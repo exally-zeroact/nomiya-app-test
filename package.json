@@ -1,0 +1,28 @@
+{
+  "name": "nomiya-app-test",
+  "version": "1.0.0",
+  "private": true,
+  "description": "飲み屋 売上管理（テスト版・DB-test を見る）",
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "probe": "node tests/probe-nomiya-db.mjs",
+    "live": "node tests/live-nomiya.mjs",
+    "live:ui": "node tests/live-nomiya-ui.mjs",
+    "check": "npm run lint && npm run test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.16.0",
+    "@playwright/test": "^1.49.0",
+    "@supabase/supabase-js": "^2.111.0",
+    "eslint": "^9.16.0",
+    "http-server": "^14.1.1",
+    "prettier": "^3.8.0",
+    "vitest": "^4.1.6"
+  }
+}
