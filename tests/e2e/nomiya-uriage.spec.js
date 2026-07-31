@@ -583,7 +583,9 @@ test.describe("飲み屋 売上管理", () => {
     await expect(page.locator("#listSheets tr[data-id]")).toHaveCount(0);
 
     // 入金のときに「領収書も渡した」で発行済みになる
-    await page.locator(".nav-item[data-scr='inv']").click();
+    // 請求書タブは既定が「今月」。テストの売上は2026年7月なので、月を明示して合わせる
+    // （合わせないと、今日が7月でなくなった瞬間に落ちる＝時計の時限爆弾）
+    await setInvMonth(page, "2026-07");
     await page.locator("#invName").selectOption("鈴木");
     await page.locator("#btnPaid").click();
     await expect(page.locator("#mdPaidRc")).toBeChecked();
@@ -1215,6 +1217,8 @@ test.describe("飲み屋 売上管理", () => {
     await openPartners(page);
     await expect(page.locator("#partnerList .empty")).toBeVisible();
     await page.locator("#modalX").click();
+    // 開き直したので請求書タブは「今月」に戻っている。テストの売上の月に合わせ直す
+    await setInvMonth(page, "2026-07");
     await page.locator("#invName").selectOption("株式会社山本商事");
     await expect(page.locator("#invSheets .iv-to")).toHaveText("株式会社山本商事　御中");
     expect(await page.evaluate(() => window.__NOMIYA.sales.length)).toBe(5);
@@ -1325,7 +1329,13 @@ test.describe("飲み屋 売上管理", () => {
     });
     await page.evaluate(() => window.__NOMIYA.syncNow(false));
     expect(await page.evaluate(() => window.__NOMIYA.sales.length)).toBe(2);
+    // 一覧は既定が「今月」。テストの売上は2026年7月なので範囲を明示して合わせる
+    // （合わせないと、今日が7月でなくなった瞬間に落ちる＝時計の時限爆弾）
     await page.locator(".nav-item[data-scr='list']").click();
+    await page.locator("#periodList .period-lb").click();
+    await page.locator("#mdFrom").fill("2026-07-01");
+    await page.locator("#mdTo").fill("2026-07-31");
+    await page.locator("#mdOk").click();
     await expect(page.locator("#listSheets")).toContainText("佐藤");
 
     // 同じ売上を「別のスマホ」で新しく直す → 同期すると新しい方が残る
@@ -1984,6 +1994,12 @@ test.describe("飲み屋 売上管理", () => {
     // 開き直しても選んだままで残る
     await page.reload({ waitUntil: "load" });
     await page.locator(".nav-item[data-scr='tax']").click();
+    // 開き直すと期間は「今月」に戻る。テストの売上の月に合わせ直す
+    // （合わせないと、今日が7月でなくなった瞬間に落ちる＝時計の時限爆弾）
+    await page.locator("#periodTax .period-lb").click();
+    await page.locator("#mdFrom").fill("2026-07-01");
+    await page.locator("#mdTo").fill("2026-07-31");
+    await page.locator("#mdOk").click();
     await expect(page.locator("#taxSheets .sheet")).toContainText("あかり（1回）");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
