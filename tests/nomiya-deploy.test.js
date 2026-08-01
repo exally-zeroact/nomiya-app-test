@@ -109,6 +109,27 @@ describe("飲み屋アプリ 倉庫の向き先（テストはテスト・本番
     expect(SQL).toMatch(/alter table nomiya_work add column if not exists amount/);
   });
 
+  it("★棚のDDLに「消す系」が1つも無い（自動で当てても、データが消えない）", () => {
+    // push したら自動で当たる仕組みにしたので、ここが最後の砦。
+    // うっかり drop table を書いたら、当てる前にCIが落ちる。
+    const stmts = SQL.split(/\r?\n/)
+      .filter((l) => !/^\s*--/.test(l))
+      .join("\n")
+      .split(";")
+      .map((s) => s.trim().replace(/\s+/g, " "))
+      .filter(Boolean);
+    const bad = stmts.filter((s) =>
+      /\b(drop\s+table|drop\s+schema|drop\s+database|drop\s+column|truncate|delete\s+from|update\s+\w+\s+set)\b/i.test(
+        s
+      )
+    );
+    expect(bad, "消す系のSQLが入っている: " + bad.join(" / ")).toEqual([]);
+
+    // 飲み屋の棚以外に触らない（他アプリと同じ倉庫に同居しているため）
+    const other = stmts.filter((s) => !/nomiya_/i.test(s) && !/create extension/i.test(s));
+    expect(other, "飲み屋以外の棚に触っている: " + other.join(" / ")).toEqual([]);
+  });
+
   it("このrepoに、別のアプリのファイルが混ざっていない（飲み屋だけのrepo）", () => {
     const files = fs.readdirSync(ROOT);
     for (const ng of ["daikou-seikyu.html", "book.html", "kyuuryoumeisai.html", "seikyusyo.html"]) {

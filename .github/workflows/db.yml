@@ -1,0 +1,67 @@
+name: DB
+
+# 棚（テーブル）の変更を、push したら自動で当てる。
+#
+# ★これを入れた理由:
+#   これまでは棚を変えるたびに、司さんが Supabase の SQL Editor に
+#   手でSQLを貼っていた。毎回それをやるのは無理があるので、自動にした。
+#
+# ★普段はこっちで足りる（司さんの手番ゼロ）:
+#   Claude Code の手元で  npm run db:apply  を走らせれば当たる。
+#   この workflow は「押し忘れ防止」の保険。
+#
+# ★安全:
+#   - supabase/schema-nomiya.sql は冪等（if not exists）。何度当てても同じ
+#   - 「消す系」(drop table / truncate / delete / update) や
+#     飲み屋以外の棚に触る文が1つでもあれば、当てる前に tests/apply-schema.mjs が中止する
+#   - 当てる先はこのrepoの倉庫だけ（js/supa-config.js から読む＝取り違えない）
+#
+# ★1回だけの用意（やらなくても壊れない。未設定なら何もせず終わる）:
+#   GitHub → このrepo → Settings → Secrets and variables → Actions → New repository secret
+#     名前: SUPABASE_ACCESS_TOKEN
+#     中身: https://supabase.com/dashboard/account/tokens で作った sbp_… の鍵
+#   秘密は GitHub の中だけ。ログにも出さない。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/**"
+      - "tests/apply-schema.mjs"
+      - ".github/workflows/db.yml"
+  workflow_dispatch:
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 鍵が用意されているか見る
+        id: check
+        run: |
+          if [ -z "${{ secrets.SUPABASE_ACCESS_TOKEN }}" ]; then
+            echo "ready=no" >> "$GITHUB_OUTPUT"
+            echo "::notice::SUPABASE_ACCESS_TOKEN が未設定です。棚は当てずに終わります（手元の npm run db:apply で当たっていれば問題ありません）"
+          else
+            echo "ready=yes" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 鍵をファイルに置く（ログには出さない）
+        if: steps.check.outputs.ready == 'yes'
+        env:
+          TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          NAME=nomiya-db-url.json
+          if [ "$(node -p "require('./package.json').name")" = "nomiya-app" ]; then
+            NAME=nomiya-db-url-prod.json
+          fi
+          node -e 'const fs=require("fs"),os=require("os"),p=require("path");fs.writeFileSync(p.join(os.tmpdir(),process.argv[1]),JSON.stringify({token:process.env.TOKEN}))' "$NAME"
+
+      - name: 棚を当てる（冪等・追加だけ・自分で確かめて出す）
+        if: steps.check.outputs.ready == 'yes'
+        run: node tests/apply-schema.mjs
