@@ -172,9 +172,22 @@
     return +ym.slice(0, 4) + "年" + +ym.slice(5, 7) + "月";
   }
   var WD = ["日", "月", "火", "水", "木", "金", "土"];
+  function _dateOf(iso) {
+    return new Date(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10));
+  }
   function weekday(iso) {
     if (!isIsoDate(iso)) return "";
-    return WD[new Date(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)).getDay()];
+    return WD[_dateOf(iso).getDay()];
+  }
+  function wdayNo(iso) {
+    return isIsoDate(iso) ? _dateOf(iso).getDay() : -1;
+  }
+  // '2026-08-31' の3日後 → '2026-09-03'（月またぎ・うるう年は Date に任せる）
+  function addDays(iso, n) {
+    if (!isIsoDate(iso)) return "";
+    var d = _dateOf(iso);
+    d.setDate(d.getDate() + Math.floor(Number(n) || 0));
+    return toIso(d);
   }
 
   /* ===================================================================
@@ -1122,10 +1135,12 @@
     { key: "employee", label: "雇用（時給・日給）" },
     { key: "contract", label: "業務委託（歩合）" },
   ];
+  // 締め方（人ごとに選ぶ）。店によって全部バラバラなので、決め打ちにしない。
   var PAY_CYCLES = [
     { key: "daily", label: "日払い" },
-    { key: "weekly", label: "週払い" },
-    { key: "monthly", label: "月払い" },
+    { key: "weekly", label: "週払い" }, // 締め曜日は staff.closeWday
+    { key: "half", label: "15日締め" }, // 16日〜翌15日
+    { key: "monthly", label: "月末締め" }, // 1日〜末日
   ];
 
   function _int(v) {
@@ -1178,6 +1193,13 @@
       })
         ? r.cycle
         : "daily",
+      // 週払いの締め曜日（0=日 … 6=土）。変な値は日曜に戻す。
+      closeWday: (function () {
+        var n = _int(r.closeWday);
+        return n >= 0 && n <= 6 ? n : 0;
+      })(),
+      // 締めてから何日後に払うか。0＝締めたその日。長すぎる値はふた月で止める。
+      payAfter: Math.max(0, Math.min(60, _int(r.payAfter))),
       employ: r.employ === "contract" ? "contract" : "employee",
       cash: r.cash === false ? false : true, // 現金で渡すか（振込ならfalse）
       memo: String(r.memo == null ? "" : r.memo).trim(),
@@ -1561,6 +1583,91 @@
   }
 
   /**
+   * payPeriod(staff, ymd)
+   *  その人の締め方で、ymd が入る「1回分」の区切りを返す。
+   *    { cycle, from, to, payYmd }   to=締め日 / payYmd=渡す日
+   *  日払い＝その日1日。週払い＝締め曜日まで（締め曜日その日は、その週に入る）。
+   *  15日締め＝16日〜翌15日。月末締め＝1日〜末日。
+   */
+  function payPeriod(staff, ymd) {
+    if (!isIsoDate(ymd)) return null;
+    var st = staff || {};
+    var cycle = PAY_CYCLES.some(function (c) {
+      return c.key === st.cycle;
+    })
+      ? st.cycle
+      : "daily";
+    var from, to;
+    if (cycle === "weekly") {
+      // 締め曜日まで何日か。締め曜日その日なら 0 日＝その日で締める。
+      var add = (((_int(st.closeWday) - wdayNo(ymd)) % 7) + 7) % 7;
+      to = addDays(ymd, add);
+      from = addDays(to, -6);
+    } else if (cycle === "half") {
+      var day = +ymd.slice(8, 10);
+      var ym = ymOf(ymd);
+      if (day <= 15) {
+        from = shiftMonth(ym, -1) + "-16";
+        to = ym + "-15";
+      } else {
+        from = ym + "-16";
+        to = shiftMonth(ym, 1) + "-15";
+      }
+    } else if (cycle === "monthly") {
+      var r = rangeOfMonth(ymOf(ymd));
+      from = r.from;
+      to = r.to;
+    } else {
+      from = ymd;
+      to = ymd;
+    }
+    return { cycle: cycle, from: from, to: to, payYmd: addDays(to, _int(st.payAfter)) };
+  }
+
+  /**
+   * payPlan(staffList, works, sales, ymd, opt)
+   *  「その日に渡す人」だけを出す。額は、その区切りの“まだ渡していない分”。
+   *  渡す日から逆に数えて、ちょうどその日が締め日になる人だけを拾う
+   *  （区切りの途中の日を渡す日と間違えない）。
+   */
+  function payPlan(staffList, works, sales, ymd, opt) {
+    if (!isIsoDate(ymd)) return [];
+    var out = [];
+    aliveStaff(staffList).forEach(function (st) {
+      var close = addDays(ymd, -_int(st.payAfter));
+      var p = payPeriod(st, close);
+      if (!p || p.to !== close || p.payYmd !== ymd) return;
+      var t = paySummary(st, works, sales, p.from, p.to, opt);
+      if (!t.days) return; // その区切りに出勤が1日も無い人は出さない（渡す物が無い）
+      out.push({
+        staff: st,
+        period: p,
+        days: t.days,
+        net: t.net,
+        paid: t.paidNet,
+        unpaid: t.unpaidNet,
+      });
+    });
+    return out;
+  }
+
+  /**
+   * markPaidRange(works, staffId, from, to, now)
+   *  その区切りの分を「渡した」にする。まとめて渡したときに押す。
+   *  もう渡した分・他の人の分・消した分は触らない（二重払いを作らない）。
+   *  元の配列は書き換えない。
+   */
+  function markPaidRange(works, staffId, from, to, now) {
+    var iso = now || nowIso();
+    return (works || []).map(function (w) {
+      if (!w || w.deletedAt || w.staffId !== staffId || w.paidAt) return w;
+      if (from && w.ymd < from) return w;
+      if (to && w.ymd > to) return w;
+      return Object.assign({}, w, { paidAt: iso, updatedAt: iso });
+    });
+  }
+
+  /**
    * normalizeItem(raw)
    *  よく出るボトル・シャンパン。タップで金額が入るようにするためのもの。
    *  kind = バックの種類（bottle / champagne は bottle 扱い）
@@ -1645,6 +1752,8 @@
       guarantee: _int(x.guarantee),
       kousei: _int(x.kousei),
       cycle: _s(x.cycle),
+      close_wday: _int(x.closeWday),
+      pay_after: _int(x.payAfter),
       employ: _s(x.employ),
       cash: !!x.cash,
       memo: _s(x.memo),
@@ -1667,6 +1776,8 @@
         guarantee: r.guarantee,
         kousei: r.kousei,
         cycle: _s(r.cycle),
+        closeWday: r.close_wday,
+        payAfter: r.pay_after,
         employ: _s(r.employ),
         cash: r.cash,
         memo: _s(r.memo),
@@ -2147,6 +2258,11 @@
     staffUses: staffUses,
     EMPLOY_KINDS: EMPLOY_KINDS,
     PAY_CYCLES: PAY_CYCLES,
+    WDAYS: WD,
+    addDays: addDays,
+    payPeriod: payPeriod,
+    payPlan: payPlan,
+    markPaidRange: markPaidRange,
     normalizeStaff: normalizeStaff,
     normalizeWork: normalizeWork,
     workMinutes: workMinutes,

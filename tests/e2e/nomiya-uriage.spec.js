@@ -2214,8 +2214,10 @@ test.describe("飲み屋 売上管理", () => {
     const row = page.locator("#payMonth tbody tr", { hasText: "あかり" });
     await expect(row).toContainText("20,000"); // 差引（稼いだ額）
     await expect(row).toContainText("10,000"); // これから渡す額
-    await expect(page.locator("#payMonth thead")).toContainText("渡し済み");
-    await expect(page.locator("#payMonth thead")).toContainText("これから渡す");
+    // 画面の表はスマホ幅に合わせて見出しを短くしている（意味は下のひとことで補う）
+    await expect(page.locator("#payMonth thead")).toContainText("渡した");
+    await expect(page.locator("#payMonth thead")).toContainText("まだ");
+    await expect(page.locator("#payMonth")).toContainText("「まだ」＝これから渡す分");
 
     // A4の給与一覧にも同じ3つが出る
     await expect(page.locator("#paySheets thead")).toContainText("渡し済み");
@@ -2923,6 +2925,138 @@ test.describe("③ 設定の歯車とマスタ", () => {
     await page.locator("#kd_ok").click();
     await expect(page.locator("#kindList .li")).toHaveCount(6);
     await expect(page.locator("#kindList")).toContainText("シャンパン");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* =====================================================================
+   ④ 締め方（人ごと）
+   日払い / 週払い(締め曜日) / 15日締め / 月末締め ＋「締めてから何日後に渡す」
+   ===================================================================== */
+test.describe("④ 締め方", () => {
+  // 給料の画面を、その日に合わせる（実際に日バーの矢印を押す）
+  async function setPayDay(page, ymd) {
+    await page.locator(".nav-item[data-scr='pay']").click();
+    for (let i = 0; i < 400; i++) {
+      const now = await page.evaluate(() => window.__NOMIYA.payYmd);
+      if (now === ymd) return;
+      await page.locator(`#periodPay [data-pmv="${now > ymd ? -1 : 1}"]`).click();
+    }
+    throw new Error("給料の日を " + ymd + " に合わせられなかった");
+  }
+
+  // 出勤を1日入れる（時給×時間だけの単純な人）
+  async function addWork(page, ymd, name) {
+    await setPayDay(page, ymd);
+    await page.locator("#btnWorkAdd").click();
+    await page.locator("#wk_staff").selectOption({ label: name });
+    await page.locator("#wk_in").fill("20:00");
+    await page.locator("#wk_out").fill("01:00");
+    await page.locator("#wk_ok").click();
+  }
+
+  async function addStaffWithCycle(page, o) {
+    await gotoSet(page, "staff");
+    await page.locator("#btnStaffAdd").click();
+    await page.locator("#st_name").fill(o.name);
+    await page.locator("#st_hourly").fill(String(o.hourly));
+    await page.locator(`#st_cycle button[data-cy='${o.cycle}']`).click();
+    if (o.wday !== undefined) await page.locator(`#st_wday button[data-wd='${o.wday}']`).click();
+    if (o.payAfter) await page.locator("#st_payafter").fill(String(o.payAfter));
+    await page.locator("#st_ok").click();
+  }
+
+  test("15日締め・5日後に渡す＝設定に出て、渡す日に額が出て、渡すと消える", async ({ page }) => {
+    const errors = await open(page);
+    await addStaffWithCycle(page, { name: "あかり", hourly: 1000, cycle: "half", payAfter: 5 });
+    await expect(page.locator("#staffList")).toContainText("15日締め・5日後に渡す");
+
+    // 8/20 と 9/10 に出勤（どちらも 8/16〜9/15 の区切り）＝5,000円×2
+    await addWork(page, "2026-08-20", "あかり");
+    await addWork(page, "2026-09-10", "あかり");
+
+    // 渡す日の前は、まだ誰も出ない
+    await setPayDay(page, "2026-09-19");
+    await expect(page.locator("#payDue")).toContainText("この日に渡す人はいません");
+
+    // 9/15締め → 5日後の 9/20 に、10,000円で出る
+    await setPayDay(page, "2026-09-20");
+    await expect(page.locator("#payDue .li-nm")).toContainText("あかり");
+    await expect(page.locator("#payDue .li-sub")).toContainText("8/16〜9/15 締め分");
+    await expect(page.locator("#payDue .li-amt")).toHaveText("¥10,000");
+
+    // 渡すと0になり、二重には払わない
+    await page.locator("#payDue [data-due]").click();
+    await expect(page.locator("#payDue .li-amt")).toHaveText("¥0");
+    await expect(page.locator("#payDue .li-nm")).toContainText("渡した");
+    await expect(page.locator("#payDue [data-due]")).toHaveCount(0);
+    await expect(page.locator("#payDue .li-sub")).toContainText("渡し済み ¥10,000");
+
+    // 開き直しても渡した印は残る
+    await page.reload({ waitUntil: "load" });
+    await setPayDay(page, "2026-09-20");
+    await expect(page.locator("#payDue .li-amt")).toHaveText("¥0");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("週払い：締める曜日を選ぶと、区切りも渡す日も変わる", async ({ page }) => {
+    const errors = await open(page);
+    // 締め＝土曜(6)、締めた2日後（月曜）に渡す
+    await addStaffWithCycle(page, {
+      name: "ゆい",
+      hourly: 1000,
+      cycle: "weekly",
+      wday: 6,
+      payAfter: 2,
+    });
+    await expect(page.locator("#staffList")).toContainText("週払い(土)・2日後に渡す");
+
+    // 2026-07-28(火)と 07-30(木)は、どちらも 7/26(日)〜8/1(土)の週
+    await addWork(page, "2026-07-28", "ゆい");
+    await addWork(page, "2026-07-30", "ゆい");
+
+    await setPayDay(page, "2026-08-01"); // 締め日そのものは、まだ渡す日ではない
+    await expect(page.locator("#payDue")).toContainText("この日に渡す人はいません");
+
+    await setPayDay(page, "2026-08-03"); // 締めの2日後
+    await expect(page.locator("#payDue .li-sub")).toContainText("7/26〜8/1 締め分");
+    await expect(page.locator("#payDue .li-amt")).toHaveText("¥10,000");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("締める曜日は週払いのときだけ聞く（要らない欄は出さない）", async ({ page }) => {
+    const errors = await open(page);
+    await gotoSet(page, "staff");
+    await page.locator("#btnStaffAdd").click();
+    await expect(page.locator("#st_row_wday")).toBeHidden(); // 既定は日払い
+    await page.locator("#st_cycle button[data-cy='weekly']").click();
+    await expect(page.locator("#st_row_wday")).toBeVisible();
+    await page.locator("#st_cycle button[data-cy='monthly']").click();
+    await expect(page.locator("#st_row_wday")).toBeHidden();
+    // 選んだ決め方で「いつ渡すか」がその場に出る
+    await expect(page.locator("#st_cycle_hint")).toContainText("に渡します");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("月末締め：2月でも末日で締まる／今までの人は日払いのまま変わらない", async ({ page }) => {
+    const errors = await open(page);
+    await addStaffWithCycle(page, { name: "みか", hourly: 1000, cycle: "monthly" });
+    await addWork(page, "2026-02-10", "みか");
+    await setPayDay(page, "2026-02-28");
+    await expect(page.locator("#payDue .li-sub")).toContainText("2/1〜2/28 締め分");
+    await expect(page.locator("#payDue .li-amt")).toHaveText("¥5,000");
+
+    // 締め方を決めていない人は日払い＝その日に渡す（今までの動きを変えない）
+    await gotoSet(page, "staff");
+    await page.locator("#btnStaffAdd").click();
+    await page.locator("#st_name").fill("さき");
+    await page.locator("#st_hourly").fill("1000");
+    await page.locator("#st_ok").click();
+    await expect(page.locator("#staffList")).toContainText("日払い");
+    await addWork(page, "2026-02-10", "さき");
+    await setPayDay(page, "2026-02-10");
+    await expect(page.locator("#payDue")).toContainText("さき");
+    await expect(page.locator("#payDue .li-amt")).toHaveText("¥5,000");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });

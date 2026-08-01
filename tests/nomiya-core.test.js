@@ -2106,3 +2106,204 @@ describe("歩合の元を税込か税抜で選べる", () => {
     expect(d.commission).toBe(1000);
   });
 });
+
+/* =====================================================================
+   ④ 締め方（人ごと）
+   日払い / 週払い(締め曜日) / 15日締め / 月末締め ＋「締めてから何日後に払う」
+   ここが狂うと払う日と額が狂うので、実際の日付で固定する。
+   ===================================================================== */
+describe("締め方（人ごと）", () => {
+  const mk = (o) => C.normalizeStaff(Object.assign({ id: "s1", name: "あかり" }, o));
+
+  it("何も決めていない人は今までどおり日払い・その日に渡す", () => {
+    const st = mk({});
+    expect(st.cycle).toBe("daily");
+    expect(st.payAfter).toBe(0);
+    expect(C.payPeriod(st, "2026-08-05")).toEqual({
+      cycle: "daily",
+      from: "2026-08-05",
+      to: "2026-08-05",
+      payYmd: "2026-08-05",
+    });
+  });
+
+  it("日払いで「3日後に払う」なら、支払日が3日ずれる", () => {
+    const p = C.payPeriod(mk({ payAfter: 3 }), "2026-08-05");
+    expect(p.payYmd).toBe("2026-08-08");
+  });
+
+  it("週払い：締め曜日までが1回分（締め曜日そのものは、その週に入る）", () => {
+    // 締め曜日＝日曜(0)。2026-08-05は水曜 → その週は 7/30(木)〜8/5? ではなく 8/2(日)締め
+    const st = mk({ cycle: "weekly", closeWday: 0 });
+    expect(C.weekday("2026-08-02")).toBe("日");
+    const p = C.payPeriod(st, "2026-07-30");
+    expect(p.to).toBe("2026-08-02"); // 次の日曜で締める
+    expect(p.from).toBe("2026-07-27"); // その7日前（月曜）から
+    expect(p.payYmd).toBe("2026-08-02");
+    // 締め曜日その日は、その週に入る（翌週送りにしない）
+    expect(C.payPeriod(st, "2026-08-02").to).toBe("2026-08-02");
+    // 翌日はもう次の週
+    expect(C.payPeriod(st, "2026-08-03").to).toBe("2026-08-09");
+  });
+
+  it("週払い：締め曜日を土曜にすると、区切りが変わる", () => {
+    const st = mk({ cycle: "weekly", closeWday: 6, payAfter: 2 });
+    expect(C.weekday("2026-08-01")).toBe("土");
+    const p = C.payPeriod(st, "2026-07-28");
+    expect(p).toEqual({
+      cycle: "weekly",
+      from: "2026-07-26",
+      to: "2026-08-01",
+      payYmd: "2026-08-03",
+    });
+  });
+
+  it("15日締め：16日〜翌15日でひと区切り", () => {
+    const st = mk({ cycle: "half", payAfter: 5 });
+    expect(C.payPeriod(st, "2026-08-20")).toEqual({
+      cycle: "half",
+      from: "2026-08-16",
+      to: "2026-09-15",
+      payYmd: "2026-09-20",
+    });
+    // 15日ちょうどは、前の区切りの最後の日
+    expect(C.payPeriod(st, "2026-08-15")).toEqual({
+      cycle: "half",
+      from: "2026-07-16",
+      to: "2026-08-15",
+      payYmd: "2026-08-20",
+    });
+    // 1日は前月16日から
+    expect(C.payPeriod(st, "2026-01-05").from).toBe("2025-12-16");
+  });
+
+  it("月末締め：1日〜末日。2月も30日の月もその月の末日で締める", () => {
+    const st = mk({ cycle: "monthly", payAfter: 10 });
+    expect(C.payPeriod(st, "2026-08-20")).toEqual({
+      cycle: "monthly",
+      from: "2026-08-01",
+      to: "2026-08-31",
+      payYmd: "2026-09-10",
+    });
+    expect(C.payPeriod(st, "2026-02-10").to).toBe("2026-02-28");
+    expect(C.payPeriod(mk({ cycle: "monthly" }), "2024-02-10").to).toBe("2024-02-29"); // うるう年
+    expect(C.payPeriod(st, "2026-09-01").to).toBe("2026-09-30");
+    // 末日締め＋0日後なら、締めたその日が支払日
+    expect(C.payPeriod(mk({ cycle: "monthly" }), "2026-08-20").payYmd).toBe("2026-08-31");
+  });
+
+  it("知らない締め方でも壊れない（日払い扱いに戻す）", () => {
+    const st = mk({ cycle: "yonaoshi" });
+    expect(st.cycle).toBe("daily");
+    expect(C.payPeriod(st, "2026-08-05").to).toBe("2026-08-05");
+    expect(C.payPeriod(st, "こわれた日付")).toBe(null);
+  });
+
+  it("締め曜日と支払日のずれは、変な値を入れても丸められる", () => {
+    expect(mk({ closeWday: 9 }).closeWday).toBe(0);
+    expect(mk({ closeWday: -1 }).closeWday).toBe(0);
+    expect(mk({ closeWday: "6" }).closeWday).toBe(6);
+    expect(mk({ payAfter: -5 }).payAfter).toBe(0);
+    expect(mk({ payAfter: 999 }).payAfter).toBe(60); // ふた月先までで止める
+    expect(mk({ payAfter: "7" }).payAfter).toBe(7);
+  });
+});
+
+describe("その日に払う人と、まとめて渡す", () => {
+  const staff = [
+    C.normalizeStaff({ id: "s1", name: "あかり", hourly: 1000, cycle: "half", payAfter: 5 }),
+    C.normalizeStaff({ id: "s2", name: "ゆい", hourly: 1000, cycle: "daily" }),
+  ];
+  // あかり＝8/16〜9/15締め・9/20払い。2日出勤（各5時間＝5,000円）
+  const works = [
+    C.normalizeWork({ id: "w1", ymd: "2026-08-20", staffId: "s1", inAt: "20:00", outAt: "01:00" }),
+    C.normalizeWork({ id: "w2", ymd: "2026-09-10", staffId: "s1", inAt: "20:00", outAt: "01:00" }),
+    C.normalizeWork({ id: "w3", ymd: "2026-09-20", staffId: "s2", inAt: "20:00", outAt: "01:00" }),
+  ];
+
+  it("支払日に当たる人だけ出て、額はその区切りの「これから渡す」分", () => {
+    const plan = C.payPlan(staff, works, [], "2026-09-20", {});
+    expect(plan.map((x) => x.staff.name)).toEqual(["あかり", "ゆい"]);
+    const a = plan[0];
+    expect(a.period.from).toBe("2026-08-16");
+    expect(a.period.to).toBe("2026-09-15");
+    expect(a.unpaid).toBe(10000); // 5,000×2日
+    expect(a.paid).toBe(0);
+    // 日払いのゆいは、その日ぶんだけ
+    expect(plan[1].unpaid).toBe(5000);
+  });
+
+  it("支払日でない日は、誰も出ない", () => {
+    expect(C.payPlan(staff, works, [], "2026-09-19", {}).length).toBe(0);
+  });
+
+  it("まとめて渡すと、その区切りの分だけ渡し済みになる（二重払いしない）", () => {
+    const next = C.markPaidRange(
+      works,
+      "s1",
+      "2026-08-16",
+      "2026-09-15",
+      "2026-09-20T10:00:00.000Z"
+    );
+    expect(next.filter((w) => w.paidAt).map((w) => w.id)).toEqual(["w1", "w2"]);
+    // 他の人の分と、区切りの外は触らない
+    expect(next.find((w) => w.id === "w3").paidAt).toBe(null);
+    // 元の配列は書き換えない
+    expect(works[0].paidAt).toBe(null);
+    // 渡したあとは「これから渡す」が0になる
+    const plan = C.payPlan(staff, next, [], "2026-09-20", {});
+    expect(plan[0].unpaid).toBe(0);
+    expect(plan[0].paid).toBe(10000);
+  });
+
+  it("もう渡した分は、押し直しても時刻が変わらない（上書きしない）", () => {
+    const one = C.markPaidRange(
+      works,
+      "s1",
+      "2026-08-16",
+      "2026-09-15",
+      "2026-09-20T10:00:00.000Z"
+    );
+    const two = C.markPaidRange(one, "s1", "2026-08-16", "2026-09-15", "2026-09-25T10:00:00.000Z");
+    expect(two.find((w) => w.id === "w1").paidAt).toBe("2026-09-20T10:00:00.000Z");
+  });
+
+  it("消した出勤は数えないし、渡し済みにもしない", () => {
+    const w = works.concat([
+      C.normalizeWork({
+        id: "w9",
+        ymd: "2026-09-01",
+        staffId: "s1",
+        inAt: "20:00",
+        outAt: "01:00",
+        deletedAt: "2026-09-02T00:00:00.000Z",
+      }),
+    ]);
+    const plan = C.payPlan(staff, w, [], "2026-09-20", {});
+    expect(plan[0].unpaid).toBe(10000);
+    const next = C.markPaidRange(w, "s1", "2026-08-16", "2026-09-15", "2026-09-20T10:00:00.000Z");
+    expect(next.find((x) => x.id === "w9").paidAt).toBe(null);
+  });
+});
+
+describe("締め方もクラウドに残る（新しいスマホでも同じ締め方）", () => {
+  it("行に出して読み戻しても、締め方・締め曜日・何日後が変わらない", () => {
+    const st = C.normalizeStaff(
+      { id: "s1", name: "ゆい", cycle: "weekly", closeWday: 6, payAfter: 2 },
+      "2026-08-01T00:00:00.000Z"
+    );
+    const row = C.staffToRow(st);
+    expect(row.close_wday).toBe(6);
+    expect(row.pay_after).toBe(2);
+    const back = C.staffFromRow(row);
+    expect(back.cycle).toBe("weekly");
+    expect(back.closeWday).toBe(6);
+    expect(back.payAfter).toBe(2);
+    expect(C.payPeriod(back, "2026-07-28").payYmd).toBe("2026-08-03");
+  });
+  it("古い行（列がまだ無い店）から読んでも壊れない", () => {
+    const back = C.staffFromRow({ sid: "s1", name: "あかり", cycle: "daily" });
+    expect(back.closeWday).toBe(0);
+    expect(back.payAfter).toBe(0);
+  });
+});

@@ -1578,6 +1578,12 @@
         </div>
       </div>
 
+      <!-- 締め方は人ごと。誰にいつ渡すかは、アプリが数える（手で数えさせない） -->
+      <div class="card">
+        <div class="card-label">この日に渡す人</div>
+        <div id="payDue"></div>
+      </div>
+
       <div class="card">
         <div class="card-label">この月のまとめ</div>
         <div id="payMonth"></div>
@@ -5024,6 +5030,57 @@
             };
           });
 
+        // この日に渡す人（人ごとの締め方から数える）
+        var plan = C.payPlan(STAFF, WORKS, SALES, UI.payYmd, { settings: SETTINGS });
+        $("payDue").innerHTML = plan.length
+          ? plan
+              .map(function (x) {
+                return (
+                  '<div class="li"><div class="li-main"><div class="li-nm">' +
+                  esc(x.staff.name) +
+                  (x.unpaid ? "" : '<span class="li-tag">渡した</span>') +
+                  '</div><div class="li-sub">' +
+                  C.mdShort(x.period.from) +
+                  "〜" +
+                  C.mdShort(x.period.to) +
+                  " 締め分　" +
+                  x.days +
+                  "日" +
+                  (x.paid ? "　渡し済み " + C.yen(x.paid) : "") +
+                  '</div></div><div class="li-amt">' +
+                  C.yen(x.unpaid) +
+                  "</div>" +
+                  (x.unpaid
+                    ? '<button class="btn btn-ghost btn-sm" type="button" data-due="' +
+                      esc(x.staff.id) +
+                      '" data-from="' +
+                      esc(x.period.from) +
+                      '" data-to="' +
+                      esc(x.period.to) +
+                      '" style="flex:0 0 auto">渡した</button>'
+                    : "") +
+                  "</div>"
+                );
+              })
+              .join("")
+          : '<div class="empty">この日に渡す人はいません。</div>';
+        $("payDue")
+          .querySelectorAll("[data-due]")
+          .forEach(function (b) {
+            b.onclick = function () {
+              WORKS = C.markPaidRange(
+                WORKS,
+                b.getAttribute("data-due"),
+                b.getAttribute("data-from"),
+                b.getAttribute("data-to"),
+                new Date().toISOString()
+              );
+              saveWorks();
+              renderAll();
+              toast("✅ 渡しました");
+            };
+          });
+
         // 月のまとめ
         var ym = C.ymOf(UI.payYmd);
         var r = C.rangeOfMonth(ym);
@@ -5042,9 +5099,10 @@
           ? '<div class="hint" style="margin-bottom:8px">' +
             esc(C.jpMonth(ym)) +
             "分</div>" +
-            // ★「これから渡す」を出さないと、日払いで渡した分をもう一度払ってしまう
+            // ★「まだ渡していない分」を出さないと、日払いで渡した分をもう一度払ってしまう
+            //   スマホの幅では見出しがぶつかるので短くする（意味は下のひとことで補う）
             '<table class="sum-tbl"><thead><tr><th>名前</th><th>日数</th><th>差引</th>' +
-            "<th>渡し済み</th><th>これから渡す</th><th>前借り残</th></tr></thead><tbody>" +
+            "<th>渡した</th><th>まだ</th><th>前借り</th></tr></thead><tbody>" +
             sums
               .map(function (x) {
                 var bal = C.lendBalance(x.st, WORKS, r.to);
@@ -5065,7 +5123,8 @@
                 );
               })
               .join("") +
-            "</tbody></table>"
+            "</tbody></table>" +
+            '<div class="hint" style="margin-top:6px">「まだ」＝これから渡す分。「渡した」は日払いなどで渡し済みの分。</div>'
           : '<div class="empty">この月はまだ出勤がありません。</div>';
 
         $("paySheets").innerHTML = paySheetHtml(ym, sums);
@@ -5307,11 +5366,13 @@
           })
           .join("・");
         if (b) t.push(b);
-        t.push(
-          C.PAY_CYCLES.filter(function (c) {
-            return c.key === st.cycle;
-          })[0].label
-        );
+        // 締め方＝「週払い(日)」「15日締め・5日後に渡す」のように、その場で分かる形にする
+        var cy = C.PAY_CYCLES.filter(function (c) {
+          return c.key === st.cycle;
+        })[0].label;
+        if (st.cycle === "weekly") cy += "(" + C.WDAYS[st.closeWday] + ")";
+        if (st.payAfter) cy += "・" + st.payAfter + "日後に渡す";
+        t.push(cy);
         if (st.employ === "contract") t.push("業務委託");
         return t.join(" / ");
       }
@@ -5492,7 +5553,7 @@
             numRow("売上の歩合（％）", "rate", cur.rate, "例）10") +
             numRow("最低保証", "guarantee", cur.guarantee, "0なら無し") +
             numRow("厚生費（1日）", "kousei", cur.kousei, "0なら無し") +
-            '<div class="frow"><span class="flabel">払い方</span><div class="chips" id="st_cycle">' +
+            '<div class="frow"><span class="flabel">締め方</span><div class="chips" id="st_cycle">' +
             C.PAY_CYCLES.map(function (c) {
               return (
                 '<button class="chip chip-sm" type="button" data-cy="' +
@@ -5503,6 +5564,23 @@
               );
             }).join("") +
             "</div></div>" +
+            // 週払いのときだけ、どの曜日で締めるかを聞く
+            '<div class="frow" id="st_row_wday"><span class="flabel">締める曜日</span><div class="chips" id="st_wday">' +
+            C.WDAYS.map(function (w, i) {
+              return (
+                '<button class="chip chip-sm" type="button" data-wd="' +
+                i +
+                '">' +
+                esc(w) +
+                "</button>"
+              );
+            }).join("") +
+            "</div></div>" +
+            '<div class="frow"><span class="flabel">締めてから何日後に渡す</span>' +
+            '<input class="finput" type="number" inputmode="numeric" id="st_payafter" value="' +
+            (cur.payAfter ? esc(cur.payAfter) : "") +
+            '" placeholder="0＝締めたその日に渡す"></div>' +
+            '<div class="hint" id="st_cycle_hint" style="margin:-4px 2px 10px"></div>' +
             '<div class="frow"><span class="flabel">立場</span><div class="chips" id="st_employ">' +
             C.EMPLOY_KINDS.map(function (c) {
               return (
@@ -5522,6 +5600,7 @@
                 '<button class="btn btn-ghost btn-danger btn-sm" id="st_del">この人を外す</button></div>')
         );
         var cycle = cur.cycle;
+        var wday = cur.closeWday;
         var employ = cur.employ;
         var use = {};
         PAY_ITEMS().forEach(function (x) {
@@ -5570,6 +5649,18 @@
                 sync();
               };
             });
+          // 締める曜日は週払いのときだけ。要らない欄は出さない。
+          $("st_row_wday").style.display = cycle === "weekly" ? "" : "none";
+          $("st_wday")
+            .querySelectorAll("[data-wd]")
+            .forEach(function (b) {
+              b.classList.toggle("on", Number(b.getAttribute("data-wd")) === wday);
+              b.onclick = function () {
+                wday = Number(b.getAttribute("data-wd"));
+                sync();
+              };
+            });
+          syncCycleHint();
           $("st_employ")
             .querySelectorAll("[data-em]")
             .forEach(function (b) {
@@ -5580,6 +5671,27 @@
               };
             });
         };
+        // 「いま選んでいる決め方だと、今日ぶんはいつ渡すことになるか」をその場で出す
+        var syncCycleHint = function () {
+          var p = C.payPeriod(
+            { cycle: cycle, closeWday: wday, payAfter: $("st_payafter").value },
+            todayIso()
+          );
+          $("st_cycle_hint").textContent = p
+            ? "今日ぶんは " +
+              C.mdShort(p.from) +
+              "〜" +
+              C.mdShort(p.to) +
+              "（" +
+              C.weekday(p.to) +
+              "）で締めて、" +
+              C.mdShort(p.payYmd) +
+              "（" +
+              C.weekday(p.payYmd) +
+              "）に渡します"
+            : "";
+        };
+        $("st_payafter").oninput = syncCycleHint;
         sync();
         $("st_ok").onclick = function () {
           var name = $("st_name").value.trim();
@@ -5607,6 +5719,8 @@
             kousei: $("st_kousei").value,
             use: use, // 外した項目の値は消さない（また使うときに戻せる）
             cycle: cycle,
+            closeWday: wday,
+            payAfter: $("st_payafter").value,
             employ: employ,
           });
           STAFF = STAFF.filter(function (x) {

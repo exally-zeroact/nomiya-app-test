@@ -158,7 +158,7 @@ try {
   const c = await run(
     "select table_name, column_name from information_schema.columns " +
       "where table_schema='public' and table_name like 'nomiya_%' " +
-      "and column_name in ('crew','use_items','picks','back_pct','amount','paid_cash') order by 1,2"
+      "and column_name in ('crew','use_items','picks','back_pct','amount','paid_cash','close_wday','pay_after') order by 1,2"
   );
   console.log("\n  あとから足した列");
   c.forEach((r) => console.log("    " + String(r.table_name).padEnd(18) + r.column_name));
@@ -167,8 +167,12 @@ try {
     ["nomiya_sales", "crew"],
     ["nomiya_staff", "use_items"],
     ["nomiya_work", "picks"],
+    ["nomiya_staff", "close_wday"],
+    ["nomiya_staff", "pay_after"],
   ];
-  const miss = want.filter(([tb, col]) => !c.some((r) => r.table_name === tb && r.column_name === col));
+  const miss = want.filter(
+    ([tb, col]) => !c.some((r) => r.table_name === tb && r.column_name === col)
+  );
   console.log("");
   if (t.length === 7 && !miss.length) {
     console.log("APPLY RESULT: OK（棚7つ・必要な列すべて入った）");
