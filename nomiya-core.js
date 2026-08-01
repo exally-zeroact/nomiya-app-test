@@ -692,7 +692,10 @@
   function taxIncluded(total, rate) {
     var r = rate == null ? 0.1 : Number(rate);
     var t = Math.floor(Number(total) || 0);
-    var tax = Math.floor((t * r) / (1 + r));
+    // ★1e-9 を足すのは、小数の掛け算のわずかなズレを打ち消すため。
+    //   これが無いと 11,000円の内税が 999円（正しくは1,000円）になる。
+    //   割り切れない額の切り捨ては今までどおり（1000円→90円）。
+    var tax = Math.floor((t * r) / (1 + r) + 1e-9);
     return { total: t, tax: tax, net: t - tax, rate: r };
   }
 

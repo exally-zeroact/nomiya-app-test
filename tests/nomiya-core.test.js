@@ -2523,3 +2523,29 @@ describe("18歳未満の深夜（止めないで、黄色く出す）", () => {
     expect(C.normalizeStaff({ name: "x", birth: "へんな値" }).birth).toBe("");
   });
 });
+
+describe("内税の計算（1円もずらさない）", () => {
+  // 小数の掛け算のせいで 999円 になっていた（11,000円の内税は 1,000円）。
+  it("きっちり割り切れる額は、きっちり出る（10%）", () => {
+    expect(C.taxIncluded(1100, 0.1).tax).toBe(100);
+    expect(C.taxIncluded(5500, 0.1).tax).toBe(500);
+    expect(C.taxIncluded(11000, 0.1).tax).toBe(1000);
+    expect(C.taxIncluded(22000, 0.1).tax).toBe(2000);
+    expect(C.taxIncluded(33000, 0.1).tax).toBe(3000);
+    expect(C.taxIncluded(11000, 0.1).net).toBe(10000);
+  });
+  it("8%でもきっちり出る", () => {
+    expect(C.taxIncluded(1080, 0.08).tax).toBe(80);
+    expect(C.taxIncluded(10800, 0.08).tax).toBe(800);
+  });
+  it("割り切れない額は、今までどおり切り捨て", () => {
+    expect(C.taxIncluded(1000, 0.1).tax).toBe(90); // 90.9…→90
+    expect(C.taxIncluded(8000, 0.1).tax).toBe(727); // 727.2…→727
+    expect(C.taxIncluded(0, 0.1).tax).toBe(0);
+    expect(C.taxIncluded(12345, 0).tax).toBe(0);
+  });
+  it("税抜のバックの元も、1円ずれない", () => {
+    expect(C.backBaseAmt(11000, { backBase: "nuki", rate: 0.1 })).toBe(10000);
+    expect(C.backBaseAmt(11000, { backBase: "service", rate: 0.1, serviceRate: 10 })).toBe(9090);
+  });
+});
