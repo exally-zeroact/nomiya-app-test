@@ -756,6 +756,7 @@ describe("クラウド同期（端末が作業台・クラウドは控え）", (
         paidDate: null,
         paidCash: false,
         staff: "",
+        crew: [], // ついた人（ヘルプ・場内など）。無ければ空
         createdAt: "2026-07-01T00:00:00.000Z",
         updatedAt: "2026-07-01T00:00:00.000Z",
         deletedAt: null,
@@ -1513,5 +1514,516 @@ describe("バックの決め方（円と％）と、よく出るボトル", () =
     const t = C.paySummary(st, works, [], "2026-07-01", "2026-07-31");
     expect(t.amounts.bottle).toBe(80000);
     expect(t.backTotal).toBe(8000);
+  });
+});
+
+describe("給料の「使う項目」は人ごとに選ぶ（選ばれていない項目は計算に乗らない）", () => {
+  // 全部入りの人。ここから項目を外して、外した分だけ消えることを実数で確かめる。
+  function full(use) {
+    return C.normalizeStaff(
+      {
+        id: "u1",
+        name: "あかり",
+        hourly: 1200,
+        back: { shimei: 2000, jonai: 1000, douhan: 3000, drink: 500 },
+        backPct: { bottle: 10 },
+        rate: 10,
+        guarantee: 15000,
+        kousei: 1000,
+        use: use,
+      },
+      "2026-07-01T00:00:00.000Z"
+    );
+  }
+  function work(o) {
+    return C.normalizeWork(
+      Object.assign(
+        {
+          ymd: "2026-07-30",
+          staffId: "u1",
+          inAt: "20:00",
+          outAt: "01:00", // 5時間 → 基本6,000
+          count: { shimei: 2, jonai: 1, douhan: 1, drink: 4 },
+          amount: { bottle: 50000 },
+          fine: 1000,
+          lend: 3000,
+          repay: 2000,
+        },
+        o || {}
+      ),
+      "2026-07-30T18:00:00.000Z"
+    );
+  }
+
+  it("項目の一覧は11個（バック5種＋歩合・最低保証・厚生費・罰金・前借り・返済）", () => {
+    expect(C.PAY_ITEMS.map((x) => x.key)).toEqual([
+      "shimei",
+      "jonai",
+      "douhan",
+      "drink",
+      "bottle",
+      "rate",
+      "guarantee",
+      "kousei",
+      "fine",
+      "lend",
+      "repay",
+    ]);
+  });
+
+  it("既定は全部オン（今までの人はそのまま・使う項目を触っていない人も変わらない）", () => {
+    const st = full(undefined);
+    C.PAY_ITEMS.forEach((x) => expect(C.staffUses(st, x.key), x.key).toBe(true));
+    // 空のオブジェクト（クラウドの既定値 '{}'）でも全部オン
+    const empty = full({});
+    C.PAY_ITEMS.forEach((x) => expect(C.staffUses(empty, x.key), x.key).toBe(true));
+  });
+
+  it("全部オンなら今までと同じ数字（外す前の基準）", () => {
+    const d = C.payDay(full(undefined), work(), {});
+    expect(d.base).toBe(6000); // 1,200×5h
+    expect(d.backTotal).toBe(2 * 2000 + 1000 + 3000 + 4 * 500 + 5000); // 4,000+1,000+3,000+2,000+5,000
+    expect(d.commission).toBe(0); // 自分の客の売上が無い
+    expect(d.gross).toBe(21000);
+    expect(d.deduct).toBe(1000 + 1000 + 2000); // 罰金＋厚生費＋返済
+    expect(d.net).toBe(17000);
+    expect(d.lend).toBe(3000);
+  });
+
+  it("バックを外すと、その種類だけ0になる（過去に打った本数・売った額は消さない）", () => {
+    const st = full({ bottle: false, drink: false });
+    const w = work();
+    const d = C.payDay(st, w, {});
+    const g = (k) => d.backs.filter((b) => b.key === k)[0];
+    expect(g("bottle").amount).toBe(0);
+    expect(g("bottle").used).toBe(false);
+    expect(g("drink").amount).toBe(0);
+    expect(g("shimei").amount).toBe(4000); // 残した種類はそのまま
+    expect(g("shimei").used).toBe(true);
+    expect(d.backTotal).toBe(4000 + 1000 + 3000);
+    // 実績そのものは残っている（外しただけでデータは消えない）
+    expect(w.amount.bottle).toBe(50000);
+    expect(w.count.drink).toBe(4);
+  });
+
+  it("歩合を外すと歩合が付かない", () => {
+    const d = C.payDay(full({ rate: false }), work({ sales: 60000 }), {});
+    expect(d.commission).toBe(0);
+    const on = C.payDay(full(undefined), work({ sales: 60000 }), {});
+    expect(on.commission).toBe(6000);
+  });
+
+  it("最低保証を外すと、保証で底上げされない", () => {
+    const poor = work({ count: {}, amount: {}, inAt: "", outAt: "" }); // 稼ぎ0
+    const on = C.payDay(full(undefined), poor, {});
+    expect(on.gross).toBe(15000);
+    expect(on.guaranteeUsed).toBe(true);
+    const off = C.payDay(full({ guarantee: false }), poor, {});
+    expect(off.gross).toBe(0);
+    expect(off.guaranteeUsed).toBe(false);
+  });
+
+  it("厚生費・罰金・返済を外すと、控除から消える", () => {
+    const d = C.payDay(full({ kousei: false, fine: false }), work(), {});
+    expect(d.kousei).toBe(0);
+    expect(d.fine).toBe(0);
+    expect(d.deduct).toBe(2000); // 返済だけ残る
+    const d2 = C.payDay(full({ kousei: false, fine: false, repay: false }), work(), {});
+    expect(d2.repay).toBe(0);
+    expect(d2.deduct).toBe(0);
+    expect(d2.net).toBe(d2.gross);
+  });
+
+  it("前借りを外すと、前借りは0で出る", () => {
+    expect(C.payDay(full({ lend: false }), work(), {}).lend).toBe(0);
+  });
+
+  it("期間のまとめにも、外した項目は乗らない", () => {
+    const works = [work({ ymd: "2026-07-01" }), work({ ymd: "2026-07-02" })];
+    const on = C.paySummary(full(undefined), works, [], "2026-07-01", "2026-07-31");
+    const off = C.paySummary(
+      full({ kousei: false, bottle: false }),
+      works,
+      [],
+      "2026-07-01",
+      "2026-07-31"
+    );
+    expect(on.kousei).toBe(2000);
+    expect(off.kousei).toBe(0);
+    expect(on.backTotal - off.backTotal).toBe(5000 * 2); // ボトル10%×50,000×2日
+  });
+
+  it("使う項目は DBの行と往復できる（外した印が消えない）", () => {
+    const st = full({ kousei: false, bottle: false });
+    const row = C.staffToRow(st);
+    expect(row.use_items.kousei).toBe(false);
+    expect(row.use_items.shimei).toBe(true);
+    const back = C.staffFromRow(row);
+    expect(C.staffUses(back, "kousei")).toBe(false);
+    expect(C.staffUses(back, "bottle")).toBe(false);
+    expect(C.staffUses(back, "shimei")).toBe(true);
+    // 古い行（use_items が無い）は全部オンで戻る
+    const old = Object.assign({}, row);
+    delete old.use_items;
+    C.PAY_ITEMS.forEach((x) => expect(C.staffUses(C.staffFromRow(old), x.key), x.key).toBe(true));
+  });
+});
+
+describe("バックの種類は店が決める（5つ固定をやめる）", () => {
+  it("何も決めていない店は、今までの5つがそのまま出る（既存の店が壊れない）", () => {
+    const k = C.backKinds({});
+    expect(k.map((x) => x.key)).toEqual(["shimei", "jonai", "douhan", "drink", "bottle"]);
+    expect(k.map((x) => x.label)).toEqual(["本指名", "場内指名", "同伴", "ドリンク", "ボトル"]);
+  });
+
+  it("種類を足せる・名前を変えられる・並べ替えられる", () => {
+    const k = C.backKinds({
+      backKinds: [
+        { key: "shimei", label: "指名" }, // 名前を変えた
+        { key: "champagne", label: "シャンパン" }, // 足した
+        { key: "food", label: "フード" }, // 足した
+      ],
+    });
+    expect(k.map((x) => x.key)).toEqual(["shimei", "champagne", "food"]);
+    expect(k[0].label).toBe("指名");
+  });
+
+  it("名前が空の種類は捨てる／同じキーは1つに寄せる（打ち間違いで壊れない）", () => {
+    const k = C.backKinds({
+      backKinds: [
+        { key: "a", label: "シャンパン" },
+        { key: "b", label: "  " },
+        { key: "a", label: "あとの方" },
+      ],
+    });
+    expect(k.length).toBe(1);
+    expect(k[0].key).toBe("a");
+  });
+
+  it("店が足した種類でも、人ごとに単価と％を持てる", () => {
+    const st = C.normalizeStaff(
+      {
+        id: "s1",
+        name: "あかり",
+        back: { champagne: 0, food: 300 },
+        backPct: { champagne: 15 },
+      },
+      "2026-08-01T00:00:00.000Z"
+    );
+    // 決め打ちの5つに無いキーも消えない
+    expect(st.backPct.champagne).toBe(15);
+    expect(st.back.food).toBe(300);
+    // DBの行と往復しても消えない
+    const back = C.staffFromRow(C.staffToRow(st));
+    expect(back.backPct.champagne).toBe(15);
+    expect(back.back.food).toBe(300);
+  });
+
+  it("店が足した種類で計算できる（シャンパン15%）", () => {
+    const cfg = { backKinds: [{ key: "champagne", label: "シャンパン" }] };
+    const st = C.normalizeStaff({ id: "s1", name: "あかり", backPct: { champagne: 15 } });
+    const w = C.normalizeWork({ ymd: "2026-08-01", staffId: "s1", amount: { champagne: 80000 } });
+    const d = C.payDay(st, w, { settings: cfg });
+    expect(d.backTotal).toBe(12000);
+    expect(d.backs.map((b) => b.key)).toEqual(["champagne"]);
+  });
+});
+
+describe("銘柄ごとの率（ドンペリだけ20%）", () => {
+  const SETTINGS = {
+    backKinds: [{ key: "champagne", label: "シャンパン" }],
+    items: [
+      { id: "i1", name: "ドンペリ白", price: 50000, kind: "champagne", pct: 20 }, // 特別
+      { id: "i2", name: "モエ", price: 20000, kind: "champagne" }, // 率なし＝種類の率
+    ],
+  };
+  const st = C.normalizeStaff({ id: "s1", name: "あかり", backPct: { champagne: 15 } });
+
+  it("押した銘柄に率があれば、その率で計算する", () => {
+    // ドンペリ1本 → 50,000 の 20% = 10,000
+    const w = C.normalizeWork({
+      ymd: "2026-08-01",
+      staffId: "s1",
+      picks: { i1: 1 },
+    });
+    const d = C.payDay(st, w, { settings: SETTINGS });
+    expect(d.backTotal).toBe(10000);
+  });
+
+  it("率が無い銘柄は、種類の率で計算する", () => {
+    // モエ1本 → 20,000 の 15% = 3,000
+    const w = C.normalizeWork({ ymd: "2026-08-01", staffId: "s1", picks: { i2: 1 } });
+    expect(C.payDay(st, w, { settings: SETTINGS }).backTotal).toBe(3000);
+  });
+
+  it("混ざっても正しい（ドンペリ2本＋モエ1本）", () => {
+    // 50,000×2×20% = 20,000  ／  20,000×15% = 3,000  → 23,000
+    const w = C.normalizeWork({ ymd: "2026-08-01", staffId: "s1", picks: { i1: 2, i2: 1 } });
+    const d = C.payDay(st, w, { settings: SETTINGS });
+    expect(d.backTotal).toBe(23000);
+    const b = d.backs[0];
+    expect(b.sold).toBe(120000); // 売った額も自動で出る（打たなくていい）
+    expect(b.count).toBe(3); // 本数も自動
+  });
+
+  it("登録していない物は、金額を直接打てば種類の率で付く", () => {
+    // ドンペリ1本(20%=10,000) ＋ 手打ち30,000(15%=4,500) → 14,500
+    const w = C.normalizeWork({
+      ymd: "2026-08-01",
+      staffId: "s1",
+      picks: { i1: 1 },
+      amount: { champagne: 30000 },
+    });
+    expect(C.payDay(st, w, { settings: SETTINGS }).backTotal).toBe(14500);
+  });
+
+  it("使う項目から外した種類は、銘柄を押していても0になる", () => {
+    const off = C.normalizeStaff({
+      id: "s1",
+      name: "あかり",
+      backPct: { champagne: 15 },
+      use: { champagne: false },
+    });
+    const w = C.normalizeWork({ ymd: "2026-08-01", staffId: "s1", picks: { i1: 2 } });
+    expect(C.payDay(off, w, { settings: SETTINGS }).backTotal).toBe(0);
+  });
+
+  it("押した銘柄の記録は、DBの行と往復しても消えない", () => {
+    const w = C.normalizeWork({ ymd: "2026-08-01", staffId: "s1", picks: { i1: 2, i2: 1 } });
+    const back = C.workFromRow(C.workToRow(w));
+    expect(back.picks).toEqual({ i1: 2, i2: 1 });
+  });
+
+  it("期間のまとめにも、銘柄ごとの率が効く", () => {
+    const works = [
+      C.normalizeWork({ ymd: "2026-08-01", staffId: "s1", picks: { i1: 1 } }),
+      C.normalizeWork({ ymd: "2026-08-02", staffId: "s1", picks: { i2: 1 } }),
+    ];
+    const t = C.paySummary(st, works, [], "2026-08-01", "2026-08-31", { settings: SETTINGS });
+    expect(t.backTotal).toBe(13000); // 10,000 + 3,000
+  });
+});
+
+describe("ついた人（ヘルプ・場内・同伴）— 1つの会計に何人でも付けられる", () => {
+  const SETTINGS = {
+    backKinds: [
+      { key: "shimei", label: "本指名" },
+      { key: "help", label: "ヘルプ" },
+    ],
+  };
+  // 会計: 担当=あかり、ヘルプ=ゆい と さき
+  const sale = (o) =>
+    C.normalizeSale(
+      Object.assign(
+        {
+          date: "2026-08-05",
+          name: "客A",
+          people: 2,
+          amount: 60000,
+          pay: "cash",
+          staff: "あかり",
+          crew: [
+            { name: "ゆい", role: "help" },
+            { name: "さき", role: "help" },
+          ],
+        },
+        o || {}
+      ),
+      "2026-08-05T00:00:00.000Z"
+    );
+
+  it("ついた人は、そのまま持てる（DBの行と往復しても消えない）", () => {
+    const s = sale();
+    expect(s.crew).toEqual([
+      { name: "ゆい", role: "help" },
+      { name: "さき", role: "help" },
+    ]);
+    expect(C.saleFromRow(C.saleToRow(s)).crew).toEqual(s.crew);
+  });
+
+  it("名前が空のついた人は捨てる（打ち間違いで壊れない）", () => {
+    const s = sale({ crew: [{ name: "  ", role: "help" }, { name: "ゆい", role: "help" }, {}] });
+    expect(s.crew).toEqual([{ name: "ゆい", role: "help" }]);
+  });
+
+  it("その日そのの人が、何の役割で何回ついたかを数える", () => {
+    const sales = [sale(), sale({ amount: 20000, crew: [{ name: "ゆい", role: "help" }] })];
+    const yui = C.crewByStaff(sales, "2026-08-05", "ゆい");
+    expect(yui.help.n).toBe(2); // 2回ヘルプに入った
+    expect(yui.help.sold).toBe(80000); // その会計の合計（％で払う店用）
+    const saki = C.crewByStaff(sales, "2026-08-05", "さき");
+    expect(saki.help.n).toBe(1);
+    expect(saki.help.sold).toBe(60000);
+    // 担当の人は crew には入らない（歩合で払うので二重にしない）
+    expect(C.crewByStaff(sales, "2026-08-05", "あかり")).toEqual({});
+  });
+
+  it("ヘルプ1回いくらの人＝回数×単価が自動で入る（出勤で手で数えない）", () => {
+    const yui = C.normalizeStaff({ id: "y", name: "ゆい", back: { help: 500 } });
+    const w = C.normalizeWork({ ymd: "2026-08-05", staffId: "y" });
+    const d = C.payDay(yui, w, {
+      settings: SETTINGS,
+      crew: C.crewByStaff([sale(), sale({ amount: 20000 })], "2026-08-05", "ゆい"),
+    });
+    const help = d.backs.filter((b) => b.key === "help")[0];
+    expect(help.count).toBe(2);
+    expect(help.amount).toBe(1000); // 2回 × 500
+  });
+
+  it("ヘルプも％で払える（ついた会計の額に率をかける）", () => {
+    const yui = C.normalizeStaff({ id: "y", name: "ゆい", backPct: { help: 5 } });
+    const w = C.normalizeWork({ ymd: "2026-08-05", staffId: "y" });
+    const d = C.payDay(yui, w, {
+      settings: SETTINGS,
+      crew: C.crewByStaff([sale()], "2026-08-05", "ゆい"),
+    });
+    expect(d.backs.filter((b) => b.key === "help")[0].amount).toBe(3000); // 60,000の5%
+  });
+
+  it("担当は歩合、ヘルプはヘルプバック。同じ会計で両方が成り立つ", () => {
+    const akari = C.normalizeStaff({ id: "a", name: "あかり", rate: 10 });
+    const da = C.payDay(akari, C.normalizeWork({ ymd: "2026-08-05", staffId: "a" }), {
+      settings: SETTINGS,
+      sales: 60000,
+    });
+    expect(da.commission).toBe(6000);
+    const yui = C.normalizeStaff({ id: "y", name: "ゆい", back: { help: 500 } });
+    const dy = C.payDay(yui, C.normalizeWork({ ymd: "2026-08-05", staffId: "y" }), {
+      settings: SETTINGS,
+      crew: C.crewByStaff([sale()], "2026-08-05", "ゆい"),
+    });
+    expect(dy.backTotal).toBe(500);
+  });
+
+  it("使う項目からヘルプを外している人には付かない", () => {
+    const off = C.normalizeStaff({
+      id: "y",
+      name: "ゆい",
+      back: { help: 500 },
+      use: { help: false },
+    });
+    const d = C.payDay(off, C.normalizeWork({ ymd: "2026-08-05", staffId: "y" }), {
+      settings: SETTINGS,
+      crew: C.crewByStaff([sale()], "2026-08-05", "ゆい"),
+    });
+    expect(d.backTotal).toBe(0);
+  });
+
+  it("期間のまとめでも、ついた回数が自動で入る", () => {
+    const yui = C.normalizeStaff({ id: "y", name: "ゆい", back: { help: 500 } });
+    const sales = [sale(), sale({ date: "2026-08-06" })];
+    const works = [
+      C.normalizeWork({ ymd: "2026-08-05", staffId: "y" }),
+      C.normalizeWork({ ymd: "2026-08-06", staffId: "y" }),
+    ];
+    const t = C.paySummary(yui, works, sales, "2026-08-01", "2026-08-31", { settings: SETTINGS });
+    expect(t.counts.help).toBe(2);
+    expect(t.backTotal).toBe(1000);
+  });
+});
+
+describe("★日払いで渡した分は、月のまとめから引く（二重に払わない）", () => {
+  const st = C.normalizeStaff({ id: "s1", name: "あかり", daily: 10000, cycle: "daily" });
+  const day = (ymd, paid) =>
+    C.normalizeWork({
+      ymd: ymd,
+      staffId: "s1",
+      inAt: "20:00",
+      outAt: "01:00",
+      paidAt: paid ? ymd + "T02:00:00.000Z" : null,
+    });
+
+  it("3日ぶん働いて、2日ぶん渡し済みなら、これから渡すのは1日ぶん", () => {
+    const works = [day("2026-08-01", true), day("2026-08-02", true), day("2026-08-03", false)];
+    const t = C.paySummary(st, works, [], "2026-08-01", "2026-08-31");
+    expect(t.net).toBe(30000); // 稼いだ額は3日ぶん（今までどおり）
+    expect(t.paidNet).toBe(20000); // もう渡した額
+    expect(t.unpaidNet).toBe(10000); // ★これから渡す額
+    expect(t.paidDays).toBe(2);
+  });
+
+  it("全部渡し済みなら、これから渡す額は0（ここを間違えると倍払う）", () => {
+    const works = [day("2026-08-01", true), day("2026-08-02", true)];
+    const t = C.paySummary(st, works, [], "2026-08-01", "2026-08-31");
+    expect(t.net).toBe(20000);
+    expect(t.paidNet).toBe(20000);
+    expect(t.unpaidNet).toBe(0);
+  });
+
+  it("1日も渡していなければ、これから渡す額＝稼いだ額（月払いの人）", () => {
+    const monthly = C.normalizeStaff({ id: "s2", name: "ゆい", daily: 8000, cycle: "monthly" });
+    const works = [
+      C.normalizeWork({ ymd: "2026-08-01", staffId: "s2" }),
+      C.normalizeWork({ ymd: "2026-08-02", staffId: "s2" }),
+    ];
+    const t = C.paySummary(monthly, works, [], "2026-08-01", "2026-08-31");
+    expect(t.net).toBe(16000);
+    expect(t.paidNet).toBe(0);
+    expect(t.unpaidNet).toBe(16000);
+  });
+
+  it("控除がある日も、渡した額は差引の額で数える", () => {
+    const w = C.normalizeWork({
+      ymd: "2026-08-01",
+      staffId: "s1",
+      fine: 1000,
+      paidAt: "2026-08-01T02:00:00.000Z",
+    });
+    const t = C.paySummary(st, [w], [], "2026-08-01", "2026-08-31");
+    expect(t.net).toBe(9000); // 10,000 − 罰金1,000
+    expect(t.paidNet).toBe(9000);
+    expect(t.unpaidNet).toBe(0);
+  });
+});
+
+describe("前借りの残高（いくら貸していて、いくら残っているか）", () => {
+  const st = C.normalizeStaff({ id: "s1", name: "あかり", daily: 10000 });
+  it("貸した合計 − 返した合計 が残高", () => {
+    const works = [
+      C.normalizeWork({ ymd: "2026-08-01", staffId: "s1", lend: 30000 }),
+      C.normalizeWork({ ymd: "2026-08-05", staffId: "s1", repay: 10000 }),
+      C.normalizeWork({ ymd: "2026-08-10", staffId: "s1", repay: 5000 }),
+    ];
+    // 期間を切っても、残高は「始めから今日まで」で数える（月をまたいでも残る）
+    expect(C.lendBalance(st, works, "2026-08-31")).toBe(15000);
+    expect(C.lendBalance(st, works, "2026-08-05")).toBe(20000); // 途中の日で見る
+  });
+  it("返しすぎてもマイナスにしない（打ち間違いで変な数字を出さない）", () => {
+    const works = [
+      C.normalizeWork({ ymd: "2026-08-01", staffId: "s1", lend: 10000 }),
+      C.normalizeWork({ ymd: "2026-08-05", staffId: "s1", repay: 30000 }),
+    ];
+    expect(C.lendBalance(st, works, "2026-08-31")).toBe(0);
+  });
+  it("使う項目から前借り・返済を外している人は、残高0のまま", () => {
+    const off = C.normalizeStaff({
+      id: "s1",
+      name: "あかり",
+      use: { lend: false, repay: false },
+    });
+    const works = [C.normalizeWork({ ymd: "2026-08-01", staffId: "s1", lend: 30000 })];
+    expect(C.lendBalance(off, works, "2026-08-31")).toBe(0);
+  });
+  it("他の人の前借りは混ざらない", () => {
+    const works = [
+      C.normalizeWork({ ymd: "2026-08-01", staffId: "s1", lend: 30000 }),
+      C.normalizeWork({ ymd: "2026-08-01", staffId: "s2", lend: 50000 }),
+    ];
+    expect(C.lendBalance(st, works, "2026-08-31")).toBe(30000);
+  });
+});
+
+describe("歩合の元を税込か税抜で選べる", () => {
+  const st = C.normalizeStaff({ id: "s1", name: "あかり", rate: 10 });
+  const w = C.normalizeWork({ ymd: "2026-08-01", staffId: "s1", sales: 11000 });
+
+  it("何も決めていなければ今までどおり税込", () => {
+    expect(C.payDay(st, w, {}).commission).toBe(1100);
+  });
+
+  it("税抜を選ぶと、消費税を抜いてから掛ける", () => {
+    // 11,000(税込10%) → 税抜10,000 → 10% = 1,000
+    const d = C.payDay(st, w, { settings: { rateBase: "nuki", rate: 0.1 } });
+    expect(d.commission).toBe(1000);
   });
 });

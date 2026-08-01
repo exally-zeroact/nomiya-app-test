@@ -4,28 +4,25 @@
  *  ★このrepo(nomiya-app-test)はテスト用DBを向いている。本番倉庫だったら即中止する。
  *  前提:
  *   ① supabase/schema-nomiya.sql を DB-test に適用済み（node tests/probe-nomiya-db.mjs が OK）
- *   ② %TEMP%\nomiya-test-cred.json に
- *      { "email": "exally.supoort+nomiya@gmail.com", "password": "…" }
- *      ＝テスト用アカウント。お店のアカウントでは絶対に走らせない
- *   ③ もう1つ別アカウントがあれば email2/password2 も入れる（他店から見えないことの確認に使う）
+ *   ② DB-test で「匿名サインイン」が有効（Authentication > Sign In / Providers）
+ *
+ *  ★合言葉(パスワード)は要らない。
+ *    匿名サインインで、その場かぎりの本物のアカウントを2つ作って使う。
+ *    お店のアカウントには最初から触れない（別人なのでRLSが弾く）。
  *  やること:
- *   1. テストURLを開く → ログイン画面が出る → ログインできる
+ *   1. テストURLを開く → 使い捨てのアカウントで入った状態にする
  *   2. 売上を1件入れる → 「同期済み」になる
  *   3. 端末の控えを全部消して開き直す → クラウドから戻ってくる（＝本当に保存されている）
- *   4. 別アカウントで入る → さっきの売上が1件も見えない（RLSの隔離）
+ *   4. もう1つの使い捨てアカウントで入る → さっきの売上が1件も見えない（RLSの隔離）
  *  片付け: 入れた売上は最後に「全部消す」で消し、クラウドにも消したことを伝える
  */
 import { chromium } from "@playwright/test";
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
+import { createClient } from "@supabase/supabase-js";
 import { readSupaConfig } from "./supa-from-config.mjs";
 
-readSupaConfig(); // 配る物が本番倉庫を向いていたら、ここで止まる
+const { url: SUPA_URL, key: SUPA_KEY } = readSupaConfig(); // 本番倉庫ならこの中で止まる
 
 const SITE = process.env.NOMIYA_URL || "https://nomiya-app-test.vercel.app/nomiya-uriage.html";
-const CRED = path.join(os.tmpdir(), "nomiya-test-cred.json");
-const ALLOW = /^exally\.supoort\+nomiya@gmail\.com$/;
 
 let ok = 0;
 let ng = 0;
@@ -43,9 +40,23 @@ function die(m) {
   process.exit(1);
 }
 
-if (!fs.existsSync(CRED)) die("合言葉のファイルがありません: " + CRED);
-const cred = JSON.parse(fs.readFileSync(CRED, "utf8"));
-if (!ALLOW.test(String(cred.email || ""))) die("このメールでは走らせません: " + cred.email);
+// 使い捨ての本物のログインを作る（合言葉なし）。人のアカウントなら即中止。
+async function makeAnonSession(label) {
+  const sb = createClient(SUPA_URL, SUPA_KEY, { auth: { persistSession: false } });
+  const r = await sb.auth.signInAnonymously();
+  if (r.error) {
+    die(
+      "使い捨てのログインが作れません: " +
+        r.error.message +
+        "（DB-test の Authentication > Sign In / Providers で「Allow anonymous sign-ins」を有効に）"
+    );
+  }
+  if (String(r.data.user.email || "") !== "") {
+    die("匿名ではないアカウントで入りました。人のデータに触る恐れがあるので止めます。");
+  }
+  console.log("  使い捨てのログイン" + label + "（匿名・合言葉なし）: " + r.data.user.id);
+  return { sb, session: r.data.session, id: r.data.user.id };
+}
 
 const TAG = "UI" + Date.now();
 const browser = await chromium.launch();
@@ -53,19 +64,23 @@ const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
 
-async function login(email, password) {
+// 画面に「もう入っている」状態で開かせる（アプリのログイン画面は素通り＝合言葉を打たない）
+async function login(sess) {
+  const projectRef = new URL(SUPA_URL).hostname.split(".")[0];
   await page.goto(SITE + "?t=" + Date.now(), { waitUntil: "load" });
-  await page.waitForTimeout(1500);
+  await page.evaluate(
+    ([ref, s]) => {
+      localStorage.setItem("sb-" + ref + "-auth-token", JSON.stringify(s));
+    },
+    [projectRef, sess]
+  );
+  await page.goto(SITE + "?t=" + Date.now(), { waitUntil: "load" });
+  await page.waitForTimeout(2500);
   const open = await page
     .locator("#loginOv")
     .evaluate((el) => el.classList.contains("open"))
-    .catch(() => false);
-  if (!open) return "already";
-  await page.locator("#loginEmail").fill(email);
-  await page.locator("#loginPass").fill(password);
-  await page.locator("#btnLogin").click();
-  await page.waitForTimeout(2500);
-  return await page.locator("#loginOv").evaluate((el) => !el.classList.contains("open"));
+    .catch(() => true);
+  return !open;
 }
 
 async function acctLine() {
@@ -74,9 +89,10 @@ async function acctLine() {
   return (await page.locator("#acctInfo").textContent()) || "";
 }
 
-/* 1. ログイン */
-const li = await login(cred.email, cred.password);
-check("テストURLでログインできる（ログイン画面が閉じる）", li === true || li === "already", li);
+/* 1. 使い捨てのアカウントで入った状態にする */
+const a1 = await makeAnonSession("①");
+const li = await login(a1.session);
+check("テストURLで入った状態になる（ログイン画面が出ない）", li === true, li);
 
 /* 前の残骸を消しておく（この端末の控えも） */
 await page.evaluate(() => {
@@ -113,27 +129,26 @@ const back = await page.evaluate(
 );
 check("端末の控えを消しても、クラウドから戻ってくる", back === 1, back);
 
-/* 4. 別アカウントでは見えない（RLSの隔離） */
-if (cred.email2 && cred.password2) {
+/* 4. 別のお店（別アカウント）からは見えない（RLSの隔離） */
+{
   await page.locator(".nav-item[data-scr='set']").click();
   await page.locator("#btnLogout").click();
   await page.waitForTimeout(1500);
-  const li2 = await login(cred.email2, cred.password2);
-  check("別のアカウントでログインできる", li2 === true, li2);
+  const a2 = await makeAnonSession("②");
+  const li2 = await login(a2.session);
+  check("別のお店として入り直せる", li2 === true, li2);
   await page.waitForTimeout(2500);
   const seen = await page.evaluate(
     (tag) => window.__NOMIYA.sales.filter((s) => s.name === tag).length,
     TAG
   );
-  check("別のアカウントからは、さっきの売上が1件も見えない（RLS）", seen === 0, seen);
-  // 元のアカウントに戻る
+  check("別のお店からは、さっきの売上が1件も見えない（RLS）", seen === 0, seen);
+  // 元のお店に戻る
   await page.locator(".nav-item[data-scr='set']").click();
   await page.locator("#btnLogout").click();
   await page.waitForTimeout(1500);
-  await login(cred.email, cred.password);
+  await login(a1.session);
   await page.waitForTimeout(2500);
-} else {
-  console.log("  – 別アカウント(email2/password2)が無いので、隔離の確認はスクリプトでは省略");
 }
 
 /* 片付け: 入れた分を消してクラウドにも伝える */

@@ -4,25 +4,26 @@
  *  前提:
  *   ① supabase/schema-nomiya.sql を DB-test の SQL Editor で1回 Run してある
  *      （確認は node tests/probe-nomiya-db.mjs が 7表とも HTTP 200 を出すこと）
- *   ② 検証用アカウントの合言葉が %TEMP%\nomiya-test-cred.json にある
- *      { "email": "exally.supoort+nomiya@gmail.com", "password": "…" }
+ *   ② DB-test で「匿名サインイン」が有効（Authentication > Sign In / Providers）
+ *
+ *  ★合言葉(パスワード)は要らない。
+ *    匿名サインインで、その場かぎりの本物のアカウントを作って試す。
+ *    誰かのアカウントの合言葉を持ち回らなくていい＝人手も要らないし、漏れる物も無い。
+ *    お店のアカウントには最初から触れない（別人なのでRLSが弾く）。
  *
  *  ★どの倉庫を触るかは自分では書かない。配る物と同じ js/supa-config.js から読む。
  *    そこが本番倉庫だったら即中止する＝テストが本番に1バイトも書かない。
  *  安全のため:
- *   - 決めた検証用メール以外では即中止（本物のお店のデータに触らない）
- *   - RLS(account_id = auth.uid())で、触れるのはこの検証用アカウントの行だけ
+ *   - 匿名（メール無し）でなければ即中止。人のアカウントでは絶対に走らない
+ *   - RLS(account_id = auth.uid())で、触れるのはこの使い捨てアカウントの行だけ
  *   - 自分が作った行だけ、最後に必ず片付ける
  */
 import { createClient } from "@supabase/supabase-js";
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
 import { readSupaConfig } from "./supa-from-config.mjs";
 
 const { url: URL, key: KEY } = readSupaConfig(); // 本番倉庫ならこの中で止まる
-const ALLOW_EMAIL = /^exally\.supoort\+nomiya@gmail\.com$/;
-const CRED = path.join(os.tmpdir(), "nomiya-test-cred.json");
+// 人のアカウントで走らないための鍵。匿名(メールが空)以外は通さない。
+const ALLOW_EMAIL = /^$/;
 
 const TAG = "LIVE-" + Date.now(); // このセッションで作った行の目印
 
@@ -43,16 +44,21 @@ function die(msg) {
   process.exit(1);
 }
 
-if (!fs.existsSync(CRED)) die("合言葉のファイルがありません: " + CRED);
-const cred = JSON.parse(fs.readFileSync(CRED, "utf8"));
-if (!ALLOW_EMAIL.test(String(cred.email || ""))) die("このメールでは走らせません: " + cred.email);
-
 const sb = createClient(URL, KEY, { auth: { persistSession: false } });
 
-const li = await sb.auth.signInWithPassword({ email: cred.email, password: cred.password });
-if (li.error) die("ログインできません: " + li.error.message);
+const li = await sb.auth.signInAnonymously();
+if (li.error) {
+  die(
+    "使い捨てのログインが作れません: " +
+      li.error.message +
+      "（DB-test の Authentication > Sign In / Providers で「Allow anonymous sign-ins」を有効に）"
+  );
+}
+if (!ALLOW_EMAIL.test(String(li.data.user.email || ""))) {
+  die("匿名ではないアカウントで入りました。人のデータに触る恐れがあるので止めます。");
+}
 const ACC = li.data.user.id;
-console.log("ログイン: " + cred.email + " (" + ACC + ")");
+console.log("使い捨てのログイン（匿名・合言葉なし）: " + ACC);
 
 /* ── 棚があるか ─────────────────────────────────────────── */
 for (const t of [

@@ -2030,8 +2030,318 @@ test.describe("飲み屋 売上管理", () => {
     if (o.guarantee) await page.locator("#st_guarantee").fill(String(o.guarantee));
     if (o.kousei) await page.locator("#st_kousei").fill(String(o.kousei));
     if (o.contract) await page.locator("#st_employ button[data-em='contract']").click();
+    // 使う項目を外すのは値を入れたあと（外すと欄が消えるので、順番が要る）
+    for (const k of o.off || []) await page.locator(`#st_use [data-use='${k}']`).click();
     await page.locator("#st_ok").click();
   }
+
+  test("給料: 使う項目を外すと、出勤の欄に出ず、計算にも乗らない", async ({ page }) => {
+    const errors = await open(page);
+    // 厚生費とドリンクと前借りを使わない店
+    await addStaff(page, {
+      name: "あかり",
+      hourly: 1200,
+      shimei: 2000,
+      kousei: 1000,
+      off: ["kousei", "drink", "lend"],
+    });
+    // 従業員一覧の説明にも、外した項目は出ない
+    await expect(page.locator("#staffList")).toContainText("本指名2,000");
+
+    await setPayDay(page, "2026-07-30");
+    await page.locator("#btnWorkAdd").click();
+    // 外した項目の欄は出ない
+    await expect(page.locator("#wk_row_c_drink")).toBeHidden();
+    await expect(page.locator("#wk_row_a_drink")).toBeHidden();
+    await expect(page.locator("#wk_row_lend")).toBeHidden();
+    // 残した項目は今までどおり出る
+    await expect(page.locator("#wk_row_c_shimei")).toBeVisible();
+    await expect(page.locator("#wk_row_fine")).toBeVisible();
+    await expect(page.locator("#wk_row_repay")).toBeVisible();
+
+    await page.locator("#wk_in").fill("20:00");
+    await page.locator("#wk_out").fill("01:00"); // 5h → 6,000
+    await page.locator("#wk_c_shimei").fill("2"); // 4,000
+    await page.locator("#wk_fine").fill("1000");
+    // 支給10,000 − 控除1,000（厚生費は外したので引かれない）＝9,000
+    await expect(page.locator("#wk_calc")).toContainText("支給 ¥10,000");
+    await expect(page.locator("#wk_calc")).toContainText("¥9,000");
+    await page.locator("#wk_ok").click();
+    await expect(page.locator("#payDayList .li-amt")).toHaveText("¥9,000");
+
+    // 使う項目に戻すと、厚生費がまた引かれる（値は消えていない）
+    await page.locator(".nav-item[data-scr='pay']").click();
+    await page.locator("#staffList .li", { hasText: "あかり" }).click();
+    await expect(page.locator("#st_use [data-use='kousei']")).not.toHaveClass(/on/);
+    await page.locator("#st_use [data-use='kousei']").click();
+    await expect(page.locator("#st_kousei")).toHaveValue("1000");
+    await page.locator("#st_ok").click();
+    await setPayDay(page, "2026-07-30");
+    await expect(page.locator("#payDayList .li-amt")).toHaveText("¥8,000");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("給料: 使う項目はクラウドにも残る（新しいスマホでも外れたまま）", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff(page, { name: "ゆい", hourly: 1200, off: ["kousei", "bottle"] });
+    await page.locator(".nav-item[data-scr='set']").click();
+    await expect(page.locator("#acctInfo")).toContainText("同期済み");
+
+    await page.evaluate(() => {
+      ["nomiya_staff_v1", "nomiya_sync_at_v1", "nomiya_sync_ok_v1"].forEach((k) =>
+        localStorage.removeItem(k)
+      );
+    });
+    await page.reload({ waitUntil: "load" });
+    await page.evaluate(() => window.__NOMIYA.syncNow(false));
+    const use = await page.evaluate(() => window.__NOMIYA.staff[0].use);
+    expect(use.kousei).toBe(false);
+    expect(use.bottle).toBe(false);
+    expect(use.shimei).toBe(true);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("ついた人: ヘルプに入った回数が、給料に自動で入る", async ({ page }) => {
+    const errors = await open(page);
+    // ヘルプという種類を足す
+    await page.locator(".nav-item[data-scr='pay']").click();
+    await page.locator("#btnKindAdd").click();
+    await page.locator("#kd_label").fill("ヘルプ");
+    await page.locator("#kd_ok").click();
+
+    // あかり=担当で歩合10% / ゆい=ヘルプ1回500円
+    await addStaff(page, { name: "あかり", rate: 10 });
+    await page.locator("#btnStaffAdd").click();
+    await page.locator("#st_name").fill("ゆい");
+    const helpKey = await page.evaluate(() => window.__NOMIYA.settings.backKinds.slice(-1)[0].key);
+    await page.locator(`#st_b_${helpKey}`).fill("500");
+    await page.locator("#st_ok").click();
+
+    // 売上に 担当=あかり、ついた人=ゆい(ヘルプ)
+    await page.locator(".nav-item[data-scr='input']").click();
+    await page.locator("#inDate").fill("2026-08-07");
+    await page.locator("#inName").fill("客A");
+    await page.locator("#inPeople").fill("2");
+    await page.locator("#inAmount").fill("60000");
+    await page.locator("#inStaff").selectOption({ label: "あかり" });
+    await page.locator("#btnCrewAdd").click();
+    await page.locator("#crewList select.crew-who").last().selectOption({ label: "ゆい" });
+    await page.locator("#crewList select.crew-role").last().selectOption({ label: "ヘルプ" });
+    await page.locator("#btnSave").click();
+    expect(await page.evaluate(() => window.__NOMIYA.sales[0].crew)).toEqual([
+      { name: "ゆい", role: helpKey },
+    ]);
+
+    // 出勤を入れるだけ。ヘルプ回数は打たない
+    await setPayDay(page, "2026-08-07");
+    await page.locator("#btnWorkAdd").click();
+    await page.locator("#wk_staff").selectOption({ label: "ゆい" });
+    await expect(page.locator("#wk_calc")).toContainText("¥500");
+    await page.locator("#wk_ok").click();
+    // あかりは歩合6,000、ゆいはヘルプ500。同じ会計で両方成り立つ
+    await page.locator("#btnWorkAdd").click();
+    await page.locator("#wk_staff").selectOption({ label: "あかり" });
+    await expect(page.locator("#wk_calc")).toContainText("歩合 6,000");
+    await page.locator("#wk_ok").click();
+    await expect(page.locator("#payDayList")).toContainText("¥6,000");
+    await expect(page.locator("#payDayList")).toContainText("¥500");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★日払いで渡した分は、月のまとめで二重に出ない", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff(page, { name: "あかり", daily: 10000 });
+
+    // 2日ぶん働いて、1日ぶんだけ日払いで渡す
+    for (const d of ["2026-08-03", "2026-08-04"]) {
+      await setPayDay(page, d);
+      await page.locator("#btnWorkAdd").click();
+      await page.locator("#wk_ok").click();
+    }
+    await setPayDay(page, "2026-08-03");
+    await page.locator("#payDayList .li").first().click();
+    await page.locator("#wk_pay").click();
+    await expect(page.locator("#payDayList")).toContainText("渡した");
+
+    // 月のまとめ: 稼いだ20,000 / 渡し済み10,000 / これから渡す10,000
+    const row = page.locator("#payMonth tbody tr", { hasText: "あかり" });
+    await expect(row).toContainText("20,000"); // 差引（稼いだ額）
+    await expect(row).toContainText("10,000"); // これから渡す額
+    await expect(page.locator("#payMonth thead")).toContainText("渡し済み");
+    await expect(page.locator("#payMonth thead")).toContainText("これから渡す");
+
+    // A4の給与一覧にも同じ3つが出る
+    await expect(page.locator("#paySheets thead")).toContainText("渡し済み");
+    await expect(page.locator("#paySheets thead")).toContainText("これから渡す");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("前借りの残高が、給料の画面に出る", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff(page, { name: "あかり", daily: 10000 });
+
+    // 3万貸して、1万返す
+    await setPayDay(page, "2026-08-03");
+    await page.locator("#btnWorkAdd").click();
+    await page.locator("#wk_lend").fill("30000");
+    await page.locator("#wk_ok").click();
+    await expect(page.locator("#payDayList")).toContainText("前借り残 ¥30,000");
+
+    await setPayDay(page, "2026-08-04");
+    await page.locator("#btnWorkAdd").click();
+    await page.locator("#wk_repay").fill("10000");
+    await page.locator("#wk_ok").click();
+    await expect(page.locator("#payDayList")).toContainText("前借り残 ¥20,000");
+
+    // 月のまとめにも出る
+    await expect(page.locator("#payMonth tbody tr", { hasText: "あかり" })).toContainText("20,000");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("担当: 売上に担当を付けると、その人の歩合が自動で出る", async ({ page }) => {
+    const errors = await open(page);
+    // 歩合10%の人を作る
+    await addStaff(page, { name: "あかり", rate: 10 });
+    await addStaff(page, { name: "ゆい", rate: 10 });
+
+    // 売上を打つときに担当を選ぶ
+    await page.locator(".nav-item[data-scr='input']").click();
+    await expect(page.locator("#inStaff")).toBeVisible();
+    await page.locator("#inDate").fill("2026-08-05");
+    await page.locator("#inName").fill("客A");
+    await page.locator("#inPeople").fill("2");
+    await page.locator("#inAmount").fill("60000");
+    await page.locator("#inStaff").selectOption({ label: "あかり" });
+    await page.locator("#btnSave").click();
+    expect(await page.evaluate(() => window.__NOMIYA.sales[0].staff)).toBe("あかり");
+
+    // ゆいの客も1件（あかりの歩合に混ざらないこと）
+    await page.locator("#inDate").fill("2026-08-05");
+    await page.locator("#inName").fill("客B");
+    await page.locator("#inPeople").fill("2");
+    await page.locator("#inAmount").fill("50000");
+    await page.locator("#inStaff").selectOption({ label: "ゆい" });
+    await page.locator("#btnSave").click();
+
+    // 出勤を入れるだけで、歩合が自動で入る（打たない）
+    await setPayDay(page, "2026-08-05");
+    await page.locator("#btnWorkAdd").click();
+    await page.locator("#wk_staff").selectOption({ label: "あかり" });
+    await expect(page.locator("#wk_calc")).toContainText("歩合 6,000"); // 60,000の10%
+    await page.locator("#wk_ok").click();
+    await expect(page.locator("#payDayList .li-amt")).toHaveText("¥6,000");
+
+    // 担当を選ばずに保存もできる（付け忘れても売上は打てる）
+    await page.locator(".nav-item[data-scr='input']").click();
+    await page.locator("#inDate").fill("2026-08-05");
+    await page.locator("#inName").fill("客C");
+    await page.locator("#inPeople").fill("1");
+    await page.locator("#inAmount").fill("3000");
+    await page.locator("#btnSave").click();
+    expect(await page.evaluate(() => window.__NOMIYA.sales.length)).toBe(3);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("担当: 付け忘れがあると、締めの画面で件数を教えてくれる", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff(page, { name: "あかり", rate: 10 });
+    await page.locator(".nav-item[data-scr='input']").click();
+    await page.locator("#inDate").fill("2026-08-06");
+    await page.locator("#inName").fill("客A");
+    await page.locator("#inPeople").fill("2");
+    await page.locator("#inAmount").fill("10000");
+    await page.locator("#btnSave").click(); // 担当なし
+
+    await setCloseDay(page, "2026-08-06");
+    await expect(page.locator("#clNoStaff")).toContainText("担当が入っていない");
+    await expect(page.locator("#clNoStaff")).toContainText("1 件");
+
+    // 担当を付けたら消える
+    await page.locator(".nav-item[data-scr='list']").click();
+    await page.locator("#periodList .period-lb").click();
+    await page.locator("#mdFrom").fill("2026-08-01");
+    await page.locator("#mdTo").fill("2026-08-31");
+    await page.locator("#mdOk").click();
+    await page.locator("#listSheets tr[data-id]").first().click();
+    await page.locator("#inStaff").selectOption({ label: "あかり" });
+    await page.locator("#btnSave").click();
+    await setCloseDay(page, "2026-08-06");
+    await expect(page.locator("#clNoStaff")).toHaveText("");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("バックの種類: 店が足せる（シャンパンを別種類にする）", async ({ page }) => {
+    const errors = await open(page);
+    await page.locator(".nav-item[data-scr='pay']").click();
+
+    // はじめは今までの5つ
+    await expect(page.locator("#kindList .li")).toHaveCount(5);
+    await expect(page.locator("#kindList")).toContainText("ボトル");
+
+    // シャンパンを足す
+    await page.locator("#btnKindAdd").click();
+    await page.locator("#kd_label").fill("シャンパン");
+    await page.locator("#kd_ok").click();
+    await expect(page.locator("#kindList .li")).toHaveCount(6);
+    await expect(page.locator("#kindList")).toContainText("シャンパン");
+
+    // 足した種類が、従業員の「使う項目」にも決め方にも出る
+    await page.locator("#btnStaffAdd").click();
+    await expect(page.locator("#st_use [data-use]")).toHaveCount(12); // 6種類＋6項目
+    await expect(page.locator("#st_use")).toContainText("シャンパン");
+    await page.locator("#modalX").click();
+
+    // 名前を変えられる・消せる（消しても過去の実績は残す）
+    await page.locator("#kindList .li", { hasText: "シャンパン" }).click();
+    await page.locator("#kd_label").fill("シャンパン類");
+    await page.locator("#kd_ok").click();
+    await expect(page.locator("#kindList")).toContainText("シャンパン類");
+    await page.locator("#kindList .li", { hasText: "シャンパン類" }).click();
+    await page.locator("#kd_del").click();
+    await expect(page.locator("#kindList .li")).toHaveCount(5);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("銘柄: 押すだけで本数と金額が入り、銘柄の率が種類の率に勝つ", async ({ page }) => {
+    const errors = await open(page);
+    await page.locator(".nav-item[data-scr='pay']").click();
+
+    // ドンペリは20%（特別）、モエは率なし＝ボトルの率に従う
+    await page.locator("#btnItemAdd").click();
+    await page.locator("#it_name").fill("ドンペリ白");
+    await page.locator("#it_price").fill("50000");
+    await page.locator("#it_pct").fill("20");
+    await page.locator("#it_ok").click();
+    await page.locator("#btnItemAdd").click();
+    await page.locator("#it_name").fill("モエ");
+    await page.locator("#it_price").fill("20000");
+    await page.locator("#it_ok").click();
+    await expect(page.locator("#itemList")).toContainText("20%");
+
+    // ボトルは15%の人
+    await addStaff(page, { name: "あかり", bottlePct: 15 });
+
+    await setPayDay(page, "2026-08-05");
+    await page.locator("#btnWorkAdd").click();
+    // 押すだけ。金額を打つ欄には触らない
+    await page.locator("#wk_items_bottle button", { hasText: "ドンペリ白" }).click();
+    await page.locator("#wk_items_bottle button", { hasText: "ドンペリ白" }).click();
+    await page.locator("#wk_items_bottle button", { hasText: "モエ" }).click();
+    // 押した中身が見える
+    await expect(page.locator("#wk_picked_bottle")).toContainText("ドンペリ白 ×2");
+    await expect(page.locator("#wk_picked_bottle")).toContainText("モエ ×1");
+    await expect(page.locator("#wk_picked_bottle")).toContainText("¥120,000");
+    // 50,000×2×20%=20,000 ＋ 20,000×15%=3,000 → 23,000
+    await expect(page.locator("#wk_calc")).toContainText("¥23,000");
+    await page.locator("#wk_ok").click();
+    await expect(page.locator("#payDayList .li-amt")).toHaveText("¥23,000");
+
+    // 押し間違いは戻せる
+    await page.locator("#payDayList .li").first().click();
+    await page.locator("#wk_picked_bottle [data-undo='1']").first().click();
+    await expect(page.locator("#wk_picked_bottle")).toContainText("ドンペリ白 ×1");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
 
   test("給料: 時給＋バック＋歩合−控除で、その日の払う額が出る", async ({ page }) => {
     const errors = await open(page);
@@ -2176,12 +2486,16 @@ test.describe("飲み屋 売上管理", () => {
     expect(m.h).toBe(1123);
     expect(m.sh, "給与一覧がA4からはみ出している").toBeLessThanOrEqual(1123);
     await expect(page.locator("#paySheets")).toContainText("給 与 一 覧");
-    // 合計の行に歯抜けが無い（日数・時間・本指名・同伴・基本・バック・歩合・支給・控除・差引）
+    // 合計の行に歯抜けが無い
+    // （日数・時間・本指名・同伴・基本・バック・歩合・支給・控除・差引・渡し済み・これから渡す）
     const foot = await page
       .locator("#paySheets tfoot tr td")
       .evaluateAll((tds) => tds.map((td) => td.textContent.trim()));
     expect(foot[0]).toBe("合計");
-    expect(foot.length).toBe(11);
+    expect(foot.length).toBe(13);
+    // ★1日も渡していないので、これから渡す額＝差引と同じ（二重払いの逆＝払い漏れも防ぐ）
+    expect(foot[11]).toBe("0"); // 渡し済み
+    expect(foot[12]).toBe(foot[10]); // これから渡す ＝ 差引
     expect(foot.slice(1), "合計の行が歯抜け").not.toContain("");
     expect(foot[1]).toBe("6"); // 6人×1日
     expect(foot[2]).toBe("30.0"); // 5h×6人
@@ -2239,13 +2553,14 @@ test.describe("飲み屋 売上管理", () => {
     await page.locator("#btnWorkAdd").click();
     const chip = page.locator("#wk_items_bottle button", { hasText: "ドンペリ白" });
     await chip.click();
-    await expect(page.locator("#wk_a_bottle")).toHaveValue("50000");
+    await expect(page.locator("#wk_picked_bottle")).toContainText("ドンペリ白 ×1");
+    await expect(page.locator("#wk_picked_bottle")).toContainText("¥50,000");
     await chip.click(); // 2本目
-    await expect(page.locator("#wk_a_bottle")).toHaveValue("100000");
+    await expect(page.locator("#wk_picked_bottle")).toContainText("ドンペリ白 ×2");
     await expect(page.locator("#wk_calc")).toContainText("100,000の10% = 10,000");
-    await page.locator("#wk_items_bottle button", { hasText: "0にもどす" }).click();
-    await expect(page.locator("#wk_a_bottle")).toHaveValue("");
-    await chip.click();
+    // 押し間違いは✕で1本ずつ戻せる
+    await page.locator("#wk_picked_bottle [data-undo='1']").click();
+    await expect(page.locator("#wk_picked_bottle")).toContainText("ドンペリ白 ×1");
     await page.locator("#wk_ok").click();
     await expect(page.locator("#payDayList .li-amt")).toHaveText("¥5,000");
 

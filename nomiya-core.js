@@ -235,8 +235,20 @@
       // 領収書を渡した日（あとで渡す場合は入金日が入る。出していなければ null）
       receiptDate: normalizeReceipt(r.receipt) === "issued" ? r.receiptDate || r.date : null,
       memo: String(r.memo == null ? "" : r.memo).trim(),
-      // 担当（誰の客か）。今は画面に出さないが、後からキャスト別に出せるよう器だけ持つ
+      // 担当（誰の客か）。この人に「歩合」が付く
       staff: String(r.staff == null ? "" : r.staff).trim(),
+      // ついた人（ヘルプ・場内・同伴など）。役割はバックの種類。何人でも入る。
+      // 名前が空の物は捨てる（打ち間違いで壊れない）
+      crew: (r.crew || [])
+        .map(function (c) {
+          return {
+            name: String((c && c.name) || "").trim(),
+            role: String((c && c.role) || "").trim(),
+          };
+        })
+        .filter(function (c) {
+          return c.name;
+        }),
       // 未回収でない支払い方法は「その場で回収済み」＝ paidDate は持たない
       paidDate: isUnpaidMethod(r.pay) ? r.paidDate || null : null,
       // ツケ・請求書送りを回収したとき、現金で受け取ったか（レジの現金が増えるかどうか）
@@ -1040,7 +1052,7 @@
        控除 = 罰金 ＋ 厚生費 ＋ 前借りの返済
        差引 = 支給 − 控除
      =================================================================== */
-  // バックの種類（この5つで夜の店はほぼ足りる）
+  // バックの種類の「はじめの5つ」。店はここから足す・変える・消せる（固定ではない）。
   var BACK_KINDS = [
     { key: "shimei", label: "本指名" },
     { key: "jonai", label: "場内指名" },
@@ -1048,6 +1060,64 @@
     { key: "drink", label: "ドリンク" },
     { key: "bottle", label: "ボトル" },
   ];
+
+  /**
+   * backKinds(settings)
+   *  その店のバックの種類。設定に無ければ、はじめの5つを返す。
+   *  ＝何も決めていない店は今までどおり動く。決めた店はその通りになる。
+   *  名前が空の物は捨てる。同じキーが2つあったら最初の1つに寄せる（打ち間違いで壊さない）。
+   */
+  function backKinds(settings) {
+    var raw = (settings || {}).backKinds;
+    if (!raw || !raw.length) return BACK_KINDS.slice();
+    var seen = {};
+    var out = [];
+    raw.forEach(function (x) {
+      var key = String((x && x.key) || "").trim();
+      var label = String((x && x.label) || "").trim();
+      if (!key || !label || seen[key]) return;
+      seen[key] = true;
+      out.push({ key: key, label: label });
+    });
+    return out.length ? out : BACK_KINDS.slice();
+  }
+  // 給料で「使う項目」。店ごとにやり方が違うので、人ごとに要る物だけ選ばせる。
+  //   group: back=バック / pay=支給side / deduct=控除side（画面の並べ方に使う）
+  var PAY_ITEMS = [
+    { key: "shimei", label: "本指名", group: "back" },
+    { key: "jonai", label: "場内指名", group: "back" },
+    { key: "douhan", label: "同伴", group: "back" },
+    { key: "drink", label: "ドリンク", group: "back" },
+    { key: "bottle", label: "ボトル", group: "back" },
+    { key: "rate", label: "歩合", group: "pay" },
+    { key: "guarantee", label: "最低保証", group: "pay" },
+    { key: "kousei", label: "厚生費", group: "deduct" },
+    { key: "fine", label: "罰金", group: "deduct" },
+    { key: "lend", label: "前借り", group: "deduct" },
+    { key: "repay", label: "返済", group: "deduct" },
+  ];
+  // 「選ばれているか」。既定は全部オン＝今まで使っていた人の数字を変えない。
+  // 外した印(false)だけを持つので、クラウドの既定値 '{}' でも全部オンで戻る。
+  function staffUses(staff, key) {
+    var u = (staff || {}).use || {};
+    return u[key] === false ? false : true;
+  }
+  function normalizeUse(raw) {
+    var u = raw || {};
+    var out = {};
+    // 決め打ちの11個＋店が足した種類のキーも見る（外した印を捨てない）
+    var keys = {};
+    PAY_ITEMS.forEach(function (x) {
+      keys[x.key] = true;
+    });
+    Object.keys(u).forEach(function (k) {
+      keys[k] = true;
+    });
+    Object.keys(keys).forEach(function (k) {
+      out[k] = u[k] === false ? false : true;
+    });
+    return out;
+  }
   var EMPLOY_KINDS = [
     { key: "employee", label: "雇用（時給・日給）" },
     { key: "contract", label: "業務委託（歩合）" },
@@ -1075,10 +1145,21 @@
     var r = raw || {};
     var back = {};
     var backPct = {};
+    // ★店が足した種類のキーも消さない。はじめの5つ＋実際に入っているキーを全部見る。
+    var keys = {};
     BACK_KINDS.forEach(function (k) {
-      back[k.key] = _int((r.back || {})[k.key]);
+      keys[k.key] = true;
+    });
+    Object.keys(r.back || {}).forEach(function (k) {
+      keys[k] = true;
+    });
+    Object.keys(r.backPct || {}).forEach(function (k) {
+      keys[k] = true;
+    });
+    Object.keys(keys).forEach(function (k) {
+      back[k] = _int((r.back || {})[k]);
       // ％で決める種類（シャンパン・ボトルは値段がバラバラなので、円では決まらない）
-      backPct[k.key] = _num((r.backPct || {})[k.key]);
+      backPct[k] = _num((r.backPct || {})[k]);
     });
     return {
       id: r.id || makeId(),
@@ -1088,6 +1169,7 @@
       daily: _int(r.daily), // 日給（0なら無し）
       back: back, // バックの単価（1本・1回あたり）
       backPct: backPct, // バックの率（%）。入っていればこちらを使う
+      use: normalizeUse(r.use), // この人に使う項目（外した物だけ false）
       rate: _num(r.rate), // 売上歩合（%）
       guarantee: _int(r.guarantee), // 最低保証（0なら無し）
       kousei: _int(r.kousei), // 厚生費（1日あたり引く）
@@ -1111,10 +1193,27 @@
     var r = raw || {};
     var cnt = {};
     var amt = {};
+    // ★店が足した種類のキーも消さない
+    var keys = {};
     BACK_KINDS.forEach(function (k) {
-      cnt[k.key] = _int((r.count || {})[k.key]);
-      // ％のバックはこの金額に率を掛ける（ボトル・シャンパンの売った額）
-      amt[k.key] = _int((r.amount || {})[k.key]);
+      keys[k.key] = true;
+    });
+    Object.keys(r.count || {}).forEach(function (k) {
+      keys[k] = true;
+    });
+    Object.keys(r.amount || {}).forEach(function (k) {
+      keys[k] = true;
+    });
+    Object.keys(keys).forEach(function (k) {
+      cnt[k] = _int((r.count || {})[k]);
+      // ％のバックはこの金額に率を掛ける（手で打った分。銘柄を押した分は picks に入る）
+      amt[k] = _int((r.amount || {})[k]);
+    });
+    // 押した銘柄 { 商品id: 本数 }。値段も率も商品マスタから引くので、打ち込みが要らない。
+    var picks = {};
+    Object.keys(r.picks || {}).forEach(function (id) {
+      var n = _int((r.picks || {})[id]);
+      if (n > 0) picks[id] = n;
     });
     return {
       id: r.id || makeId(),
@@ -1124,6 +1223,7 @@
       outAt: String(r.outAt == null ? "" : r.outAt),
       count: cnt,
       amount: amt,
+      picks: picks,
       sales: _int(r.sales), // 自分の客の売上（手入力ぶん）
       fine: _int(r.fine), // 罰金
       lend: _int(r.lend), // この日に前借りした
@@ -1168,27 +1268,74 @@
 
   /**
    * payDay(staff, work, opt)
-   *  その日の1人ぶん。opt.sales = 売上データから拾った「その人の客の売上」
+   *  その日の1人ぶん。
+   *   opt.sales    = 売上データから拾った「その人の客の売上」
+   *   opt.settings = 店の設定（バックの種類・商品・歩合の元）。無ければ今までどおり動く。
+   *
+   *  バックの率は3段で、上が勝つ:
+   *    ① 押した銘柄の率（ドンペリ20%）
+   *    ② その種類の率（シャンパン15%）
+   *    ③ 無ければ 本数×単価（円で決めている種類）
    */
   function payDay(staff, work, opt) {
     var st = staff || {};
     var w = work || {};
     var o = opt || {};
+    var cfg = o.settings || {};
+    var kinds = backKinds(cfg);
+    var items = itemList(cfg.items);
     var mins = workMinutes(w.inAt, w.outAt);
     var hours = mins / 60;
     var base = 0;
     if (st.daily) base = _int(st.daily);
     else if (st.hourly) base = Math.floor(_int(st.hourly) * hours);
-    var backs = BACK_KINDS.map(function (k) {
-      var n = _int((w.count || {})[k.key]);
+
+    // 押した銘柄を種類ごとにまとめる（本数・売った額・銘柄の率で出したバック）
+    var picked = {};
+    Object.keys(w.picks || {}).forEach(function (id) {
+      var n = _int(w.picks[id]);
+      if (n <= 0) return;
+      var it = items.filter(function (x) {
+        return x.id === id;
+      })[0];
+      if (!it) return; // 消された銘柄は、記録は残るが計算には入れない
+      var p = picked[it.kind] || (picked[it.kind] = { n: 0, sold: 0, back: 0, ownPct: 0 });
+      p.n += n;
+      p.sold += it.price * n;
+      // 銘柄に率があればそれで、無ければ後で種類の率をかける
+      if (it.pct > 0) p.back += Math.floor((it.price * n * it.pct) / 100);
+      else p.ownPct += it.price * n; // 種類の率をかける対象として残す
+    });
+
+    // 売上に「ついた人」として入っている分（ヘルプ○回など）。手で数えなくていい。
+    var crew = o.crew || {};
+    var backs = kinds.map(function (k) {
+      var p = picked[k.key] || { n: 0, sold: 0, back: 0, ownPct: 0 };
+      var cw = crew[k.key] || { n: 0, sold: 0 };
+      var n = _int((w.count || {})[k.key]) + p.n + cw.n;
       var unit = _int((st.back || {})[k.key]);
       var pct = _num((st.backPct || {})[k.key]);
-      var sold = _int((w.amount || {})[k.key]);
-      // ％で決めている種類は「売った金額 × ％」。円で決めているなら「本数 × 単価」。
-      var amount = pct > 0 ? Math.floor((sold * pct) / 100) : n * unit;
+      var typed = _int((w.amount || {})[k.key]) + cw.sold; // 手で打った額＋ついた会計の額
+      var sold = typed + p.sold;
+      // 「使う項目」で外した種類は、打ってある本数・売った額を残したまま0にする。
+      var used = staffUses(st, k.key);
+      var amount = 0;
+      if (used) {
+        if (pct > 0) {
+          // 銘柄の率で出した分＋（種類の率をかける分）
+          amount = p.back + Math.floor(((typed + p.ownPct) * pct) / 100);
+        } else if (p.back > 0) {
+          // 種類には率が無いが、銘柄に率がある（ドンペリだけバック、など）
+          amount = p.back;
+        } else {
+          // 円で決めている種類は「本数×単価」。押した銘柄も、ついた回数も同じ扱い。
+          amount = n * unit;
+        }
+      }
       return {
         key: k.key,
         label: k.label,
+        used: used,
         count: n,
         unit: unit,
         pct: pct,
@@ -1200,11 +1347,18 @@
       return a + x.amount;
     }, 0);
     var sales = _int(w.sales) || _int(o.sales);
-    var comm = Math.floor((sales * _num(st.rate)) / 100);
+    // 歩合の元。店が「税抜」を選んでいれば、消費税を抜いてから掛ける。
+    if (cfg.rateBase === "nuki") sales = taxIncluded(sales, cfg.rate).net;
+    var comm = staffUses(st, "rate") ? Math.floor((sales * _num(st.rate)) / 100) : 0;
     var earned = base + backTotal + comm;
     // 最低保証は「保証と、計算した額の高い方」
-    var guaranteed = st.guarantee ? Math.max(st.guarantee, earned) : earned;
-    var deduct = _int(w.fine) + _int(st.kousei) + _int(w.repay);
+    var guar = staffUses(st, "guarantee") ? _int(st.guarantee) : 0;
+    var guaranteed = guar ? Math.max(guar, earned) : earned;
+    var fine = staffUses(st, "fine") ? _int(w.fine) : 0;
+    var kousei = staffUses(st, "kousei") ? _int(st.kousei) : 0;
+    var repay = staffUses(st, "repay") ? _int(w.repay) : 0;
+    var lend = staffUses(st, "lend") ? _int(w.lend) : 0;
+    var deduct = fine + kousei + repay;
     return {
       minutes: mins,
       hours: hours,
@@ -1215,14 +1369,14 @@
       sales: sales,
       commission: comm,
       earned: earned,
-      guaranteeUsed: !!(st.guarantee && st.guarantee > earned),
+      guaranteeUsed: !!(guar && guar > earned),
       gross: guaranteed,
-      fine: _int(w.fine),
-      kousei: _int(st.kousei),
-      repay: _int(w.repay),
+      fine: fine,
+      kousei: kousei,
+      repay: repay,
       deduct: deduct,
       net: guaranteed - deduct,
-      lend: _int(w.lend),
+      lend: lend,
       paidAt: w.paidAt || null,
     };
   }
@@ -1239,10 +1393,13 @@
   }
 
   /**
-   * paySummary(staff, works, sales, from, to)
+   * paySummary(staff, works, sales, from, to, opt)
    *  1人ぶんの期間まとめ（月払いの人の「今月いくら」）
+   *  opt.settings = 店の設定（バックの種類・商品・歩合の元）。無ければ今までどおり。
    */
-  function paySummary(staff, works, sales, from, to) {
+  function paySummary(staff, works, sales, from, to, opt) {
+    var o = opt || {};
+    var kinds = backKinds(o.settings || {});
     var rows = (works || []).filter(function (w) {
       if (!w || w.deletedAt) return false;
       if (w.staffId !== staff.id) return false;
@@ -1264,10 +1421,14 @@
       net: 0,
       lend: 0,
       paidDays: 0,
+      // ★日払いなどで「もう渡した額」と「これから渡す額」。
+      //   ここを分けないと、渡し済みの分をもう一度払ってしまう（二重払い）。
+      paidNet: 0,
+      unpaidNet: 0,
       counts: {},
       amounts: {},
     };
-    BACK_KINDS.forEach(function (k) {
+    kinds.forEach(function (k) {
       t.counts[k.key] = 0;
       t.amounts[k.key] = 0;
     });
@@ -1276,7 +1437,11 @@
         return a.ymd < b.ymd ? -1 : 1;
       })
       .forEach(function (w) {
-        var d = payDay(staff, w, { sales: salesByStaff(sales, w.ymd, staff.name) });
+        var d = payDay(staff, w, {
+          sales: salesByStaff(sales, w.ymd, staff.name),
+          crew: crewByStaff(sales, w.ymd, staff.name),
+          settings: o.settings,
+        });
         t.days += 1;
         t.minutes += d.minutes;
         t.base += d.base;
@@ -1289,14 +1454,70 @@
         t.deduct += d.deduct;
         t.net += d.net;
         t.lend += d.lend;
-        if (d.paidAt) t.paidDays += 1;
-        BACK_KINDS.forEach(function (k) {
-          t.counts[k.key] += _int((w.count || {})[k.key]);
-          t.amounts[k.key] += _int((w.amount || {})[k.key]);
+        if (d.paidAt) {
+          t.paidDays += 1;
+          t.paidNet += d.net; // もう渡した
+        } else {
+          t.unpaidNet += d.net; // これから渡す
+        }
+        // 本数・売った額は「押した銘柄ぶん」も入った、計算に使った値をそのまま足す
+        d.backs.forEach(function (b) {
+          t.counts[b.key] = (t.counts[b.key] || 0) + b.count;
+          t.amounts[b.key] = (t.amounts[b.key] || 0) + b.sold;
         });
       });
     t.rows = rows;
     return t;
+  }
+
+  /**
+   * crewByStaff(sales, ymd, staffName)
+   *  その日、その人が「ついた人」として何の役割で何回ついたか、その会計の合計はいくらか。
+   *  → 出勤を入れるときに、ヘルプ○回・場内○回を手で数えなくてよくなる。
+   *  戻り値: { 役割key: { n: 回数, sold: その会計の合計 } }
+   *  ※担当（その客の主）は crew に入れない。担当は「歩合」で払うので二重にしない。
+   */
+  function crewByStaff(sales, ymd, staffName) {
+    var out = {};
+    var who = String(staffName || "");
+    if (!who) return out;
+    (sales || [])
+      .filter(isAlive)
+      .filter(function (s) {
+        return s.date === ymd;
+      })
+      .forEach(function (s) {
+        (s.crew || []).forEach(function (c) {
+          if (String(c.name || "") !== who) return;
+          var role = String(c.role || "");
+          if (!role) return;
+          var o = out[role] || (out[role] = { n: 0, sold: 0 });
+          o.n += 1;
+          o.sold += _int(s.amount);
+        });
+      });
+    return out;
+  }
+
+  /**
+   * lendBalance(staff, works, ymd)
+   *  前借りの残高＝「始めからその日まで」の 貸した合計 − 返した合計。
+   *  月をまたいでも残る（月で切らない）。返しすぎてもマイナスにはしない。
+   *  ※前借り・返済を「使う項目」から外している人は、いつも0。
+   */
+  function lendBalance(staff, works, ymd) {
+    var st = staff || {};
+    var lentOn = staffUses(st, "lend");
+    var repayOn = staffUses(st, "repay");
+    var bal = 0;
+    (works || []).forEach(function (w) {
+      if (!w || w.deletedAt) return;
+      if (w.staffId !== st.id) return;
+      if (ymd && w.ymd > ymd) return;
+      if (lentOn) bal += _int(w.lend);
+      if (repayOn) bal -= _int(w.repay);
+    });
+    return Math.max(0, bal);
   }
 
   /**
@@ -1350,11 +1571,10 @@
       id: r.id || makeId(),
       name: String(r.name == null ? "" : r.name).trim(),
       price: _int(r.price),
-      kind: BACK_KINDS.some(function (k) {
-        return k.key === r.kind;
-      })
-        ? r.kind
-        : "bottle",
+      // どの種類に入れるか。店が足した種類でもそのまま持てる（決め打ちに寄せない）。
+      kind: String(r.kind || "").trim() || "bottle",
+      // この銘柄だけの率（ドンペリ20%など）。0なら種類の率をそのまま使う。
+      pct: _num(r.pct),
     };
   }
   function itemList(items, kind) {
@@ -1377,6 +1597,7 @@
       daily: _int(x.daily),
       back: x.back || {},
       back_pct: x.backPct || {},
+      use_items: normalizeUse(x.use),
       rate: _num(x.rate),
       guarantee: _int(x.guarantee),
       kousei: _int(x.kousei),
@@ -1398,6 +1619,7 @@
         daily: r.daily,
         back: r.back || {},
         backPct: r.back_pct || {},
+        use: r.use_items || {},
         rate: r.rate,
         guarantee: r.guarantee,
         kousei: r.kousei,
@@ -1419,6 +1641,7 @@
       out_at: _s(x.outAt),
       count: x.count || {},
       amount: x.amount || {},
+      picks: x.picks || {}, // 押した銘柄 { 商品id: 本数 }
       sales: _int(x.sales),
       fine: _int(x.fine),
       lend: _int(x.lend),
@@ -1439,6 +1662,7 @@
         outAt: _s(r.out_at),
         count: r.count || {},
         amount: r.amount || {},
+        picks: r.picks || {},
         sales: r.sales,
         fine: r.fine,
         lend: r.lend,
@@ -1501,6 +1725,7 @@
       memo: _s(s.memo),
       paid_date: _date(s.paidDate),
       staff: _s(s.staff),
+      crew: s.crew || [], // ついた人（ヘルプ・場内など）
       paid_cash: !!s.paidCash,
       created_at: _ts(s.createdAt),
       // 「いつの更新か」は同期の勝ち負けを決める鍵。空では送らない（無ければ今）
@@ -1523,6 +1748,7 @@
       paidDate: r.paid_date || null,
       paidCash: !!r.paid_cash,
       staff: _s(r.staff),
+      crew: r.crew || [],
       createdAt: r.created_at || "",
       updatedAt: r.updated_at || "",
       deletedAt: r.deleted_at || null,
@@ -1873,6 +2099,9 @@
     syncPlanCloses: syncPlanCloses,
     monthlyCash: monthlyCash,
     BACK_KINDS: BACK_KINDS,
+    backKinds: backKinds,
+    PAY_ITEMS: PAY_ITEMS,
+    staffUses: staffUses,
     EMPLOY_KINDS: EMPLOY_KINDS,
     PAY_CYCLES: PAY_CYCLES,
     normalizeStaff: normalizeStaff,
@@ -1882,6 +2111,8 @@
     payDay: payDay,
     paySummary: paySummary,
     payWarnings: payWarnings,
+    lendBalance: lendBalance,
+    crewByStaff: crewByStaff,
     salesByStaff: salesByStaff,
     staffToRow: staffToRow,
     staffFromRow: staffFromRow,

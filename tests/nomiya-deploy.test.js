@@ -85,27 +85,20 @@ describe("飲み屋アプリ 倉庫の向き先（テストはテスト・本番
     );
   });
 
-  it("実機検証は、決めた検証用アカウント以外では走らない", () => {
-    const gate = LIVE.match(/const ALLOW_EMAIL = (.+);/);
-    const gateUi = LIVEUI.match(/const ALLOW = (.+);/);
-    expect(gate, "live-nomiya.mjs の ALLOW_EMAIL が無い").not.toBe(null);
-    expect(gateUi, "live-nomiya-ui.mjs の ALLOW が無い").not.toBe(null);
-    for (const [src, label] of [
-      [gate[1], "live-nomiya.mjs"],
-      [gateUi[1], "live-nomiya-ui.mjs"],
+  it("★実機検証は「使い捨て（匿名）」でしか動かない＝人のアカウントには入らない", () => {
+    // 合言葉(パスワード)を持ち回らない。その場かぎりの匿名アカウントで試す形。
+    // こうすると、人手も要らないし、漏れて困る物も無い。
+    for (const [f, name] of [
+      [LIVE, "live-nomiya.mjs"],
+      [LIVEUI, "live-nomiya-ui.mjs"],
     ]) {
-      const re = eval(src); // 実ファイルのふるいをそのまま動かして確かめる
-      expect(re.test("exally.supoort+nomiya@gmail.com"), label + " が検証用を弾いている").toBe(
-        true
-      );
-      for (const ng of [
-        "tsukasa@snack.example",
-        "exally.supoort@gmail.com",
-        "zeroact24.729@outlook.com",
-        "vaojf21496@yahoo.co.jp",
-      ]) {
-        expect(re.test(ng), label + " が " + ng + " を通してしまう").toBe(false);
-      }
+      expect(f, name + " が匿名サインインを使っていない").toContain("signInAnonymously()");
+      // 合言葉を使う道が残っていないこと（残っていると人の垢で走れてしまう）
+      expect(f.includes("signInWithPassword"), name + " がまだ合言葉でログインする").toBe(false);
+      expect(f.includes("cred.json"), name + " がまだ合言葉のファイルを読む").toBe(false);
+      expect(f.includes("#loginPass"), name + " がまだ合言葉を打ち込む").toBe(false);
+      // 匿名でなければ止まる、と書いてあること
+      expect(f, name + " に「匿名でなければ中止」が無い").toMatch(/user\.email[\s\S]{0,160}?die\(/);
     }
   });
 

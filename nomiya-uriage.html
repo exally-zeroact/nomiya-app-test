@@ -706,6 +706,48 @@
         color: #7aa08c;
         line-height: 1.6;
       }
+      /* 押した結果（入れた分）。押すボタンとは見た目をはっきり変える＝どっちが入力か迷わない */
+      .picked {
+        margin-top: 6px;
+        padding: 8px 10px;
+        background: #f0faf4;
+        border: 1px dashed #a9d3bd;
+        border-radius: 10px;
+      }
+      .picked:empty {
+        display: none;
+      }
+      .picked-hd {
+        font-size: 11px;
+        font-weight: 700;
+        color: #3d6b53;
+        margin-bottom: 6px;
+      }
+      .picked-it {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: #ffffff;
+        border: 1px solid #d4eae0;
+        border-radius: 999px;
+        padding: 5px 6px 5px 11px;
+        margin: 0 6px 6px 0;
+        font-size: 13px;
+        font-weight: 700;
+        color: #1a4a2e;
+      }
+      .picked-it b {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 999px;
+        background: #f2f8f5;
+        color: #7aa08c;
+        font-size: 11px;
+        cursor: pointer;
+      }
       /* 色見本（丸）。押すとその色になる */
       .acc-sw {
         width: 34px;
@@ -1013,6 +1055,25 @@
             min="0"
             placeholder="0"
           />
+        </div>
+
+        <div class="frow">
+          <span class="flabel">担当（任意）</span>
+          <select class="fselect" id="inStaff"></select>
+          <span class="hint">
+            選んでおくと、その人の歩合が給料に自動で入ります。付けなくても保存できます。
+          </span>
+        </div>
+
+        <div class="frow">
+          <span class="flabel">ついた人（ヘルプなど・任意）</span>
+          <div id="crewList"></div>
+          <div class="btn-right" style="margin-top: 6px">
+            <button class="btn btn-ghost btn-sm" type="button" id="btnCrewAdd">＋ 人を足す</button>
+          </div>
+          <span class="hint">
+            ヘルプ・場内・同伴で付いた人。入れておくと、その回数が給料に自動で入ります。
+          </span>
         </div>
 
         <div class="frow">
@@ -1348,6 +1409,7 @@
           />
         </div>
         <div class="hint" id="clState" style="margin-top: 8px"></div>
+        <div class="li-warn" id="clNoStaff" style="margin-top: 8px"></div>
         <div style="margin-top: 12px">
           <button class="btn btn-primary" type="button" id="btnClose">この日を締める</button>
         </div>
@@ -1392,9 +1454,21 @@
       </div>
 
       <div class="card">
+        <div class="card-label">バックの種類</div>
+        <div class="hint" style="margin-bottom: 8px">
+          お店に合わせて足せます。シャンパン・フード・カラオケ・延長など。
+        </div>
+        <div id="kindList"></div>
+        <div class="btn-right" style="margin-top: 10px">
+          <button class="btn btn-ghost btn-sm" type="button" id="btnKindAdd">＋ 種類を足す</button>
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card-label">よく出るボトル・シャンパン</div>
         <div class="hint" style="margin-bottom: 8px">
-          登録しておくと、出勤を入れるときに押すだけで金額が入ります。
+          登録しておくと、出勤を入れるときに押すだけで本数と金額が入ります。
+          この銘柄だけ率を変えたいときは「バック率」に入れてください。
         </div>
         <div id="itemList"></div>
         <div class="btn-right" style="margin-top: 10px">
@@ -1514,6 +1588,8 @@
           taxNames: false, // 税理士の紙に、日払いを渡した相手の名前まで出すか
           minWage: 0,
           items: [], // よく出るボトル・シャンパン（押すだけで金額が入る）
+          backKinds: [], // バックの種類（空なら、はじめの5つがそのまま出る）
+          rateBase: "komi", // 歩合の元 komi=税込 / nuki=税抜
         };
       }
       var SETTINGS = {
@@ -1532,6 +1608,8 @@
         taxNames: false, // 税理士の紙に日払いの相手の名前を出すか（既定は出さない）
         minWage: 0, // その県の最低賃金（時給）。入れると割れたときに注意が出る
         items: [], // よく出るボトル・シャンパン（押すだけで金額が入る）
+        backKinds: [], // バックの種類（空なら、はじめの5つがそのまま出る）
+        rateBase: "komi", // 歩合の元 komi=税込 / nuki=税抜
       };
       var INVOICES = []; // [{no, name, from, to, issuedAt}]
       // 宛先（請求書送りの相手）。売上に打つ名前をキーにする { 名前: {name,to,honor,addr,person} }
@@ -2456,6 +2534,8 @@
           amount: $("inAmount").value === "" ? NaN : Number($("inAmount").value),
           pay: UI.inPay,
           receipt: UI.inRec,
+          staff: $("inStaff").value, // 担当（誰の客か）。歩合の元になる
+          crew: readCrew(), // ついた人（ヘルプ・場内など）
           memo: $("inMemo").value,
         };
       }
@@ -2467,6 +2547,8 @@
         $("inPeople").value = "";
         $("inAmount").value = "";
         $("inMemo").value = "";
+        $("inStaff").value = "";
+        setCrew([]);
         UI.inRec = C.defaultReceipt(UI.inPay);
         UI.editId = null;
         $("inErr").textContent = "";
@@ -2533,6 +2615,8 @@
         $("inPeople").value = s.people;
         $("inAmount").value = s.amount;
         $("inMemo").value = s.memo || "";
+        $("inStaff").value = s.staff || "";
+        setCrew(s.crew || []);
         UI.inPay = s.pay;
         UI.inRec = C.normalizeReceipt(s.receipt);
         $("inputMode").textContent = "この売上を直す";
@@ -4536,6 +4620,19 @@
               hhmm(d.closedAt) +
               " に締め）"
             : "✅ " + hhmm(d.closedAt) + " に締めました。";
+        // 担当の付け忘れ（付け忘れると、その分の歩合が付かないので教える）
+        var noStaff = SALES.filter(function (s) {
+          return !s.deletedAt && s.date === UI.closeYmd && !s.staff;
+        });
+        var anyRate = C.aliveStaff(STAFF).some(function (st) {
+          return st.rate > 0 && C.staffUses(st, "rate");
+        });
+        $("clNoStaff").textContent =
+          anyRate && noStaff.length
+            ? "⚠️ 担当が入っていない売上が " +
+              noStaff.length +
+              " 件あります。このままだと、その分の歩合が付きません（一覧からタップで直せます）"
+            : "";
         // 出金の一覧
         $("clOuts").innerHTML = d.outs.length
           ? d.outs
@@ -4788,7 +4885,11 @@
       function payDayOf(w) {
         var st = staffById(w.staffId);
         if (!st) return null;
-        return C.payDay(st, w, { sales: C.salesByStaff(SALES, w.ymd, st.name) });
+        return C.payDay(st, w, {
+          sales: C.salesByStaff(SALES, w.ymd, st.name),
+          crew: C.crewByStaff(SALES, w.ymd, st.name),
+          settings: SETTINGS,
+        });
       }
 
       function renderPayPeriod() {
@@ -4836,6 +4937,11 @@
                   (w.inAt ? esc(w.inAt) + "〜" + esc(w.outAt || "") : "時間なし") +
                   (d.minutes ? "（" + (d.minutes / 60).toFixed(1) + "h）" : "") +
                   backLabel(d) +
+                  // 前借りが残っている人は、その場で残高が見えるようにする
+                  (function () {
+                    var bal = C.lendBalance(st, WORKS, UI.payYmd);
+                    return bal ? "　前借り残 " + C.yen(bal) : "";
+                  })() +
                   warn
                     .map(function (t) {
                       return '<div class="li-warn">⚠️ ' + esc(t) + "</div>";
@@ -4862,7 +4968,10 @@
         var alive = C.aliveStaff(STAFF);
         var sums = alive
           .map(function (st) {
-            return { st: st, t: C.paySummary(st, WORKS, SALES, r.from, r.to) };
+            return {
+              st: st,
+              t: C.paySummary(st, WORKS, SALES, r.from, r.to, { settings: SETTINGS }),
+            };
           })
           .filter(function (x) {
             return x.t.days > 0;
@@ -4871,21 +4980,26 @@
           ? '<div class="hint" style="margin-bottom:8px">' +
             esc(C.jpMonth(ym)) +
             "分</div>" +
-            '<table class="sum-tbl"><thead><tr><th>名前</th><th>日数</th><th>支給</th><th>控除</th><th>差引</th></tr></thead><tbody>' +
+            // ★「これから渡す」を出さないと、日払いで渡した分をもう一度払ってしまう
+            '<table class="sum-tbl"><thead><tr><th>名前</th><th>日数</th><th>差引</th>' +
+            "<th>渡し済み</th><th>これから渡す</th><th>前借り残</th></tr></thead><tbody>" +
             sums
               .map(function (x) {
+                var bal = C.lendBalance(x.st, WORKS, r.to);
                 return (
                   "<tr><td>" +
                   esc(x.st.name) +
                   "</td><td>" +
                   x.t.days +
                   "</td><td>" +
-                  C.comma(x.t.gross) +
-                  "</td><td>" +
-                  C.comma(x.t.deduct) +
-                  "</td><td><b>" +
                   C.comma(x.t.net) +
-                  "</b></td></tr>"
+                  "</td><td>" +
+                  (x.t.paidNet ? "−" + C.comma(x.t.paidNet) : "0") +
+                  "</td><td><b>" +
+                  C.comma(x.t.unpaidNet) +
+                  "</b></td><td>" +
+                  (bal ? C.comma(bal) : "0") +
+                  "</td></tr>"
                 );
               })
               .join("") +
@@ -4917,6 +5031,7 @@
             };
           });
 
+        renderKindList();
         var items = C.itemList(SETTINGS.items);
         $("itemList").innerHTML = items.length
           ? items
@@ -4928,6 +5043,7 @@
                   esc(it.name) +
                   '</div><div class="li-sub">' +
                   esc(backLabelOf(it.kind)) +
+                  (it.pct ? "　この銘柄だけ " + it.pct + "%" : "") +
                   '</div></div><div class="li-amt">' +
                   C.yen(it.price) +
                   "</div></div>"
@@ -4947,10 +5063,110 @@
         fitSheets("payScale", "paySheets");
       }
 
+      /* ===== バックの種類（店が決める） =====
+         画面はどこもこの2つを見る。決め打ちの5つは、何も決めていない店の初期値。 */
+      function BACK_KINDS() {
+        return C.backKinds(SETTINGS);
+      }
+      // 「使う項目」の一覧＝店の種類（バック）＋ 決まった6つ（歩合・保証・厚生費・罰金・前借り・返済）
+      function PAY_ITEMS() {
+        var fixed = C.PAY_ITEMS.filter(function (x) {
+          return x.group !== "back";
+        });
+        return BACK_KINDS()
+          .map(function (k) {
+            return { key: k.key, label: k.label, group: "back" };
+          })
+          .concat(fixed);
+      }
+
+      /* 種類の登録・修正 */
+      function renderKindList() {
+        var kinds = BACK_KINDS();
+        $("kindList").innerHTML = kinds
+          .map(function (k) {
+            return (
+              '<div class="li" data-kind="' +
+              esc(k.key) +
+              '"><div class="li-main"><div class="li-nm">' +
+              esc(k.label) +
+              "</div></div></div>"
+            );
+          })
+          .join("");
+        $("kindList")
+          .querySelectorAll("[data-kind]")
+          .forEach(function (el) {
+            el.onclick = function () {
+              openKind(el.getAttribute("data-kind"));
+            };
+          });
+      }
+      function openKind(key) {
+        var kinds = BACK_KINDS();
+        var cur =
+          kinds.filter(function (k) {
+            return k.key === key;
+          })[0] || null;
+        openModal(
+          cur ? "種類を直す" : "種類を足す",
+          '<div class="frow"><span class="flabel">名前</span>' +
+            '<input class="finput" id="kd_label" value="' +
+            esc(cur ? cur.label : "") +
+            '" placeholder="例）シャンパン"></div>' +
+            '<div class="err" id="kd_err"></div>' +
+            '<div style="margin-top:12px"><button class="btn btn-primary" id="kd_ok">保存する</button></div>' +
+            (cur
+              ? '<div class="btn-right" style="margin-top:10px">' +
+                '<button class="btn btn-ghost btn-danger btn-sm" id="kd_del">この種類を消す</button></div>'
+              : "")
+        );
+        var write = function (list) {
+          SETTINGS = Object.assign({}, SETTINGS, { backKinds: list });
+          saveSettings();
+          closeModal();
+          renderPay();
+        };
+        $("kd_ok").onclick = function () {
+          var label = $("kd_label").value.trim();
+          if (!label) {
+            $("kd_err").textContent = "名前を入れてください";
+            return;
+          }
+          var next = kinds.map(function (k) {
+            return { key: k.key, label: k.label };
+          });
+          if (cur) {
+            next = next.map(function (k) {
+              return k.key === cur.key ? { key: k.key, label: label } : k;
+            });
+          } else {
+            next.push({ key: "k" + Date.now().toString(36), label: label });
+          }
+          write(next);
+          toast("✅ 保存しました");
+        };
+        if ($("kd_del")) {
+          $("kd_del").onclick = function () {
+            // 消しても、打ってある実績は消さない（表示から落とすだけ）
+            write(
+              kinds
+                .filter(function (k) {
+                  return k.key !== cur.key;
+                })
+                .map(function (k) {
+                  return { key: k.key, label: k.label };
+                })
+            );
+            toast("🗑 消しました（今までの実績は残ります）");
+          };
+        }
+      }
+
       function backLabel(d) {
         var t = d.backs
           .filter(function (b) {
-            return b.count || b.sold;
+            return b.used && (b.count || b.sold);
           })
           .map(function (b) {
             return b.pct > 0 && b.sold ? b.label + C.comma(b.sold) : b.label + b.count;
@@ -4962,11 +5178,12 @@
         var t = [];
         if (st.daily) t.push("日給" + C.comma(st.daily));
         else if (st.hourly) t.push("時給" + C.comma(st.hourly));
-        if (st.rate) t.push("歩合" + st.rate + "%");
-        if (st.guarantee) t.push("保証" + C.comma(st.guarantee));
-        var b = C.BACK_KINDS.filter(function (k) {
-          return st.back[k.key] || C.num((st.backPct || {})[k.key]);
-        })
+        if (st.rate && C.staffUses(st, "rate")) t.push("歩合" + st.rate + "%");
+        if (st.guarantee && C.staffUses(st, "guarantee")) t.push("保証" + C.comma(st.guarantee));
+        var b = BACK_KINDS()
+          .filter(function (k) {
+            return C.staffUses(st, k.key) && (st.back[k.key] || C.num((st.backPct || {})[k.key]));
+          })
           .map(function (k) {
             return C.num((st.backPct || {})[k.key])
               ? k.label + (st.backPct || {})[k.key] + "%"
@@ -4984,7 +5201,7 @@
       }
 
       function backLabelOf(kind) {
-        var k = C.BACK_KINDS.filter(function (x) {
+        var k = BACK_KINDS().filter(function (x) {
           return x.key === kind;
         })[0];
         return k ? k.label + "のバックに使う" : "";
@@ -5007,16 +5224,22 @@
             '<input class="finput" type="number" inputmode="numeric" id="it_price" value="' +
             esc(cur ? cur.price : "") +
             '" placeholder="例）50000"></div>' +
+            '<div class="frow"><span class="flabel">バック率（この銘柄だけ・％）</span>' +
+            '<input class="finput" type="number" inputmode="numeric" id="it_pct" value="' +
+            esc(cur && cur.pct ? cur.pct : "") +
+            '" placeholder="空なら、下で選んだ種類の率を使います"></div>' +
             '<div class="frow"><span class="flabel">どのバックに使う</span><div class="chips" id="it_kind">' +
-            C.BACK_KINDS.map(function (k) {
-              return (
-                '<button class="chip chip-sm" type="button" data-k="' +
-                k.key +
-                '">' +
-                esc(k.label) +
-                "</button>"
-              );
-            }).join("") +
+            BACK_KINDS()
+              .map(function (k) {
+                return (
+                  '<button class="chip chip-sm" type="button" data-k="' +
+                  k.key +
+                  '">' +
+                  esc(k.label) +
+                  "</button>"
+                );
+              })
+              .join("") +
             "</div></div>" +
             '<div class="err" id="it_err"></div>' +
             '<div style="margin-top:12px"><button class="btn btn-primary" id="it_ok">保存する</button></div>' +
@@ -5053,6 +5276,7 @@
             id: cur ? cur.id : "",
             name: name,
             price: $("it_price").value,
+            pct: $("it_pct").value,
             kind: kind,
           });
           write(
@@ -5082,7 +5306,9 @@
         var isNew = !staffById(id);
         var numRow = function (label, key, val, ph) {
           return (
-            '<div class="frow"><span class="flabel">' +
+            '<div class="frow" id="st_row_' +
+            key +
+            '"><span class="flabel">' +
             esc(label) +
             '</span><input class="finput" type="number" inputmode="numeric" id="st_' +
             key +
@@ -5103,29 +5329,48 @@
             '<input class="finput" id="st_role" value="' +
             esc(cur.role) +
             '" placeholder="例）キャスト／ボーイ"></div>' +
+            '<div class="frow"><span class="flabel">使う項目（タップで選ぶ）</span>' +
+            '<div class="chips" id="st_use">' +
+            PAY_ITEMS()
+              .map(function (x) {
+                return (
+                  '<button class="chip chip-sm" type="button" data-use="' +
+                  x.key +
+                  '">' +
+                  esc(x.label) +
+                  "</button>"
+                );
+              })
+              .join("") +
+            "</div>" +
+            '<span class="hint">この人に使う物だけ選びます。外した項目は、出勤を入れるときも出ません（打ってある実績は消えません）。</span></div>' +
             numRow("時給", "hourly", cur.hourly, "例）1200") +
             numRow("日給（時給の代わり）", "daily", cur.daily, "例）10000") +
-            '<div class="frow"><span class="flabel">バックの決め方</span>' +
+            '<div class="frow" id="st_row_backs"><span class="flabel">バックの決め方</span>' +
             '<span class="hint">1本いくら（円）か、売った額の何％か。シャンパン・ボトルは値段がバラバラなので％が楽です。</span></div>' +
-            C.BACK_KINDS.map(function (k) {
-              var isPct = C.num((cur.backPct || {})[k.key]) > 0;
-              return (
-                '<div class="frow"><span class="flabel">　' +
-                esc(k.label) +
-                '</span><div class="f2">' +
-                '<input class="finput" type="number" inputmode="numeric" id="st_b_' +
-                k.key +
-                '" value="' +
-                esc(isPct ? cur.backPct[k.key] : cur.back[k.key] || "") +
-                '" placeholder="0">' +
-                '<div class="chips" id="st_u_' +
-                k.key +
-                '">' +
-                '<button class="chip chip-sm" type="button" data-u="yen">円</button>' +
-                '<button class="chip chip-sm" type="button" data-u="pct">％</button>' +
-                "</div></div></div>"
-              );
-            }).join("") +
+            BACK_KINDS()
+              .map(function (k) {
+                var isPct = C.num((cur.backPct || {})[k.key]) > 0;
+                return (
+                  '<div class="frow" id="st_row_' +
+                  k.key +
+                  '"><span class="flabel">　' +
+                  esc(k.label) +
+                  '</span><div class="f2">' +
+                  '<input class="finput" type="number" inputmode="numeric" id="st_b_' +
+                  k.key +
+                  '" value="' +
+                  esc(isPct ? cur.backPct[k.key] : cur.back[k.key] || "") +
+                  '" placeholder="0">' +
+                  '<div class="chips" id="st_u_' +
+                  k.key +
+                  '">' +
+                  '<button class="chip chip-sm" type="button" data-u="yen">円</button>' +
+                  '<button class="chip chip-sm" type="button" data-u="pct">％</button>' +
+                  "</div></div></div>"
+                );
+              })
+              .join("") +
             numRow("売上の歩合（％）", "rate", cur.rate, "例）10") +
             numRow("最低保証", "guarantee", cur.guarantee, "0なら無し") +
             numRow("厚生費（1日）", "kousei", cur.kousei, "0なら無し") +
@@ -5160,12 +5405,34 @@
         );
         var cycle = cur.cycle;
         var employ = cur.employ;
+        var use = {};
+        PAY_ITEMS().forEach(function (x) {
+          use[x.key] = C.staffUses(cur, x.key);
+        });
         var unit = {};
-        C.BACK_KINDS.forEach(function (k) {
+        BACK_KINDS().forEach(function (k) {
           unit[k.key] = C.num((cur.backPct || {})[k.key]) > 0 ? "pct" : "yen";
         });
         var sync = function () {
-          C.BACK_KINDS.forEach(function (k) {
+          // 選んでいる項目だけ、決め方の欄を出す（使わない物は見せない）
+          $("st_use")
+            .querySelectorAll("[data-use]")
+            .forEach(function (b) {
+              var k = b.getAttribute("data-use");
+              b.classList.toggle("on", !!use[k]);
+              b.onclick = function () {
+                use[k] = !use[k];
+                sync();
+              };
+            });
+          var anyBack = false;
+          PAY_ITEMS().forEach(function (x) {
+            if (x.group === "back" && use[x.key]) anyBack = true;
+            var row = $("st_row_" + x.key);
+            if (row) row.style.display = use[x.key] ? "" : "none";
+          });
+          $("st_row_backs").style.display = anyBack ? "" : "none";
+          BACK_KINDS().forEach(function (k) {
             $("st_u_" + k.key)
               .querySelectorAll("[data-u]")
               .forEach(function (b) {
@@ -5204,7 +5471,7 @@
           }
           var back = {};
           var backPct = {};
-          C.BACK_KINDS.forEach(function (k) {
+          BACK_KINDS().forEach(function (k) {
             // 円で決めたなら単価に、％で決めたなら率に入れる（両方には入れない）
             if (unit[k.key] === "pct") backPct[k.key] = $("st_b_" + k.key).value;
             else back[k.key] = $("st_b_" + k.key).value;
@@ -5220,6 +5487,7 @@
             rate: $("st_rate").value,
             guarantee: $("st_guarantee").value,
             kousei: $("st_kousei").value,
+            use: use, // 外した項目の値は消さない（また使うときに戻せる）
             cycle: cycle,
             employ: employ,
           });
@@ -5259,9 +5527,12 @@
           return;
         }
         var sel = cur ? cur.staffId : alive[0].id;
-        var numRow = function (label, key, val, ph) {
+        // wrap=false のときだけ、外側の入れ物（id付き）を自分では作らない
+        var numRow = function (label, key, val, ph, wrap) {
           return (
-            '<div class="frow"><span class="flabel">' +
+            '<div class="frow"' +
+            (wrap === false ? "" : ' id="wk_row_' + key + '"') +
+            '><span class="flabel">' +
             esc(label) +
             '</span><input class="finput" type="number" inputmode="numeric" id="wk_' +
             key +
@@ -5297,27 +5568,36 @@
             '<input class="finput" type="time" id="wk_out" value="' +
             esc(cur ? cur.outAt : "") +
             '"></div></div>' +
-            C.BACK_KINDS.map(function (k) {
-              return (
-                '<div id="wk_row_c_' +
-                k.key +
-                '">' +
-                numRow(k.label, "c_" + k.key, cur ? cur.count[k.key] : 0) +
-                "</div>" +
-                '<div id="wk_row_a_' +
-                k.key +
-                '">' +
-                numRow(
-                  k.label + "（売った額）",
-                  "a_" + k.key,
-                  cur ? (cur.amount || {})[k.key] : 0
-                ) +
-                '<div class="chips" id="wk_items_' +
-                k.key +
-                '" style="margin:-2px 0 8px"></div>' +
-                "</div>"
-              );
-            }).join("") +
+            BACK_KINDS()
+              .map(function (k) {
+                return (
+                  // 銘柄のボタン＝押すだけ。本数も金額も自動で積まれる
+                  '<div id="wk_row_p_' +
+                  k.key +
+                  '"><div class="frow"><span class="flabel">' +
+                  esc(k.label) +
+                  '　<span style="color:#7aa08c;font-weight:400">出たら押す</span></span>' +
+                  '<div class="chips" id="wk_items_' +
+                  k.key +
+                  '"></div>' +
+                  '<div id="wk_picked_' +
+                  k.key +
+                  '" class="picked"></div></div></div>' +
+                  numRow(k.label + "（本数）", "c_" + k.key, cur ? cur.count[k.key] : 0) +
+                  '<div id="wk_row_a_' +
+                  k.key +
+                  '">' +
+                  numRow(
+                    k.label + "（登録していない物の金額）",
+                    "a_" + k.key,
+                    cur ? (cur.amount || {})[k.key] : 0,
+                    "0",
+                    false
+                  ) +
+                  "</div>"
+                );
+              })
+              .join("") +
             numRow(
               "自分の客の売上（入れると歩合に使う）",
               "sales",
@@ -5342,54 +5622,102 @@
                 '<button class="btn btn-ghost btn-danger btn-sm" id="wk_del">この出勤を消す</button></div>'
               : "")
         );
-        // 選んだ人が「％」で決めている種類だけ、金額の欄とボトルのボタンを出す
+        // 押した銘柄 { 商品id: 本数 }。ボタンを押すたびに増える。
+        var picks = Object.assign({}, (cur && cur.picks) || {});
+        // 選んだ人の「使う項目」だけを出す。銘柄は押すだけ、手打ちは補助。
         var syncKinds = function () {
           var st = staffById($("wk_staff").value);
-          C.BACK_KINDS.forEach(function (k) {
+          // 使わない項目（罰金・前借り・返済・歩合のもとになる売上）は欄ごと出さない
+          $("wk_row_sales").style.display = C.staffUses(st, "rate") ? "" : "none";
+          ["fine", "lend", "repay"].forEach(function (k) {
+            $("wk_row_" + k).style.display = C.staffUses(st, k) ? "" : "none";
+          });
+          BACK_KINDS().forEach(function (k) {
+            var on = C.staffUses(st, k.key);
             var isPct = !!(st && C.num((st.backPct || {})[k.key]) > 0);
-            $("wk_row_c_" + k.key).style.display = isPct ? "none" : "";
-            $("wk_row_a_" + k.key).style.display = isPct ? "" : "none";
-            if (!isPct) return;
             var list = C.itemList(SETTINGS.items, k.key);
-            $("wk_items_" + k.key).innerHTML =
-              list
-                .map(function (it, i) {
-                  return (
-                    '<button class="chip chip-sm" type="button" data-i="' +
-                    i +
-                    '">' +
-                    esc(it.name) +
-                    " " +
-                    C.comma(it.price) +
-                    "</button>"
-                  );
-                })
-                .join("") +
-              (list.length
-                ? '<button class="chip chip-sm" type="button" data-i="clear">0にもどす</button>'
-                : '<span class="hint">「よく出るボトル」を登録すると、ここを押すだけで金額が入ります</span>');
+            // 銘柄のボタンは、その種類に登録があるときだけ出す
+            $("wk_row_p_" + k.key).style.display = on && list.length ? "" : "none";
+            // 本数は「円で決めていて、押すボタンが無い種類」だけ手で打つ
+            // （ボタンがあるのに本数の欄も出すと、どっちで入れるのか分からなくなる）
+            $("wk_row_c_" + k.key).style.display = on && !isPct && !list.length ? "" : "none";
+            // 登録していない物の金額は、％の種類だけ
+            $("wk_row_a_" + k.key).style.display = on && isPct ? "" : "none";
+            if (!on || !list.length) return;
+            $("wk_items_" + k.key).innerHTML = list
+              .map(function (it, i) {
+                return (
+                  '<button class="chip chip-sm" type="button" data-i="' +
+                  i +
+                  '">' +
+                  esc(it.name) +
+                  " " +
+                  C.comma(it.price) +
+                  (it.pct ? " (" + it.pct + "%)" : "") +
+                  "</button>"
+                );
+              })
+              .join("");
             $("wk_items_" + k.key)
               .querySelectorAll("[data-i]")
               .forEach(function (b) {
                 b.onclick = function () {
-                  var v = b.getAttribute("data-i");
-                  if (v === "clear") {
-                    $("wk_a_" + k.key).value = "";
-                    $("wk_c_" + k.key).value = "";
-                  } else {
-                    var it = list[Number(v)];
-                    $("wk_a_" + k.key).value = C.int($("wk_a_" + k.key).value) + it.price;
-                    $("wk_c_" + k.key).value = C.int($("wk_c_" + k.key).value) + 1;
-                  }
+                  var it = list[Number(b.getAttribute("data-i"))];
+                  picks[it.id] = (picks[it.id] || 0) + 1;
+                  syncPicked();
                   preview();
                 };
               });
+          });
+          syncPicked();
+        };
+        // 押した中身を出す（何をいくつ押したか・合計いくらか。押し間違いは1つずつ戻せる）
+        var syncPicked = function () {
+          BACK_KINDS().forEach(function (k) {
+            var box = $("wk_picked_" + k.key);
+            if (!box) return;
+            var list = C.itemList(SETTINGS.items, k.key).filter(function (it) {
+              return picks[it.id];
+            });
+            if (!list.length) {
+              box.innerHTML = "";
+              return;
+            }
+            var sum = list.reduce(function (a, it) {
+              return a + it.price * picks[it.id];
+            }, 0);
+            box.innerHTML =
+              '<div class="picked-hd">入れた分　合計 ' +
+              C.yen(sum) +
+              "</div>" +
+              list
+                .map(function (it) {
+                  return (
+                    '<span class="picked-it">' +
+                    esc(it.name) +
+                    " ×" +
+                    picks[it.id] +
+                    '<b data-undo="1" data-id="' +
+                    esc(it.id) +
+                    '" title="1つ戻す">✕</b></span>'
+                  );
+                })
+                .join("");
+            box.querySelectorAll("[data-undo]").forEach(function (b) {
+              b.onclick = function () {
+                var id = b.getAttribute("data-id");
+                picks[id] = (picks[id] || 0) - 1;
+                if (picks[id] <= 0) delete picks[id];
+                syncPicked();
+                preview();
+              };
+            });
           });
         };
         var build = function () {
           var back = {};
           var amt = {};
-          C.BACK_KINDS.forEach(function (k) {
+          BACK_KINDS().forEach(function (k) {
             back[k.key] = $("wk_c_" + k.key).value;
             amt[k.key] = $("wk_a_" + k.key).value;
           });
@@ -5401,6 +5729,7 @@
             outAt: $("wk_out").value,
             count: back,
             amount: amt,
+            picks: picks,
             sales: $("wk_sales").value,
             fine: $("wk_fine").value,
             lend: $("wk_lend").value,
@@ -5413,10 +5742,14 @@
           var w = build();
           var st = staffById(w.staffId);
           if (!st) return;
-          var d = C.payDay(st, w, { sales: C.salesByStaff(SALES, UI.payYmd, st.name) });
+          var d = C.payDay(st, w, {
+            sales: C.salesByStaff(SALES, UI.payYmd, st.name),
+            crew: C.crewByStaff(SALES, UI.payYmd, st.name),
+            settings: SETTINGS,
+          });
           var pctNote = d.backs
             .filter(function (b) {
-              return b.pct > 0 && b.sold;
+              return b.used && b.pct > 0 && b.sold;
             })
             .map(function (b) {
               return b.label + " " + C.comma(b.sold) + "の" + b.pct + "% = " + C.comma(b.amount);
@@ -5442,12 +5775,12 @@
         preview();
         ["wk_staff", "wk_in", "wk_out", "wk_sales", "wk_fine", "wk_lend", "wk_repay"]
           .concat(
-            C.BACK_KINDS.map(function (k) {
+            BACK_KINDS().map(function (k) {
               return "wk_c_" + k.key;
             })
           )
           .concat(
-            C.BACK_KINDS.map(function (k) {
+            BACK_KINDS().map(function (k) {
               return "wk_a_" + k.key;
             })
           )
@@ -5477,7 +5810,11 @@
           $("wk_pay").onclick = function () {
             var w = save({ paidAt: new Date().toISOString() });
             var st = staffById(w.staffId);
-            var d = C.payDay(st, w, { sales: C.salesByStaff(SALES, UI.payYmd, st.name) });
+            var d = C.payDay(st, w, {
+              sales: C.salesByStaff(SALES, UI.payYmd, st.name),
+              crew: C.crewByStaff(SALES, UI.payYmd, st.name),
+              settings: SETTINGS,
+            });
             // 現金で渡すなら、その日の締めの出金にも入れる（二度打ちしない）
             if (st.cash && d.net > 0) addPayoutToClose(UI.payYmd, st.name, d.net, w.id);
             closeModal();
@@ -5537,12 +5874,16 @@
           repay: 0,
           deduct: 0,
           net: 0,
+          paidNet: 0,
+          unpaidNet: 0,
         };
         sums.forEach(function (x) {
+          tot.paidNet += x.t.paidNet;
+          tot.unpaidNet += x.t.unpaidNet;
           tot.days += x.t.days;
           tot.minutes += x.t.minutes;
-          tot.shimei += x.t.counts.shimei;
-          tot.douhan += x.t.counts.douhan;
+          tot.shimei += x.t.counts.shimei || 0;
+          tot.douhan += x.t.counts.douhan || 0;
           tot.base += x.t.base;
           tot.backTotal += x.t.backTotal;
           tot.commission += x.t.commission;
@@ -5564,6 +5905,7 @@
           '<table class="sh-tbl pay-tbl"><thead><tr>' +
           "<th>名前</th><th>日数</th><th>時間</th><th>本指名</th><th>同伴</th>" +
           "<th>基本</th><th>バック</th><th>歩合</th><th>支給</th><th>控除</th><th>差引</th>" +
+          "<th>渡し済み</th><th>これから渡す</th>" +
           "</tr></thead><tbody>" +
           (sums.length
             ? sums
@@ -5577,9 +5919,9 @@
                     '</td><td class="c-p">' +
                     (t.minutes / 60).toFixed(1) +
                     '</td><td class="c-p">' +
-                    t.counts.shimei +
+                    (t.counts.shimei || 0) +
                     '</td><td class="c-p">' +
-                    t.counts.douhan +
+                    (t.counts.douhan || 0) +
                     '</td><td class="c-a">' +
                     C.comma(t.base) +
                     '</td><td class="c-a">' +
@@ -5592,11 +5934,15 @@
                     C.comma(t.deduct) +
                     '</td><td class="c-a"><b>' +
                     C.comma(t.net) +
+                    '</b></td><td class="c-a">' +
+                    (t.paidNet ? "−" + C.comma(t.paidNet) : "0") +
+                    '</td><td class="c-a"><b>' +
+                    C.comma(t.unpaidNet) +
                     "</b></td></tr>"
                   );
                 })
                 .join("")
-            : '<tr><td colspan="11" style="text-align:center;color:#888">この月は出勤がありません</td></tr>') +
+            : '<tr><td colspan="13" style="text-align:center;color:#888">この月は出勤がありません</td></tr>') +
           "</tbody><tfoot><tr>" +
           '<td class="c-n"><b>合計</b></td><td class="c-p">' +
           tot.days +
@@ -5618,6 +5964,10 @@
           C.comma(tot.deduct) +
           '</b></td><td class="c-a"><b>' +
           C.comma(tot.net) +
+          '</b></td><td class="c-a"><b>' +
+          (tot.paidNet ? "−" + C.comma(tot.paidNet) : "0") +
+          '</b></td><td class="c-a"><b>' +
+          C.comma(tot.unpaidNet) +
           "</b></td></tr></tfoot></table>" +
           '<div class="pay-sub">控除の内訳　罰金 ' +
           C.yen(tot.fine) +
@@ -5647,6 +5997,105 @@
         renderAcct();
       }
 
+      /* ついた人（ヘルプ・場内・同伴など）。1つの会計に何人でも足せる。
+         ここに入れておけば、給料の「ヘルプ○回」を手で数えなくてよくなる。 */
+      function staffNames() {
+        var names = C.aliveStaff(STAFF).map(function (st) {
+          return st.name;
+        });
+        SALES.forEach(function (s) {
+          if (s.staff && names.indexOf(s.staff) < 0) names.push(s.staff);
+          (s.crew || []).forEach(function (c) {
+            if (c.name && names.indexOf(c.name) < 0) names.push(c.name);
+          });
+        });
+        return names;
+      }
+      function crewRowHtml(c) {
+        var names = staffNames();
+        return (
+          '<div class="f2 crew-row" style="margin-bottom:6px">' +
+          '<select class="fselect crew-who">' +
+          '<option value="">（誰か選ぶ）</option>' +
+          names
+            .map(function (n) {
+              return (
+                '<option value="' +
+                esc(n) +
+                '"' +
+                (c && c.name === n ? " selected" : "") +
+                ">" +
+                esc(n) +
+                "</option>"
+              );
+            })
+            .join("") +
+          "</select>" +
+          '<select class="fselect crew-role">' +
+          BACK_KINDS()
+            .map(function (k) {
+              return (
+                '<option value="' +
+                esc(k.key) +
+                '"' +
+                (c && c.role === k.key ? " selected" : "") +
+                ">" +
+                esc(k.label) +
+                "</option>"
+              );
+            })
+            .join("") +
+          "</select>" +
+          '<button class="btn btn-ghost btn-sm crew-del" type="button" style="flex:0 0 44px">✕</button>' +
+          "</div>"
+        );
+      }
+      function bindCrewRows() {
+        $("crewList")
+          .querySelectorAll(".crew-del")
+          .forEach(function (b) {
+            b.onclick = function () {
+              b.closest(".crew-row").remove();
+            };
+          });
+      }
+      function setCrew(list) {
+        $("crewList").innerHTML = (list || []).map(crewRowHtml).join("");
+        bindCrewRows();
+      }
+      function readCrew() {
+        var out = [];
+        $("crewList")
+          .querySelectorAll(".crew-row")
+          .forEach(function (row) {
+            var name = row.querySelector(".crew-who").value;
+            var role = row.querySelector(".crew-role").value;
+            if (name) out.push({ name: name, role: role });
+          });
+        return out;
+      }
+
+      // 担当（誰の客か）の選び先。いま居る従業員から選ぶ。
+      // 消した人でも、過去の売上に付いている名前は選択肢に残す（直せなくならないように）。
+      function syncStaffSelect() {
+        var sel = $("inStaff");
+        var keep = sel.value;
+        var names = C.aliveStaff(STAFF).map(function (st) {
+          return st.name;
+        });
+        SALES.forEach(function (s) {
+          if (s.staff && names.indexOf(s.staff) < 0) names.push(s.staff);
+        });
+        sel.innerHTML =
+          '<option value="">（担当なし）</option>' +
+          names
+            .map(function (n) {
+              return '<option value="' + esc(n) + '">' + esc(n) + "</option>";
+            })
+            .join("");
+        sel.value = keep;
+      }
+
       function renderAll() {
         // 名前の候補＝「前に打った名前」＋「登録した宛先の会社名」。
         // 宛先を登録しただけ（まだ売上が無い）の相手も候補に出るようにする。
@@ -5663,6 +6112,7 @@
           .join("");
         // 宛先を足した直後でも、入力の相手の一覧をその場で作り直す
         syncNameField();
+        syncStaffSelect();
         renderPeriodBars();
         renderDay();
         renderList();
@@ -5771,6 +6221,13 @@
         };
         $("btnItemAdd").onclick = function () {
           openItem("");
+        };
+        $("btnCrewAdd").onclick = function () {
+          $("crewList").insertAdjacentHTML("beforeend", crewRowHtml(null));
+          bindCrewRows();
+        };
+        $("btnKindAdd").onclick = function () {
+          openKind("");
         };
         $("btnStaffAdd").onclick = function () {
           openStaff("");

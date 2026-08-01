@@ -4,8 +4,8 @@
 --   ★配るアプリ(nomiya-uriage.html)が向いているのは本番倉庫 tnfwipbgfgjaymlszeid。★
 --     この1本を、本番倉庫とテスト用DB(DB-test / khawdrnvssdenumbiwfg)の両方に当てる。
 --     （開発版 exally-staging だけが DB-test を向く。本番から DB-test には書かない）
---   ★適用は司さんが SQL Editor に貼る（本番倉庫は Kyually/代行の実データと同居＝自動運転しない）。
---     適用できたかの確認は node tests/probe-nomiya-prod.mjs（anonキーで7表を叩いて出力を残す）。
+--   ★本番倉庫は Kyually/代行の実データと同居。適用は司さんの許可を取ってから。
+--     適用できたかの確認は node tests/probe-nomiya-db.mjs（公開鍵で7表を叩いて出力を残す）。
 --   ★このファイルは「新規テーブル3つを作るだけ」。既存テーブル/既存データには触らない。★
 --   ★冪等（create if not exists / drop policy if exists）＝何度実行しても安全。★
 --   適用方法: Supabase ダッシュボード > SQL Editor に貼って Run（1回）。
@@ -47,7 +47,8 @@ create table if not exists nomiya_sales (
   memo       text not null default '',
   paid_date  date,
   paid_cash  boolean not null default false,      -- ツケ回収を現金で受けたか（レジ締めの現金に効く）
-  staff      text not null default '',
+  staff      text not null default '',              -- 担当（誰の客か）＝歩合が付く人
+  crew       jsonb not null default '[]'::jsonb,   -- ついた人 [{name,role}]（ヘルプ・場内など）
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
@@ -57,6 +58,7 @@ create index if not exists idx_nomiya_sales_acct_ymd on nomiya_sales(account_id,
 create index if not exists idx_nomiya_sales_acct_upd on nomiya_sales(account_id, updated_at);
 -- 既に作ってある店にも足す（あとから列を増やすときはこの形で書く）
 alter table nomiya_sales add column if not exists paid_cash boolean not null default false;
+alter table nomiya_sales add column if not exists crew jsonb not null default '[]'::jsonb;
 
 -- ── 宛先（請求書送りの相手） ──────────────────────────────────────────
 --   name  = 会社名（そのまま売上の名前になる＝突合の鍵）
@@ -136,6 +138,7 @@ create table if not exists nomiya_staff (
   daily      integer not null default 0,         -- 日給
   back       jsonb   not null default '{}'::jsonb,   -- 円で決めたバック単価
   back_pct   jsonb   not null default '{}'::jsonb,   -- ％で決めたバック率（シャンパン等）
+  use_items  jsonb   not null default '{}'::jsonb,   -- この人に使う項目（外した物だけ false・空＝全部使う）
   rate       numeric not null default 0,         -- 売上歩合(%)
   guarantee  integer not null default 0,         -- 最低保証
   kousei     integer not null default 0,         -- 厚生費（1日）
@@ -148,6 +151,7 @@ create table if not exists nomiya_staff (
   unique (account_id, sid)
 );
 alter table nomiya_staff add column if not exists back_pct jsonb not null default '{}'::jsonb;
+alter table nomiya_staff add column if not exists use_items jsonb not null default '{}'::jsonb;
 create index if not exists idx_nomiya_staff_acct on nomiya_staff(account_id, name);
 
 -- ── 日々の実績（1人×1日） ────────────────────────────────────────────
@@ -162,7 +166,8 @@ create table if not exists nomiya_work (
   in_at      text not null default '',           -- 'HH:MM'
   out_at     text not null default '',
   count      jsonb   not null default '{}'::jsonb,   -- 本数（円バック用）
-  amount     jsonb   not null default '{}'::jsonb,   -- 売った額（％バック用）
+  amount     jsonb   not null default '{}'::jsonb,   -- 売った額（手で打った分）
+  picks      jsonb   not null default '{}'::jsonb,   -- 押した銘柄 { 商品id: 本数 }
   sales      integer not null default 0,         -- 自分の客の売上（手入力ぶん）
   fine       integer not null default 0,         -- 罰金
   lend       integer not null default 0,         -- 前借り
@@ -174,6 +179,7 @@ create table if not exists nomiya_work (
   unique (account_id, wid)
 );
 alter table nomiya_work add column if not exists amount jsonb not null default '{}'::jsonb;
+alter table nomiya_work add column if not exists picks jsonb not null default '{}'::jsonb;
 create index if not exists idx_nomiya_work_acct_ymd on nomiya_work(account_id, ymd);
 create index if not exists idx_nomiya_work_acct_staff on nomiya_work(account_id, staff_id, ymd);
 
