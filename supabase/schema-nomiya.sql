@@ -155,6 +155,8 @@ alter table nomiya_staff add column if not exists use_items jsonb not null defau
 -- 締め方（人ごと）。close_wday=週払いの締め曜日(0=日…6=土) / pay_after=締めてから何日後に渡すか
 alter table nomiya_staff add column if not exists close_wday integer not null default 0;
 alter table nomiya_staff add column if not exists pay_after integer not null default 0;
+-- 生年月日（任意）。18歳未満の深夜の注意にだけ使う
+alter table nomiya_staff add column if not exists birth date;
 create index if not exists idx_nomiya_staff_acct on nomiya_staff(account_id, name);
 
 -- ── 日々の実績（1人×1日） ────────────────────────────────────────────

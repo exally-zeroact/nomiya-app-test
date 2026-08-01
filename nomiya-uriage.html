@@ -1452,6 +1452,76 @@
 
       <!-- ===== 従業員（キャスト・スタッフ） ===== -->
       <div class="pane" id="pane-staff">
+        <!-- 店ぜんぶ共通の決め方。どれも「選ぶだけ」で、既定は今までのやり方のまま。 -->
+        <div class="card">
+          <div class="card-label">お店の給料の決め方（みんな共通）</div>
+
+          <div class="frow">
+            <span class="flabel">バック（％）の元</span>
+            <div class="chips" id="ruleBackBase">
+              <button class="chip chip-sm" type="button" data-bb="komi">会計そのまま</button>
+              <button class="chip chip-sm" type="button" data-bb="nuki">消費税を抜く</button>
+              <button class="chip chip-sm" type="button" data-bb="service">サービス料も抜く</button>
+            </div>
+          </div>
+          <div class="frow" id="ruleServiceRow">
+            <span class="flabel">サービス料（％）</span>
+            <input
+              class="finput"
+              type="number"
+              inputmode="numeric"
+              id="ruleService"
+              placeholder="例）10"
+            />
+          </div>
+
+          <div class="frow">
+            <span class="flabel">ツケの歩合</span>
+            <div class="chips" id="ruleTsuke">
+              <button class="chip chip-sm" type="button" data-tk="now">すぐ出す</button>
+              <button class="chip chip-sm" type="button" data-tk="collected">回収できてから</button>
+            </div>
+          </div>
+
+          <div class="frow">
+            <span class="flabel">深夜割増（22時〜5時）</span>
+            <div class="chips" id="ruleNight">
+              <button class="chip chip-sm" type="button" data-np="0">付けない</button>
+              <button class="chip chip-sm" type="button" data-np="1">付ける</button>
+            </div>
+          </div>
+          <div class="frow" id="ruleNightRow">
+            <span class="flabel">割増の率（％）</span>
+            <input
+              class="finput"
+              type="number"
+              inputmode="numeric"
+              id="ruleNightRate"
+              placeholder="25"
+            />
+          </div>
+
+          <div class="frow">
+            <span class="flabel">源泉（業務委託の人）</span>
+            <div class="chips" id="ruleGensen">
+              <button class="chip chip-sm" type="button" data-gs="0">引かない</button>
+              <button class="chip chip-sm" type="button" data-gs="1">引く</button>
+            </div>
+          </div>
+          <div class="frow" id="ruleGensenRow">
+            <span class="flabel">源泉の率（％）</span>
+            <input
+              class="finput"
+              type="number"
+              inputmode="numeric"
+              id="ruleGensenRate"
+              placeholder="10.21"
+            />
+          </div>
+
+          <div class="li-warn" id="ruleNote"></div>
+        </div>
+
         <div class="card">
           <div class="card-label">スタッフ</div>
           <div class="hint" style="margin-bottom: 8px">名前を押すと、給料の決め方を直せます。</div>
@@ -1584,6 +1654,18 @@
         <div id="payDue"></div>
       </div>
 
+      <!-- キャストに渡す紙。渡す人ごとに1枚。 -->
+      <div class="card no-print" id="castBox" style="display: none">
+        <div class="card-label" id="castLabel">渡す明細</div>
+        <div class="btn-row">
+          <button class="btn btn-ghost" id="btnPrintCast">🖨 印刷 / PDFにする</button>
+          <button class="btn btn-ghost" id="btnCastClose">閉じる</button>
+        </div>
+        <div class="sheet-scale" id="castScale">
+          <div class="sheet-scale-inner" id="castSheets"></div>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-label">この月のまとめ</div>
         <div id="payMonth"></div>
@@ -1688,27 +1770,19 @@
           items: [], // よく出るボトル・シャンパン（押すだけで金額が入る）
           backKinds: [], // バックの種類（空なら、はじめの5つがそのまま出る）
           rateBase: "komi", // 歩合の元 komi=税込 / nuki=税抜
+          backBase: "komi", // ％バックの元 komi=会計そのまま / nuki=税抜 / service=サービス料も抜く
+          serviceRate: 0, // サービス料(%)。backBase=service のときだけ使う
+          tsukeComm: "now", // ツケの歩合 now=すぐ出す / collected=回収できてから
+          nightPay: false, // 深夜割増を付けるか（既定は付けない＝今までどおり）
+          nightRate: 25, // 深夜割増(%)
+          gensen: false, // 源泉を引くか（既定は引かない）
+          gensenRate: 10.21, // 源泉(%)
         };
       }
-      var SETTINGS = {
-        store: "",
-        addr: "",
-        tel: "",
-        regNo: "",
-        bank: "",
-        rate: 0.1,
-        tpl: "card", // 請求書のデザイン: card(カード) / band(帯) / tate(縦組み)
-        hanko: "", // 判子の画像(白抜き済みdataURL)
-        logo: "", // 店のロゴ画像(dataURL)
-        logoPos: "top", // ロゴの位置: top(右上・定番) / bottom(店名の上)
-        accent: "", // 店の色(空ならデザインの既定色)
-        font: "mincho", // 見出しの書体: mincho(明朝) / gothic(ゴシック)
-        taxNames: false, // 税理士の紙に日払いの相手の名前を出すか（既定は出さない）
-        minWage: 0, // その県の最低賃金（時給）。入れると割れたときに注意が出る
-        items: [], // よく出るボトル・シャンパン（押すだけで金額が入る）
-        backKinds: [], // バックの種類（空なら、はじめの5つがそのまま出る）
-        rateBase: "komi", // 歩合の元 komi=税込 / nuki=税抜
-      };
+      // ★設定の項目は defaultSettings() が唯一の正。
+      //   ここに同じ物を書き並べると、片方に足し忘れたとき load() が黙って捨てる
+      //   （実際にそれで「決め方が開き直すと消える」が出た）。
+      var SETTINGS = defaultSettings();
       var INVOICES = []; // [{no, name, from, to, issuedAt}]
       // 宛先（請求書送りの相手）。売上に打つ名前をキーにする { 名前: {name,to,honor,addr,person} }
       var PARTNERS = {};
@@ -4450,7 +4524,45 @@
         });
         $("dataInfo").textContent =
           "売上 " + alive.length + " 件。ファイルに書き出して手元にも残せます。";
+        renderPayRules();
         renderMasters();
+      }
+
+      /* お店の給料の決め方（バックの元・ツケの歩合・深夜割増・源泉）
+         どれも既定は「今までどおり」。選んだ店だけ、その通りに計算する。 */
+      function renderPayRules() {
+        var on = function (id, attr, val) {
+          $(id)
+            .querySelectorAll("[" + attr + "]")
+            .forEach(function (b) {
+              b.classList.toggle("on", b.getAttribute(attr) === String(val));
+            });
+        };
+        var base = SETTINGS.backBase || "komi";
+        on("ruleBackBase", "data-bb", base);
+        on("ruleTsuke", "data-tk", SETTINGS.tsukeComm || "now");
+        on("ruleNight", "data-np", SETTINGS.nightPay ? "1" : "0");
+        on("ruleGensen", "data-gs", SETTINGS.gensen ? "1" : "0");
+        $("ruleServiceRow").style.display = base === "service" ? "" : "none";
+        $("ruleNightRow").style.display = SETTINGS.nightPay ? "" : "none";
+        $("ruleGensenRow").style.display = SETTINGS.gensen ? "" : "none";
+        if (document.activeElement !== $("ruleService"))
+          $("ruleService").value = SETTINGS.serviceRate || "";
+        if (document.activeElement !== $("ruleNightRate"))
+          $("ruleNightRate").value = SETTINGS.nightRate == null ? "" : SETTINGS.nightRate;
+        if (document.activeElement !== $("ruleGensenRate"))
+          $("ruleGensenRate").value = SETTINGS.gensenRate == null ? "" : SETTINGS.gensenRate;
+        // 事実だけを黄色で置く（止めない・こうしろとは言わない）
+        var note = [];
+        if (!SETTINGS.nightPay)
+          note.push("⚠️ 深夜割増は付けていません。22時〜5時は2割5分以上の割増が要る決まりです。");
+        if (!SETTINGS.gensen)
+          note.push("⚠️ 源泉は引いていません。業務委託の報酬は10.21%を引くのが本来です。");
+        $("ruleNote").innerHTML = note
+          .map(function (t) {
+            return "<div>" + esc(t) + "</div>";
+          })
+          .join("");
       }
 
       function onSaveSettings() {
@@ -4950,11 +5062,20 @@
           return !w.deletedAt && w.ymd === ymd;
         });
       }
+      // 黄色い注意をどう出すか。店が実際に付けている/引いているなら、その注意は出さない。
+      function payWarnOpt(ymd) {
+        return {
+          minWage: SETTINGS.minWage,
+          nightPaid: !!SETTINGS.nightPay,
+          withholding: !!SETTINGS.gensen,
+          ymd: ymd || UI.payYmd,
+        };
+      }
       function payDayOf(w) {
         var st = staffById(w.staffId);
         if (!st) return null;
         return C.payDay(st, w, {
-          sales: C.salesByStaff(SALES, w.ymd, st.name),
+          sales: C.salesByStaff(SALES, w.ymd, st.name, SETTINGS),
           crew: C.crewByStaff(SALES, w.ymd, st.name),
           settings: SETTINGS,
         });
@@ -4994,7 +5115,7 @@
                 var st = staffById(w.staffId);
                 var d = payDayOf(w);
                 if (!st || !d) return "";
-                var warn = C.payWarnings(st, w, d, { minWage: SETTINGS.minWage });
+                var warn = C.payWarnings(st, w, d, payWarnOpt(w.ymd));
                 return (
                   '<div class="li" data-work="' +
                   esc(w.id) +
@@ -5050,6 +5171,15 @@
                   '</div></div><div class="li-amt">' +
                   C.yen(x.unpaid) +
                   "</div>" +
+                  '<button class="btn btn-ghost btn-sm" type="button" data-slip="' +
+                  esc(x.staff.id) +
+                  '" data-from="' +
+                  esc(x.period.from) +
+                  '" data-to="' +
+                  esc(x.period.to) +
+                  '" data-pay="' +
+                  esc(x.period.payYmd) +
+                  '" style="flex:0 0 auto">明細</button>' +
                   (x.unpaid
                     ? '<button class="btn btn-ghost btn-sm" type="button" data-due="' +
                       esc(x.staff.id) +
@@ -5078,6 +5208,18 @@
               saveWorks();
               renderAll();
               toast("✅ 渡しました");
+            };
+          });
+        $("payDue")
+          .querySelectorAll("[data-slip]")
+          .forEach(function (b) {
+            b.onclick = function () {
+              openCastSlip(
+                b.getAttribute("data-slip"),
+                b.getAttribute("data-from"),
+                b.getAttribute("data-to"),
+                b.getAttribute("data-pay")
+              );
             };
           });
 
@@ -5129,6 +5271,101 @@
 
         $("paySheets").innerHTML = paySheetHtml(ym, sums);
         fitSheets("payScale", "paySheets");
+      }
+
+      /* キャストに渡す明細（1人・1区切りで1枚）。
+         「何日出て、何が付いて、何を引いて、いくら渡すか」を紙にする。 */
+      function castSheetHtml(st, p) {
+        var t = C.paySummary(st, WORKS, SALES, p.from, p.to, { settings: SETTINGS });
+        var rows = t.rows
+          .map(function (w) {
+            var d = payDayOf(w);
+            if (!d) return "";
+            return (
+              "<tr><td>" +
+              esc(C.mdShort(w.ymd)) +
+              "（" +
+              esc(C.weekday(w.ymd)) +
+              "）</td><td>" +
+              (d.minutes ? (d.minutes / 60).toFixed(1) + "h" : "—") +
+              '</td><td class="c-a">' +
+              C.comma(d.base) +
+              '</td><td class="c-a">' +
+              (d.nightAdd ? C.comma(d.nightAdd) : "—") +
+              '</td><td class="c-a">' +
+              C.comma(d.backTotal) +
+              '</td><td class="c-a">' +
+              (d.commission ? C.comma(d.commission) : "—") +
+              '</td><td class="c-a">' +
+              C.comma(d.gross) +
+              '</td><td class="c-a">' +
+              (d.deduct ? C.comma(d.deduct) : "—") +
+              '</td><td class="c-a"><b>' +
+              C.comma(d.net) +
+              "</b></td></tr>"
+            );
+          })
+          .join("");
+        var uchiwake = [];
+        if (t.fine) uchiwake.push("罰金 " + C.yen(t.fine));
+        if (t.kousei) uchiwake.push("厚生費 " + C.yen(t.kousei));
+        if (t.repay) uchiwake.push("前借りの返済 " + C.yen(t.repay));
+        if (t.gensen) uchiwake.push("源泉 " + C.yen(t.gensen));
+        var bal = C.lendBalance(st, WORKS, p.to);
+        return (
+          '<div class="sheet">' +
+          '<div class="sh-head"><div class="sh-store">' +
+          esc(SETTINGS.store || "") +
+          '</div><div class="sh-title">給 与 明 細</div>' +
+          '<div class="sh-meta"><span>' +
+          esc(st.name) +
+          " 様</span><span>" +
+          esc(C.jpDate(p.from)) +
+          " 〜 " +
+          esc(C.jpDate(p.to)) +
+          " 締め</span><span>お渡し " +
+          esc(C.jpDate(p.payYmd)) +
+          "</span></div></div>" +
+          '<table class="sh-tbl pay-tbl"><thead><tr>' +
+          "<th>日付</th><th>時間</th><th>基本</th><th>深夜</th><th>バック</th><th>歩合</th>" +
+          "<th>支給</th><th>控除</th><th>差引</th></tr></thead><tbody>" +
+          (rows || '<tr><td colspan="9">この期間の出勤はありません</td></tr>') +
+          "</tbody><tfoot><tr><td>合計</td><td>" +
+          (t.minutes / 60).toFixed(1) +
+          'h</td><td class="c-a">' +
+          C.comma(t.base) +
+          '</td><td class="c-a">' +
+          (t.nightAdd ? C.comma(t.nightAdd) : "—") +
+          '</td><td class="c-a">' +
+          C.comma(t.backTotal) +
+          '</td><td class="c-a">' +
+          (t.commission ? C.comma(t.commission) : "—") +
+          '</td><td class="c-a"><b>' +
+          C.comma(t.gross) +
+          '</b></td><td class="c-a"><b>' +
+          C.comma(t.deduct) +
+          '</b></td><td class="c-a"><b>' +
+          C.comma(t.net) +
+          "</b></td></tr></tfoot></table>" +
+          '<div class="pay-sub">お渡しする額　' +
+          C.yen(t.unpaidNet) +
+          (t.paidNet ? "　（渡し済み " + C.yen(t.paidNet) + "）" : "") +
+          "</div>" +
+          (uchiwake.length
+            ? '<div class="sm-note">控除の内訳　' + esc(uchiwake.join("　／　")) + "</div>"
+            : "") +
+          (bal ? '<div class="sm-note">前借りの残り　' + C.yen(bal) + "</div>" : "") +
+          "</div>"
+        );
+      }
+      function openCastSlip(staffId, from, to, payYmd) {
+        var st = staffById(staffId);
+        if (!st) return;
+        $("castLabel").textContent = st.name + " に渡す明細";
+        $("castSheets").innerHTML = castSheetHtml(st, { from: from, to: to, payYmd: payYmd });
+        $("castBox").style.display = "";
+        fitSheets("castScale", "castSheets");
+        $("castBox").scrollIntoView({ block: "start" });
       }
 
       /* ===== 設定のマスタ（スタッフ・商品・バックの種類） =====
@@ -5581,6 +5818,11 @@
             (cur.payAfter ? esc(cur.payAfter) : "") +
             '" placeholder="0＝締めたその日に渡す"></div>' +
             '<div class="hint" id="st_cycle_hint" style="margin:-4px 2px 10px"></div>' +
+            // 生年月日は任意。入れた人だけ、18歳未満の深夜に黄色い注意を出す。
+            '<div class="frow"><span class="flabel">生年月日（任意）</span>' +
+            '<input class="finput" type="date" id="st_birth" value="' +
+            esc(cur.birth || "") +
+            '"><span class="hint">入れておくと、18歳未満の人が22時以降になったとき注意が出ます。</span></div>' +
             '<div class="frow"><span class="flabel">立場</span><div class="chips" id="st_employ">' +
             C.EMPLOY_KINDS.map(function (c) {
               return (
@@ -5721,6 +5963,7 @@
             cycle: cycle,
             closeWday: wday,
             payAfter: $("st_payafter").value,
+            birth: $("st_birth").value,
             employ: employ,
           });
           STAFF = STAFF.filter(function (x) {
@@ -5975,7 +6218,7 @@
           var st = staffById(w.staffId);
           if (!st) return;
           var d = C.payDay(st, w, {
-            sales: C.salesByStaff(SALES, UI.payYmd, st.name),
+            sales: C.salesByStaff(SALES, UI.payYmd, st.name, SETTINGS),
             crew: C.crewByStaff(SALES, UI.payYmd, st.name),
             settings: SETTINGS,
           });
@@ -6043,7 +6286,7 @@
             var w = save({ paidAt: new Date().toISOString() });
             var st = staffById(w.staffId);
             var d = C.payDay(st, w, {
-              sales: C.salesByStaff(SALES, UI.payYmd, st.name),
+              sales: C.salesByStaff(SALES, UI.payYmd, st.name, SETTINGS),
               crew: C.crewByStaff(SALES, UI.payYmd, st.name),
               settings: SETTINGS,
             });
@@ -6104,6 +6347,8 @@
           fine: 0,
           kousei: 0,
           repay: 0,
+          gensen: 0,
+          nightAdd: 0,
           deduct: 0,
           net: 0,
           paidNet: 0,
@@ -6123,6 +6368,8 @@
           tot.fine += x.t.fine;
           tot.kousei += x.t.kousei;
           tot.repay += x.t.repay;
+          tot.gensen += x.t.gensen;
+          tot.nightAdd += x.t.nightAdd;
           tot.deduct += x.t.deduct;
           tot.net += x.t.net;
         });
@@ -6207,8 +6454,13 @@
           C.yen(tot.kousei) +
           "　／　前借りの返済 " +
           C.yen(tot.repay) +
+          (tot.gensen ? "　／　源泉 " + C.yen(tot.gensen) : "") +
           "</div>" +
-          '<div class="sm-note">支給＝基本＋バック＋歩合（最低保証がある人は高い方）。控除＝罰金＋厚生費＋前借りの返済。</div>' +
+          '<div class="sm-note">支給＝基本' +
+          (tot.nightAdd ? "＋深夜割増" : "") +
+          "＋バック＋歩合（最低保証がある人は高い方）。控除＝罰金＋厚生費＋前借りの返済" +
+          (tot.gensen ? "＋源泉" : "") +
+          "。</div>" +
           "</div>"
         );
       }
@@ -6511,6 +6763,13 @@
         $("btnPrintPay").onclick = function () {
           printSheets("paySheets", "給与一覧");
         };
+        $("btnPrintCast").onclick = function () {
+          printSheets("castSheets", "給与明細");
+        };
+        $("btnCastClose").onclick = function () {
+          $("castBox").style.display = "none";
+          $("castSheets").innerHTML = "";
+        };
         $("btnPrintClose").onclick = function () {
           printSheets("closeSheets", "日報");
         };
@@ -6688,6 +6947,47 @@
         $("btnPartnerNew").onclick = function () {
           openPartner("");
         };
+        // お店の給料の決め方。押した瞬間に決まる（保存ボタンを探させない）
+        [
+          ["ruleBackBase", "data-bb", "backBase"],
+          ["ruleTsuke", "data-tk", "tsukeComm"],
+        ].forEach(function (x) {
+          $(x[0])
+            .querySelectorAll("[" + x[1] + "]")
+            .forEach(function (b) {
+              b.onclick = function () {
+                SETTINGS[x[2]] = b.getAttribute(x[1]);
+                saveSettings();
+                renderAll();
+              };
+            });
+        });
+        [
+          ["ruleNight", "data-np", "nightPay"],
+          ["ruleGensen", "data-gs", "gensen"],
+        ].forEach(function (x) {
+          $(x[0])
+            .querySelectorAll("[" + x[1] + "]")
+            .forEach(function (b) {
+              b.onclick = function () {
+                SETTINGS[x[2]] = b.getAttribute(x[1]) === "1";
+                saveSettings();
+                renderAll();
+              };
+            });
+        });
+        [
+          ["ruleService", "serviceRate"],
+          ["ruleNightRate", "nightRate"],
+          ["ruleGensenRate", "gensenRate"],
+        ].forEach(function (x) {
+          $(x[0]).onchange = function () {
+            var v = $(x[0]).value.trim();
+            SETTINGS[x[1]] = v === "" ? (x[1] === "serviceRate" ? 0 : null) : Number(v);
+            saveSettings();
+            renderAll();
+          };
+        });
         $("modalX").onclick = closeModal;
         $("modalOv").onclick = function (ev) {
           if (ev.target === $("modalOv")) closeModal();
