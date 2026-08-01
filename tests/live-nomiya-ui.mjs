@@ -83,8 +83,14 @@ async function login(sess) {
   return !open;
 }
 
+// 設定は右上の歯車ひとつになった（下ナビは毎日使う5つだけ）
+async function gotoSet() {
+  if (!(await page.locator("#scr-set").isVisible())) await page.locator("#btnGear").click();
+  await page.locator("#setSeg [data-sseg='self']").click();
+}
+
 async function acctLine() {
-  await page.locator(".nav-item[data-scr='set']").click();
+  await gotoSet();
   await page.waitForTimeout(400);
   return (await page.locator("#acctInfo").textContent()) || "";
 }
@@ -131,7 +137,7 @@ check("端末の控えを消しても、クラウドから戻ってくる", back
 
 /* 4. 別のお店（別アカウント）からは見えない（RLSの隔離） */
 {
-  await page.locator(".nav-item[data-scr='set']").click();
+  await gotoSet();
   await page.locator("#btnLogout").click();
   await page.waitForTimeout(1500);
   const a2 = await makeAnonSession("②");
@@ -144,7 +150,7 @@ check("端末の控えを消しても、クラウドから戻ってくる", back
   );
   check("別のお店からは、さっきの売上が1件も見えない（RLS）", seen === 0, seen);
   // 元のお店に戻る
-  await page.locator(".nav-item[data-scr='set']").click();
+  await gotoSet();
   await page.locator("#btnLogout").click();
   await page.waitForTimeout(1500);
   await login(a1.session);
@@ -152,7 +158,7 @@ check("端末の控えを消しても、クラウドから戻ってくる", back
 }
 
 /* 片付け: 入れた分を消してクラウドにも伝える */
-await page.locator(".nav-item[data-scr='set']").click();
+await gotoSet();
 await page.locator("#btnWipe").click();
 await page.locator("#mdYes").click();
 await page.waitForTimeout(2500);
