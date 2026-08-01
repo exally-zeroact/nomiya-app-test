@@ -1496,6 +1496,85 @@ describe("バックの決め方（円と％）と、よく出るボトル", () =
     expect(C.normalizeItem({ name: " ドンペリ ", price: "50,000" }).price).toBe(0); // 数字にできない値は0
     expect(C.normalizeItem({ name: "ドンペリ", price: 50000 }).kind).toBe("bottle");
   });
+
+  // ===== 並べ替え（設定のマスタで店が自分の順に並べる） =====
+  // 押すボタンの並びがこれで決まるので、順番は店の言うとおりにする。
+  describe("よく出るボトルの並べ替え", () => {
+    const ITEMS = [
+      { id: "i1", name: "モエ", price: 30000, kind: "bottle" },
+      { id: "i2", name: "ドンペリ白", price: 50000, kind: "bottle" },
+      { id: "i3", name: "鏡月", price: 6000, kind: "bottle" },
+    ];
+    it("並べ替えていない店は、今までどおり高い順のまま", () => {
+      expect(C.itemList(ITEMS).map((x) => x.name)).toEqual(["ドンペリ白", "モエ", "鏡月"]);
+      expect(C.normalizeItem({ name: "モエ" }).ord).toBe(0);
+    });
+    it("順番を決めたら、値段ではなくその順に出る", () => {
+      const list = C.itemList([
+        { id: "i1", name: "モエ", price: 30000, ord: 1 },
+        { id: "i2", name: "ドンペリ白", price: 50000, ord: 2 },
+        { id: "i3", name: "鏡月", price: 6000, ord: 3 },
+      ]);
+      expect(list.map((x) => x.name)).toEqual(["モエ", "ドンペリ白", "鏡月"]);
+    });
+    it("↑を押すと1つ上がり、全部に順番が振り直される", () => {
+      const moved = C.moveItem(ITEMS, "i1", -1); // モエ（2番目）を上へ
+      expect(C.itemList(moved).map((x) => x.name)).toEqual(["モエ", "ドンペリ白", "鏡月"]);
+      expect(C.itemList(moved).map((x) => x.ord)).toEqual([1, 2, 3]);
+      // 元の配列は書き換えない（保存に失敗しても画面と食い違わない）
+      expect(ITEMS[0].ord).toBe(undefined);
+    });
+    it("↓を押すと1つ下がる", () => {
+      const moved = C.moveItem(ITEMS, "i2", 1); // ドンペリ（1番目）を下へ
+      expect(C.itemList(moved).map((x) => x.name)).toEqual(["モエ", "ドンペリ白", "鏡月"]);
+    });
+    it("端では何も起きない・知らないIDでも壊れない", () => {
+      expect(C.itemList(C.moveItem(ITEMS, "i2", -1)).map((x) => x.name)).toEqual([
+        "ドンペリ白",
+        "モエ",
+        "鏡月",
+      ]);
+      expect(C.itemList(C.moveItem(ITEMS, "i3", 1)).map((x) => x.name)).toEqual([
+        "ドンペリ白",
+        "モエ",
+        "鏡月",
+      ]);
+      expect(C.itemList(C.moveItem(ITEMS, "xx", 1)).map((x) => x.name)).toEqual([
+        "ドンペリ白",
+        "モエ",
+        "鏡月",
+      ]);
+      expect(C.moveItem(null, "i1", 1)).toEqual([]);
+    });
+    it("名前が無い行を混ぜても、並べ替えで消えない", () => {
+      const raw = ITEMS.concat([{ id: "i9", name: "", price: 0 }]);
+      const moved = C.moveItem(raw, "i1", -1);
+      expect(moved.length).toBe(4);
+      expect(moved.filter((x) => x.id === "i9").length).toBe(1);
+    });
+    it("種類でしぼっても、決めた順のまま出る", () => {
+      const raw = [
+        { id: "i1", name: "モエ", price: 30000, kind: "bottle", ord: 3 },
+        { id: "i2", name: "ドンペリ白", price: 50000, kind: "bottle", ord: 1 },
+        { id: "i3", name: "角瓶", price: 8000, kind: "drink", ord: 2 },
+      ];
+      expect(C.itemList(raw, "bottle").map((x) => x.name)).toEqual(["ドンペリ白", "モエ"]);
+    });
+    it("新しく足す商品は一番下に付く（勝手に上へ割り込まない）", () => {
+      expect(C.nextItemOrd([])).toBe(1);
+      expect(C.nextItemOrd([{ ord: 1 }, { ord: 5 }, { ord: 2 }])).toBe(6);
+      expect(C.nextItemOrd(null)).toBe(1);
+      const list = C.itemList(
+        [
+          { id: "i1", name: "モエ", price: 30000, ord: 1 },
+          { id: "i2", name: "ドンペリ白", price: 50000, ord: 2 },
+          { id: "i3", name: "新入り", price: 99999, ord: 3 },
+        ],
+        ""
+      );
+      expect(list.map((x) => x.name)).toEqual(["モエ", "ドンペリ白", "新入り"]);
+    });
+  });
   it("期間のまとめで、％バックの売った金額も足される", () => {
     const st = C.normalizeStaff(
       { id: "s1", name: "あかり", backPct: { bottle: 10 } },

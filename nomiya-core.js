@@ -1575,6 +1575,8 @@
       kind: String(r.kind || "").trim() || "bottle",
       // この銘柄だけの率（ドンペリ20%など）。0なら種類の率をそのまま使う。
       pct: _num(r.pct),
+      // 店が決めた並び順。0＝まだ決めていない（今までどおり高い順に出す）。
+      ord: _int(r.ord),
     };
   }
   function itemList(items, kind) {
@@ -1584,8 +1586,49 @@
         return x.name && (!kind || x.kind === kind);
       })
       .sort(function (a, b) {
+        // 店が並べたならその順。決めていなければ今までどおり高い順。
+        if (a.ord !== b.ord) return a.ord - b.ord;
         return b.price - a.price;
       });
+  }
+  /**
+   * nextItemOrd(items)
+   *  新しく足す商品の並び順＝いま一番下の次。上へ勝手に割り込ませない。
+   */
+  function nextItemOrd(items) {
+    var max = 0;
+    (items || []).forEach(function (x) {
+      var o = _int((x || {}).ord);
+      if (o > max) max = o;
+    });
+    return max + 1;
+  }
+  /**
+   * moveItem(items, id, dir)
+   *  設定のマスタで ↑↓ を押したとき。dir<0=上へ / dir>0=下へ。
+   *  端では何もしない。名前が無い行（表示に出ない行）も消さずに持ったまま返す。
+   *  元の配列は書き換えない（保存に失敗したときに画面と食い違わないように）。
+   */
+  function moveItem(items, id, dir) {
+    var raw = (items || []).slice();
+    var shown = itemList(raw);
+    var i = -1;
+    shown.forEach(function (x, k) {
+      if (x.id === id) i = k;
+    });
+    var j = i + (dir < 0 ? -1 : 1);
+    if (i < 0 || j < 0 || j >= shown.length) return raw;
+    var tmp = shown[i];
+    shown[i] = shown[j];
+    shown[j] = tmp;
+    var ord = {};
+    shown.forEach(function (x, k) {
+      ord[x.id] = k + 1;
+    });
+    return raw.map(function (x) {
+      var key = (x || {}).id;
+      return key && ord[key] ? Object.assign({}, x, { ord: ord[key] }) : x;
+    });
   }
 
   function staffToRow(x) {
@@ -2123,6 +2166,8 @@
     aliveStaff: aliveStaff,
     normalizeItem: normalizeItem,
     itemList: itemList,
+    nextItemOrd: nextItemOrd,
+    moveItem: moveItem,
     buildInvoice: buildInvoice,
     paginate: paginate,
     ledgerPages: ledgerPages,

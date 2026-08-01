@@ -63,6 +63,28 @@
         color: #5c7c6a;
         margin-left: -2px;
       }
+      /* 右上の歯車。設定はここ1つだけ（下ナビは毎日使う5つに絞る） */
+      .hdr-btn {
+        margin-left: auto;
+        background: none;
+        border: 1px solid #d4eae0;
+        border-radius: 10px;
+        padding: 5px 10px;
+        font-size: 17px;
+        line-height: 1.2;
+        cursor: pointer;
+      }
+      .hdr-btn.on {
+        background: #e8f6ef;
+        border-color: #52b788;
+      }
+      /* 画面の中の切替（一覧の中の集計・税理士 / 設定の中の4つ）。中身は1つだけ出す。 */
+      .pane {
+        display: none;
+      }
+      .pane.active {
+        display: block;
+      }
       .app-title {
         margin-left: auto;
         font-size: 12px;
@@ -479,6 +501,30 @@
         font-size: 15px;
         color: #1a4a2e;
         white-space: nowrap;
+      }
+      /* 並べ替えの ↑↓（設定のマスタだけ）。押す所は指のサイズにする。 */
+      .ord {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        flex: 0 0 34px;
+      }
+      .ord-b {
+        background: #f2f8f5;
+        border: 1px solid #d4eae0;
+        border-radius: 8px;
+        color: #3d9e72;
+        font-size: 12px;
+        line-height: 1;
+        padding: 6px 0;
+        cursor: pointer;
+      }
+      .ord-b:hover {
+        background: #e8f6ef;
+      }
+      .ord-b:disabled {
+        opacity: 0.3;
+        cursor: default;
       }
       /* 画面の中の小さな表（この月のまとめ など）。名前と数字がぶつからないようにする */
       .sum-tbl {
@@ -1011,6 +1057,7 @@
     <header class="app-header">
       <span class="app-logo">Exally</span><span class="app-logo-ja">エクサリー</span>
       <span class="app-title">売上管理</span>
+      <button class="hdr-btn" type="button" id="btnGear" aria-label="設定">⚙️</button>
     </header>
 
     <!-- ==================== 入力 ==================== -->
@@ -1114,54 +1161,95 @@
 
     <!-- ==================== 一覧（売上帳） ==================== -->
     <section class="screen" id="scr-list">
-      <div class="period" id="periodList"></div>
+      <!-- 毎日使うのは「一覧」。集計と税理士の紙は同じ売上の見方違いなので、ここの中に入れる。 -->
+      <div class="chips chips-bar" id="listSeg">
+        <button class="chip chip-sm on" type="button" data-lseg="list">一覧</button>
+        <button class="chip chip-sm" type="button" data-lseg="sum">集計</button>
+        <button class="chip chip-sm" type="button" data-lseg="tax">税理士の紙</button>
+      </div>
 
-      <div class="card">
-        <div class="card-label">支払い方法で見る</div>
-        <div class="chips" id="filPay"></div>
-        <div class="card-label" style="margin: 12px 0 8px">領収書で見る</div>
-        <div class="chips" id="filRec">
-          <button class="chip chip-sm on" type="button" data-rec="all">すべて</button>
-          <button class="chip chip-sm" type="button" data-rec="yes">あり</button>
-          <button class="chip chip-sm" type="button" data-rec="no">なし</button>
-          <button class="chip chip-sm" type="button" data-rec="later">あとで渡す分</button>
+      <div class="pane active" id="pane-list">
+        <div class="period" id="periodList"></div>
+
+        <div class="card">
+          <div class="card-label">支払い方法で見る</div>
+          <div class="chips" id="filPay"></div>
+          <div class="card-label" style="margin: 12px 0 8px">領収書で見る</div>
+          <div class="chips" id="filRec">
+            <button class="chip chip-sm on" type="button" data-rec="all">すべて</button>
+            <button class="chip chip-sm" type="button" data-rec="yes">あり</button>
+            <button class="chip chip-sm" type="button" data-rec="no">なし</button>
+            <button class="chip chip-sm" type="button" data-rec="later">あとで渡す分</button>
+          </div>
+        </div>
+
+        <div class="strip" id="listStrip"></div>
+
+        <div class="btn-row no-print">
+          <button class="btn btn-ghost" id="btnPrintList">🖨 印刷 / PDFにする</button>
+        </div>
+
+        <div class="sheet-scale" id="listScale">
+          <div class="sheet-scale-inner" id="listSheets"></div>
         </div>
       </div>
 
-      <div class="strip" id="listStrip"></div>
+      <!-- ===== 集計（画面で見るだけ。紙は「税理士の紙」） ===== -->
+      <div class="pane" id="pane-sum">
+        <div class="period" id="periodSum"></div>
+        <div class="chips chips-bar" id="sumRecTabs">
+          <button class="chip chip-sm on" type="button" data-srec="all">全体</button>
+          <button class="chip chip-sm" type="button" data-srec="yes">領収書あり</button>
+          <button class="chip chip-sm" type="button" data-srec="no">領収書なし</button>
+        </div>
+        <div class="strip" id="sumStrip"></div>
 
-      <div class="btn-row no-print">
-        <button class="btn btn-ghost" id="btnPrintList">🖨 印刷 / PDFにする</button>
+        <div class="card">
+          <div class="card-label">支払い方法別</div>
+          <div id="sumPay"></div>
+        </div>
+
+        <div class="card" id="sumRecCard">
+          <div class="card-label">領収書 あり / なし</div>
+          <div id="sumRec"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-label">日別</div>
+          <div id="sumDay"></div>
+        </div>
       </div>
 
-      <div class="sheet-scale" id="listScale">
-        <div class="sheet-scale-inner" id="listSheets"></div>
-      </div>
-    </section>
+      <!-- ===== 税理士に出す紙 ===== -->
+      <div class="pane" id="pane-tax">
+        <div class="period" id="periodTax"></div>
 
-    <!-- ==================== 集計（画面で見るだけ。紙は税理士タブ） ==================== -->
-    <section class="screen" id="scr-sum">
-      <div class="period" id="periodSum"></div>
-      <div class="chips chips-bar" id="sumRecTabs">
-        <button class="chip chip-sm on" type="button" data-srec="all">全体</button>
-        <button class="chip chip-sm" type="button" data-srec="yes">領収書あり</button>
-        <button class="chip chip-sm" type="button" data-srec="no">領収書なし</button>
-      </div>
-      <div class="strip" id="sumStrip"></div>
+        <div class="card">
+          <div class="card-label">どれを出す</div>
+          <div class="chips" id="taxRecTabs">
+            <button class="chip chip-sm on" type="button" data-trec="all">全体</button>
+            <button class="chip chip-sm" type="button" data-trec="yes">領収書あり</button>
+            <button class="chip chip-sm" type="button" data-trec="no">領収書なし</button>
+          </div>
+        </div>
 
-      <div class="card">
-        <div class="card-label">支払い方法別</div>
-        <div id="sumPay"></div>
-      </div>
+        <div class="strip" id="taxStrip"></div>
 
-      <div class="card" id="sumRecCard">
-        <div class="card-label">領収書 あり / なし</div>
-        <div id="sumRec"></div>
-      </div>
+        <div class="card no-print">
+          <div class="card-label">人件費の書き方</div>
+          <div class="chips" id="taxNames">
+            <button class="chip chip-sm" type="button" data-tn="0">合計だけ</button>
+            <button class="chip chip-sm" type="button" data-tn="1">誰にいくらも出す</button>
+          </div>
+        </div>
 
-      <div class="card">
-        <div class="card-label">日別</div>
-        <div id="sumDay"></div>
+        <div class="btn-row no-print">
+          <button class="btn btn-ghost" id="btnPrintTax">🖨 印刷 / PDFにする</button>
+        </div>
+
+        <div class="sheet-scale" id="taxScale">
+          <div class="sheet-scale-inner" id="taxSheets"></div>
+        </div>
       </div>
     </section>
 
@@ -1228,138 +1316,180 @@
       </div>
     </section>
 
-    <!-- ==================== 税理士用 ==================== -->
-    <section class="screen" id="scr-tax">
-      <div class="period" id="periodTax"></div>
-
-      <div class="card">
-        <div class="card-label">どれを出す</div>
-        <div class="chips" id="taxRecTabs">
-          <button class="chip chip-sm on" type="button" data-trec="all">全体</button>
-          <button class="chip chip-sm" type="button" data-trec="yes">領収書あり</button>
-          <button class="chip chip-sm" type="button" data-trec="no">領収書なし</button>
-        </div>
-      </div>
-
-      <div class="strip" id="taxStrip"></div>
-
-      <div class="card no-print">
-        <div class="card-label">人件費の書き方</div>
-        <div class="chips" id="taxNames">
-          <button class="chip chip-sm" type="button" data-tn="0">合計だけ</button>
-          <button class="chip chip-sm" type="button" data-tn="1">誰にいくらも出す</button>
-        </div>
-      </div>
-
-      <div class="btn-row no-print">
-        <button class="btn btn-ghost" id="btnPrintTax">🖨 印刷 / PDFにする</button>
-      </div>
-
-      <div class="sheet-scale" id="taxScale">
-        <div class="sheet-scale-inner" id="taxSheets"></div>
-      </div>
-    </section>
-
-    <!-- ==================== 設定 ==================== -->
+    <!-- ==================== 設定（右上の歯車） ==================== -->
     <section class="screen" id="scr-set">
-      <div class="card">
-        <div class="card-label">お店の情報</div>
-        <div class="frow">
-          <span class="flabel">店名</span>
-          <input class="finput" type="text" id="setStore" placeholder="お店の名前" />
-        </div>
-        <div class="frow">
-          <span class="flabel">住所</span>
-          <input class="finput" type="text" id="setAddr" placeholder="" />
-        </div>
-        <div class="frow">
-          <span class="flabel">電話</span>
-          <input class="finput" type="text" id="setTel" placeholder="" />
-        </div>
-        <div class="frow">
-          <span class="flabel">登録番号（インボイス・任意）</span>
-          <input class="finput" type="text" id="setInvoiceNo" placeholder="T0000000000000" />
-        </div>
-        <div class="frow">
-          <span class="flabel">お振込先（請求書に出ます・任意）</span>
-          <input class="finput" type="text" id="setBank" placeholder="◯◯銀行 ◯◯支店 普通 1234567" />
-        </div>
-        <div class="frow">
-          <span class="flabel">店のロゴ（請求書に載ります・任意）</span>
-          <div class="hanko-row">
-            <div class="hanko-prev" id="logoPrev"></div>
-            <div style="flex: 1">
-              <button class="btn btn-ghost btn-sm" type="button" id="btnLogo">画像を選ぶ</button>
-              <button
-                class="btn btn-ghost btn-danger btn-sm"
-                type="button"
-                id="btnLogoClear"
-                style="margin-left: 6px"
-              >
-                外す
-              </button>
-              <span class="hint" style="display: block; margin-top: 6px"
-                >店名の上に入ります。背景が白い画像がきれいに出ます。</span
-              >
+      <!-- 覚えるのは「困ったら右上の歯車」だけ。中は4つに分ける。 -->
+      <div class="chips chips-bar" id="setSeg">
+        <button class="chip chip-sm on" type="button" data-sseg="self">自社情報</button>
+        <button class="chip chip-sm" type="button" data-sseg="partner">会社</button>
+        <button class="chip chip-sm" type="button" data-sseg="staff">従業員</button>
+        <button class="chip chip-sm" type="button" data-sseg="item">商品</button>
+      </div>
+
+      <div class="pane active" id="pane-self">
+        <div class="card">
+          <div class="card-label">お店の情報</div>
+          <div class="frow">
+            <span class="flabel">店名</span>
+            <input class="finput" type="text" id="setStore" placeholder="お店の名前" />
+          </div>
+          <div class="frow">
+            <span class="flabel">住所</span>
+            <input class="finput" type="text" id="setAddr" placeholder="" />
+          </div>
+          <div class="frow">
+            <span class="flabel">電話</span>
+            <input class="finput" type="text" id="setTel" placeholder="" />
+          </div>
+          <div class="frow">
+            <span class="flabel">登録番号（インボイス・任意）</span>
+            <input class="finput" type="text" id="setInvoiceNo" placeholder="T0000000000000" />
+          </div>
+          <div class="frow">
+            <span class="flabel">お振込先（請求書に出ます・任意）</span>
+            <input
+              class="finput"
+              type="text"
+              id="setBank"
+              placeholder="◯◯銀行 ◯◯支店 普通 1234567"
+            />
+          </div>
+          <div class="frow">
+            <span class="flabel">店のロゴ（請求書に載ります・任意）</span>
+            <div class="hanko-row">
+              <div class="hanko-prev" id="logoPrev"></div>
+              <div style="flex: 1">
+                <button class="btn btn-ghost btn-sm" type="button" id="btnLogo">画像を選ぶ</button>
+                <button
+                  class="btn btn-ghost btn-danger btn-sm"
+                  type="button"
+                  id="btnLogoClear"
+                  style="margin-left: 6px"
+                >
+                  外す
+                </button>
+                <span class="hint" style="display: block; margin-top: 6px"
+                  >店名の上に入ります。背景が白い画像がきれいに出ます。</span
+                >
+              </div>
+            </div>
+            <input type="file" id="fileLogo" accept="image/*" style="display: none" />
+          </div>
+
+          <div class="frow">
+            <span class="flabel">判子（請求書に載ります・任意）</span>
+            <div class="hanko-row">
+              <div class="hanko-prev" id="hankoPrev"></div>
+              <div style="flex: 1">
+                <button class="btn btn-ghost btn-sm" type="button" id="btnHanko">画像を選ぶ</button>
+                <button
+                  class="btn btn-ghost btn-danger btn-sm"
+                  type="button"
+                  id="btnHankoClear"
+                  style="margin-left: 6px"
+                >
+                  外す
+                </button>
+                <span class="hint" style="display: block; margin-top: 6px"
+                  >白い紙に押した判子を撮った写真でOK。白い背景は自動で抜きます。</span
+                >
+              </div>
+            </div>
+            <input type="file" id="fileHanko" accept="image/*" style="display: none" />
+          </div>
+
+          <div class="frow">
+            <span class="flabel">消費税率</span>
+            <div class="chips" id="setRate">
+              <button class="chip chip-sm" type="button" data-rate="0.1">10%</button>
+              <button class="chip chip-sm" type="button" data-rate="0.08">8%</button>
+              <button class="chip chip-sm" type="button" data-rate="0">なし</button>
             </div>
           </div>
-          <input type="file" id="fileLogo" accept="image/*" style="display: none" />
-        </div>
-
-        <div class="frow">
-          <span class="flabel">判子（請求書に載ります・任意）</span>
-          <div class="hanko-row">
-            <div class="hanko-prev" id="hankoPrev"></div>
-            <div style="flex: 1">
-              <button class="btn btn-ghost btn-sm" type="button" id="btnHanko">画像を選ぶ</button>
-              <button
-                class="btn btn-ghost btn-danger btn-sm"
-                type="button"
-                id="btnHankoClear"
-                style="margin-left: 6px"
-              >
-                外す
-              </button>
-              <span class="hint" style="display: block; margin-top: 6px"
-                >白い紙に押した判子を撮った写真でOK。白い背景は自動で抜きます。</span
-              >
-            </div>
-          </div>
-          <input type="file" id="fileHanko" accept="image/*" style="display: none" />
-        </div>
-
-        <div class="frow">
-          <span class="flabel">消費税率</span>
-          <div class="chips" id="setRate">
-            <button class="chip chip-sm" type="button" data-rate="0.1">10%</button>
-            <button class="chip chip-sm" type="button" data-rate="0.08">8%</button>
-            <button class="chip chip-sm" type="button" data-rate="0">なし</button>
+          <div style="margin-top: 12px">
+            <button class="btn btn-primary" id="btnSaveSet">保存する</button>
           </div>
         </div>
-        <div style="margin-top: 12px">
-          <button class="btn btn-primary" id="btnSaveSet">保存する</button>
+
+        <div class="card">
+          <div class="card-label">アカウント</div>
+          <div class="hint" id="acctInfo"></div>
+          <div class="btn-row" style="margin-top: 10px">
+            <button class="btn btn-ghost" type="button" id="btnSyncNow">今すぐ同期する</button>
+            <button class="btn btn-ghost" type="button" id="btnLogout">ログアウト</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-label">データ</div>
+          <div class="hint" id="dataInfo"></div>
+          <div class="btn-row" style="margin-top: 10px">
+            <button class="btn btn-ghost" id="btnExport">書き出す</button>
+            <button class="btn btn-ghost" id="btnImport">読み込む</button>
+          </div>
+          <input type="file" id="fileImport" accept="application/json" style="display: none" />
+          <div class="btn-right">
+            <button class="btn btn-ghost btn-danger btn-sm" id="btnWipe">全部消す</button>
+          </div>
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-label">アカウント</div>
-        <div class="hint" id="acctInfo"></div>
-        <div class="btn-row" style="margin-top: 10px">
-          <button class="btn btn-ghost" type="button" id="btnSyncNow">今すぐ同期する</button>
-          <button class="btn btn-ghost" type="button" id="btnLogout">ログアウト</button>
+      <!-- ===== 会社（請求書の宛先）。請求書の画面からもここに来る＝一覧は1つだけ ===== -->
+      <div class="pane" id="pane-partner">
+        <div class="card">
+          <div class="card-label">請求書を出す会社</div>
+          <div class="hint" style="margin-bottom: 8px">
+            ここに入れた会社名が、入力の「請求書送り」で選べるようになります。
+          </div>
+          <div id="partnerList"></div>
+          <div class="btn-right" style="margin-top: 10px">
+            <button class="btn btn-ghost btn-sm" type="button" id="btnPartnerNew">
+              ＋ 会社を足す
+            </button>
+          </div>
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-label">データ</div>
-        <div class="hint" id="dataInfo"></div>
-        <div class="btn-row" style="margin-top: 10px">
-          <button class="btn btn-ghost" id="btnExport">書き出す</button>
-          <button class="btn btn-ghost" id="btnImport">読み込む</button>
+      <!-- ===== 従業員（キャスト・スタッフ） ===== -->
+      <div class="pane" id="pane-staff">
+        <div class="card">
+          <div class="card-label">スタッフ</div>
+          <div class="hint" style="margin-bottom: 8px">名前を押すと、給料の決め方を直せます。</div>
+          <div id="staffList"></div>
+          <div class="btn-right" style="margin-top: 10px">
+            <button class="btn btn-ghost btn-sm" type="button" id="btnStaffAdd">
+              ＋ スタッフを足す
+            </button>
+          </div>
         </div>
-        <input type="file" id="fileImport" accept="application/json" style="display: none" />
-        <div class="btn-right">
-          <button class="btn btn-ghost btn-danger btn-sm" id="btnWipe">全部消す</button>
+      </div>
+
+      <!-- ===== 商品（よく出るボトル）とバックの種類 ===== -->
+      <div class="pane" id="pane-item">
+        <div class="card">
+          <div class="card-label">よく出るボトル・シャンパン</div>
+          <div class="hint" style="margin-bottom: 8px">
+            出勤を入れるとき、<b>押すだけ</b>で金額が入ります。↑↓の順が、押すボタンの並びです。
+          </div>
+          <div id="itemList"></div>
+          <div class="btn-right" style="margin-top: 10px">
+            <button class="btn btn-ghost btn-sm" type="button" id="btnItemAdd">
+              ＋ 商品を足す
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-label">バックの種類</div>
+          <div class="hint" style="margin-bottom: 8px">
+            お店に合わせて足せます。シャンパン・フード・カラオケ・延長など。
+          </div>
+          <div id="kindList"></div>
+          <div class="btn-right" style="margin-top: 10px">
+            <button class="btn btn-ghost btn-sm" type="button" id="btnKindAdd">
+              ＋ 種類を足す
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -1453,37 +1583,8 @@
         <div id="payMonth"></div>
       </div>
 
-      <div class="card">
-        <div class="card-label">バックの種類</div>
-        <div class="hint" style="margin-bottom: 8px">
-          お店に合わせて足せます。シャンパン・フード・カラオケ・延長など。
-        </div>
-        <div id="kindList"></div>
-        <div class="btn-right" style="margin-top: 10px">
-          <button class="btn btn-ghost btn-sm" type="button" id="btnKindAdd">＋ 種類を足す</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-label">よく出るボトル・シャンパン</div>
-        <div class="hint" style="margin-bottom: 8px">
-          登録しておくと、出勤を入れるときに押すだけで本数と金額が入ります。
-          この銘柄だけ率を変えたいときは「バック率」に入れてください。
-        </div>
-        <div id="itemList"></div>
-        <div class="btn-right" style="margin-top: 10px">
-          <button class="btn btn-ghost btn-sm" type="button" id="btnItemAdd">＋ 商品を足す</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-label">スタッフ</div>
-        <div id="staffList"></div>
-        <div class="btn-right" style="margin-top: 10px">
-          <button class="btn btn-ghost btn-sm" type="button" id="btnStaffAdd">
-            ＋ スタッフを足す
-          </button>
-        </div>
+      <div class="hint" style="margin: 0 2px 10px">
+        スタッフ・よく出るボトル・バックの種類は、右上の ⚙️ で足せます。
       </div>
 
       <div class="btn-row no-print">
@@ -1495,30 +1596,21 @@
     <!-- ==================== NAV ==================== -->
     <!-- 一番使う「入力」を真ん中に置く（親指が届く位置） -->
     <nav class="bottom-nav">
-      <button class="nav-item" data-scr="set" type="button">
-        <span class="nav-ic">⚙️</span><span class="nav-lb">設定</span>
-      </button>
-      <button class="nav-item" data-scr="sum" type="button">
-        <span class="nav-ic">📊</span><span class="nav-lb">集計</span>
-      </button>
       <button class="nav-item" data-scr="list" type="button">
         <span class="nav-ic">📋</span><span class="nav-lb">一覧</span>
-      </button>
-      <button class="nav-item active" data-scr="input" type="button">
-        <span class="nav-ic">✍️</span><span class="nav-lb">入力</span>
       </button>
       <button class="nav-item" data-scr="inv" type="button">
         <span class="nav-ic">🧾</span><span class="nav-lb">請求書</span>
         <span class="nav-badge" id="invBadge" style="display: none"></span>
+      </button>
+      <button class="nav-item active" data-scr="input" type="button">
+        <span class="nav-ic">✍️</span><span class="nav-lb">入力</span>
       </button>
       <button class="nav-item" data-scr="close" type="button">
         <span class="nav-ic">🧰</span><span class="nav-lb">締め</span>
       </button>
       <button class="nav-item" data-scr="pay" type="button">
         <span class="nav-ic">💰</span><span class="nav-lb">給料</span>
-      </button>
-      <button class="nav-item" data-scr="tax" type="button">
-        <span class="nav-ic">🧮</span><span class="nav-lb">税理士</span>
       </button>
     </nav>
 
@@ -1648,6 +1740,9 @@
         invYm: "", // 請求書は「◯月分」で1枚（起動時に今月が入る）
         closeYmd: "", // 締めはその日1枚（起動時に今日が入る）
         payYmd: "", // 給料はその日の出勤を見る
+        listSeg: "list", // 一覧の中の切替 list/sum/tax
+        setSeg: "self", // 設定の中の切替 self/partner/staff/item
+        backTo: "input", // 歯車を閉じたときに戻る画面
       };
 
       // 売上帳 1ページの行数（A4縦=1123pxに収まる実測値。1行27px・上下の見出しと合計欄の分を引いた数）
@@ -3488,43 +3583,9 @@
       }
 
       // 登録した宛先の一覧。ふだんは見せない（請求書タブの「宛先を直す」で開く）
+      // 宛先の一覧は設定の「会社」ひとつだけ。請求書の画面からもここへ連れて行く。
       function openPartnerList() {
-        var list = C.partnerList(PARTNERS);
-        openModal(
-          "宛先",
-          '<div id="partnerList">' +
-            (list.length
-              ? list
-                  .map(function (x) {
-                    return (
-                      '<div class="li" data-pt="' +
-                      esc(x.name) +
-                      '"><div class="li-main"><div class="li-nm">' +
-                      esc(x.to || x.name) +
-                      "　" +
-                      esc(x.honor) +
-                      "</div>" +
-                      (x.person ? '<div class="li-sub">' + esc(x.person) + "</div>" : "") +
-                      "</div></div>"
-                    );
-                  })
-                  .join("")
-              : '<div class="empty">まだありません。</div>') +
-            "</div>" +
-            '<div class="btn-right" style="margin-top:12px">' +
-            '<button class="btn btn-ghost btn-sm" type="button" id="btnPartnerNew">' +
-            "＋ 新しく登録する</button></div>"
-        );
-        $("btnPartnerNew").onclick = function () {
-          openPartner("");
-        };
-        $("partnerList")
-          .querySelectorAll("[data-pt]")
-          .forEach(function (el) {
-            el.onclick = function () {
-              openPartner(el.getAttribute("data-pt"));
-            };
-          });
+        showSettings("partner");
       }
 
       // 宛先の登録・修正。会社名がそのまま売上の名前になる（入力では選ぶだけ）。
@@ -4383,6 +4444,7 @@
         });
         $("dataInfo").textContent =
           "売上 " + alive.length + " 件。ファイルに書き出して手元にも残せます。";
+        renderMasters();
       }
 
       function onSaveSettings() {
@@ -5006,7 +5068,14 @@
             "</tbody></table>"
           : '<div class="empty">この月はまだ出勤がありません。</div>';
 
-        // スタッフ
+        $("paySheets").innerHTML = paySheetHtml(ym, sums);
+        fitSheets("payScale", "paySheets");
+      }
+
+      /* ===== 設定のマスタ（スタッフ・商品・バックの種類） =====
+         直す場所は設定ひとつだけ。押すボタンは入力の画面に置いたまま。 */
+      function renderMasters() {
+        var alive = C.aliveStaff(STAFF);
         $("staffList").innerHTML = alive.length
           ? alive
               .map(function (st) {
@@ -5032,21 +5101,32 @@
           });
 
         renderKindList();
+
         var items = C.itemList(SETTINGS.items);
         $("itemList").innerHTML = items.length
           ? items
-              .map(function (it) {
+              .map(function (it, i) {
                 return (
-                  '<div class="li" data-item="' +
+                  '<div class="li"><div class="li-main" data-item="' +
                   esc(it.id) +
-                  '"><div class="li-main"><div class="li-name">' +
+                  '"><div class="li-nm">' +
                   esc(it.name) +
                   '</div><div class="li-sub">' +
                   esc(backLabelOf(it.kind)) +
                   (it.pct ? "　この銘柄だけ " + it.pct + "%" : "") +
                   '</div></div><div class="li-amt">' +
                   C.yen(it.price) +
-                  "</div></div>"
+                  '</div><div class="ord">' +
+                  '<button class="ord-b" type="button" title="上へ" data-up="' +
+                  esc(it.id) +
+                  '"' +
+                  (i === 0 ? " disabled" : "") +
+                  ">↑</button>" +
+                  '<button class="ord-b" type="button" title="下へ" data-down="' +
+                  esc(it.id) +
+                  '"' +
+                  (i === items.length - 1 ? " disabled" : "") +
+                  ">↓</button></div></div>"
                 );
               })
               .join("")
@@ -5058,9 +5138,45 @@
               openItem(el.getAttribute("data-item"));
             };
           });
+        $("itemList")
+          .querySelectorAll("[data-up],[data-down]")
+          .forEach(function (b) {
+            b.onclick = function () {
+              var up = b.getAttribute("data-up");
+              SETTINGS = Object.assign({}, SETTINGS, {
+                items: C.moveItem(SETTINGS.items, up || b.getAttribute("data-down"), up ? -1 : 1),
+              });
+              saveSettings();
+              renderMasters();
+            };
+          });
 
-        $("paySheets").innerHTML = paySheetHtml(ym, sums);
-        fitSheets("payScale", "paySheets");
+        // 請求書の宛先（会社）。請求書の画面の「宛先を登録・修正する」もここへ来る。
+        var pts = C.partnerList(PARTNERS);
+        $("partnerList").innerHTML = pts.length
+          ? pts
+              .map(function (x) {
+                return (
+                  '<div class="li" data-pt="' +
+                  esc(x.name) +
+                  '"><div class="li-main"><div class="li-nm">' +
+                  esc(x.to || x.name) +
+                  "　" +
+                  esc(x.honor) +
+                  "</div>" +
+                  (x.person ? '<div class="li-sub">' + esc(x.person) + "</div>" : "") +
+                  "</div></div>"
+                );
+              })
+              .join("")
+          : '<div class="empty">まだありません。</div>';
+        $("partnerList")
+          .querySelectorAll("[data-pt]")
+          .forEach(function (el) {
+            el.onclick = function () {
+              openPartner(el.getAttribute("data-pt"));
+            };
+          });
       }
 
       /* ===== バックの種類（店が決める） =====
@@ -5125,7 +5241,7 @@
           SETTINGS = Object.assign({}, SETTINGS, { backKinds: list });
           saveSettings();
           closeModal();
-          renderPay();
+          renderAll();
         };
         $("kd_ok").onclick = function () {
           var label = $("kd_label").value.trim();
@@ -5264,7 +5380,7 @@
           SETTINGS = Object.assign({}, SETTINGS, { items: list });
           saveSettings();
           closeModal();
-          renderPay();
+          renderAll();
         };
         $("it_ok").onclick = function () {
           var name = $("it_name").value.trim();
@@ -5278,6 +5394,8 @@
             price: $("it_price").value,
             pct: $("it_pct").value,
             kind: kind,
+            // 新しく足した物は一番下に付ける（押すボタンの並びを勝手に変えない）
+            ord: cur ? cur.ord : C.nextItemOrd(SETTINGS.items),
           });
           write(
             (SETTINGS.items || [])
@@ -5496,7 +5614,7 @@
           }).concat([next]);
           saveStaff();
           closeModal();
-          renderPay();
+          renderAll();
           toast("✅ 保存しました");
         };
         if ($("st_del")) {
@@ -5984,17 +6102,58 @@
       /* ===================================================================
          画面切り替え・全体描画
          =================================================================== */
+      /* 集計・税理士の紙は「一覧」の中に入った。前の名前(sum/tax)で呼ばれても迷子にしない。
+         下ナビの「一覧」を押したときは、いつでも一覧そのものに戻す（探させない）。 */
       function showScreen(name) {
+        if (name === "sum" || name === "tax") {
+          UI.listSeg = name;
+          name = "list";
+        } else if (name === "list") {
+          UI.listSeg = "list";
+        }
+        if (name !== "set") UI.backTo = name;
         UI.screen = name;
-        ["input", "list", "sum", "inv", "close", "pay", "tax", "set"].forEach(function (n) {
+        ["input", "list", "inv", "close", "pay", "set"].forEach(function (n) {
           $("scr-" + n).classList.toggle("active", n === name);
         });
         document.querySelectorAll(".nav-item").forEach(function (b) {
           b.classList.toggle("active", b.getAttribute("data-scr") === name);
         });
+        $("btnGear").classList.toggle("on", name === "set");
+        syncPanes();
         renderAll();
         fitAll();
         renderAcct();
+      }
+      // 画面の中の切替（一覧＝一覧/集計/税理士の紙、設定＝自社情報/会社/従業員/商品）
+      function syncPanes() {
+        [
+          ["listSeg", "data-lseg", UI.listSeg, ["list", "sum", "tax"]],
+          ["setSeg", "data-sseg", UI.setSeg, ["self", "partner", "staff", "item"]],
+        ].forEach(function (x) {
+          $(x[0])
+            .querySelectorAll("[" + x[1] + "]")
+            .forEach(function (b) {
+              b.classList.toggle("on", b.getAttribute(x[1]) === x[2]);
+            });
+          x[3].forEach(function (n) {
+            $("pane-" + n).classList.toggle("active", n === x[2]);
+          });
+        });
+      }
+      function setListSeg(seg) {
+        UI.listSeg = seg;
+        syncPanes();
+        fitAll();
+      }
+      function showSettings(seg) {
+        UI.setSeg = seg || UI.setSeg;
+        showScreen("set");
+      }
+      // 歯車＝押すと設定、もう一度押すとさっきまでの画面に戻る
+      function toggleGear() {
+        if (UI.screen === "set") showScreen(UI.backTo || "input");
+        else showScreen("set");
       }
 
       /* ついた人（ヘルプ・場内・同伴など）。1つの会計に何人でも足せる。
@@ -6396,6 +6555,25 @@
             showScreen(b.getAttribute("data-scr"));
           };
         });
+        $("btnGear").onclick = toggleGear;
+        $("listSeg")
+          .querySelectorAll("[data-lseg]")
+          .forEach(function (b) {
+            b.onclick = function () {
+              setListSeg(b.getAttribute("data-lseg"));
+            };
+          });
+        $("setSeg")
+          .querySelectorAll("[data-sseg]")
+          .forEach(function (b) {
+            b.onclick = function () {
+              UI.setSeg = b.getAttribute("data-sseg");
+              syncPanes();
+            };
+          });
+        $("btnPartnerNew").onclick = function () {
+          openPartner("");
+        };
         $("modalX").onclick = closeModal;
         $("modalOv").onclick = function (ev) {
           if (ev.target === $("modalOv")) closeModal();
