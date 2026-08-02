@@ -4255,3 +4255,58 @@ test.describe("⑬ 並べ替え", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
+
+/* 締めたあとにその日の売上を触ったら、必ず気づけるようにする（止めはしない） */
+test.describe("⑭ 締めたあとに動いたら出す", () => {
+  async function setCloseDay(page, ymd) {
+    await goto(page, "close");
+    for (let i = 0; i < 400; i++) {
+      const now = await page.evaluate(() => window.__NOMIYA.closeYmd);
+      if (now === ymd) return;
+      await page.locator(`#periodClose [data-cmv="${now > ymd ? -1 : 1}"]`).click();
+    }
+  }
+  test("締めた日に売上を足すと、その場と締めの画面の両方で分かる", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, {
+      date: "2026-08-05",
+      name: "田中",
+      people: 2,
+      amount: 8000,
+      pay: "cash",
+      receipt: false,
+    });
+    await setCloseDay(page, "2026-08-05");
+    await page.locator("#clCount").fill("8000");
+    await page.locator("#btnClose").click();
+    await expect(page.locator("#clDiff")).toHaveText("¥0");
+    await expect(page.locator("#clMoved")).toHaveText("");
+
+    // 締めたあとに1件足す
+    await addSale(page, {
+      date: "2026-08-05",
+      name: "あとから来た客",
+      people: 2,
+      amount: 9000,
+      pay: "cash",
+      receipt: false,
+    });
+    // その場で言う
+    await expect(page.locator(".toast")).toContainText("締めてあります");
+
+    // 締めの画面でも出る
+    await setCloseDay(page, "2026-08-05");
+    await expect(page.locator("#clMoved")).toContainText("1 件 動いています");
+    await expect(page.locator("#clMoved")).toContainText("数え直して締め直して");
+    // 止めてはいない（売上は入っている）
+    expect(await page.evaluate(() => window.__NOMIYA.sales.length)).toBe(2);
+
+    // 締め直して数え直せば消える
+    await page.locator("#btnClose").click();
+    await page.locator("#clCount").fill("17000");
+    await page.locator("#btnClose").click();
+    await expect(page.locator("#clMoved")).toHaveText("");
+    await expect(page.locator("#clDiff")).toHaveText("¥0");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});

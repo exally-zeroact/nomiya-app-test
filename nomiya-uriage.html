@@ -1624,6 +1624,7 @@
           />
         </div>
         <div class="hint" id="clState" style="margin-top: 8px"></div>
+        <div class="li-warn" id="clMoved" style="margin-top: 8px"></div>
         <div class="li-warn" id="clNoStaff" style="margin-top: 8px"></div>
         <div style="margin-top: 12px">
           <button class="btn btn-primary" type="button" id="btnClose">この日を締める</button>
@@ -2802,6 +2803,10 @@
           SALES.push(C.normalizeSale(raw));
           saveSales();
           toast("✅ 保存しました");
+        }
+        // ★締めた日を触ったら、その場で言う（あとで気づくと現金が合わない）
+        if (C.movedAfterCloseCount(SALES, raw.date, CLOSES[raw.date])) {
+          toast("⚠️ " + C.jpDate(raw.date) + "は締めてあります。あるべき額が変わりました");
         }
         // 請求書送りで選んだ相手は、次から上に出す
         if (raw.pay === "invoice" && PARTNERS[raw.name]) {
@@ -4903,6 +4908,13 @@
         var anyRate = C.aliveStaff(STAFF).some(function (st) {
           return st.rate > 0 && C.staffUses(st, "rate");
         });
+        // ★締めたあとに、その日の売上が動いていたら必ず出す（黙って差額が変わらないように）
+        var movedN = C.movedAfterCloseCount(SALES, UI.closeYmd, inp);
+        $("clMoved").textContent = movedN
+          ? "⚠️ 締めたあとに、この日の売上が " +
+            movedN +
+            " 件 動いています。あるべき額と差額が変わっています。数え直して締め直してください"
+          : "";
         $("clNoStaff").textContent =
           anyRate && noStaff.length
             ? "⚠️ 担当が入っていない売上が " +

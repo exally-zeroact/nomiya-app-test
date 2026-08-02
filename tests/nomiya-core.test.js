@@ -2999,3 +2999,57 @@ describe("バックの種類の並べ替え", () => {
     expect(moved.map((x) => x.key).slice(0, 3)).toEqual(["shimei", "douhan", "jonai"]);
   });
 });
+
+/* =====================================================================
+   ⑭ 締めたあとに、その日の売上が動いたら分かるようにする
+   ★止めない。ただし黙って差額が変わるのは困るので、必ず出す。
+   ===================================================================== */
+describe("締めたあとに動いた", () => {
+  const sale = (o) =>
+    C.normalizeSale(
+      Object.assign({ date: "2026-08-05", name: "客", people: 2, amount: 8000, pay: "cash" }, o),
+      o && o.at ? o.at : "2026-08-05T10:00:00.000Z"
+    );
+  const closed = C.normalizeClose(
+    { ymd: "2026-08-05", counted: 30000, closedAt: "2026-08-05T20:00:00.000Z" },
+    "2026-08-05T20:00:00.000Z"
+  );
+
+  it("まだ締めていない日は、いつでも false", () => {
+    const open = C.normalizeClose({ ymd: "2026-08-05" }, "2026-08-05T10:00:00.000Z");
+    expect(C.movedAfterClose([sale({ at: "2026-08-06T01:00:00.000Z" })], "2026-08-05", open)).toBe(
+      false
+    );
+    expect(C.movedAfterClose([], "2026-08-05", null)).toBe(false);
+  });
+  it("締める前に打った分だけなら false", () => {
+    expect(
+      C.movedAfterClose([sale({ at: "2026-08-05T19:00:00.000Z" })], "2026-08-05", closed)
+    ).toBe(false);
+  });
+  it("締めたあとに足した／直したら true", () => {
+    expect(
+      C.movedAfterClose([sale({ at: "2026-08-05T21:00:00.000Z" })], "2026-08-05", closed)
+    ).toBe(true);
+  });
+  it("締めたあとに消したときも true（現金が動くから）", () => {
+    const del = Object.assign(sale({ at: "2026-08-05T19:00:00.000Z" }), {
+      deletedAt: "2026-08-05T22:00:00.000Z",
+      updatedAt: "2026-08-05T22:00:00.000Z",
+    });
+    expect(C.movedAfterClose([del], "2026-08-05", closed)).toBe(true);
+  });
+  it("別の日の売上は数えない", () => {
+    const other = sale({ date: "2026-08-06", at: "2026-08-06T21:00:00.000Z" });
+    expect(C.movedAfterClose([other], "2026-08-05", closed)).toBe(false);
+  });
+  it("何件動いたかも数えられる", () => {
+    const rows = [
+      sale({ at: "2026-08-05T19:00:00.000Z" }),
+      sale({ at: "2026-08-05T21:00:00.000Z" }),
+      sale({ at: "2026-08-05T22:00:00.000Z" }),
+    ];
+    expect(C.movedAfterCloseCount(rows, "2026-08-05", closed)).toBe(2);
+    expect(C.movedAfterCloseCount(rows, "2026-08-05", null)).toBe(0);
+  });
+});

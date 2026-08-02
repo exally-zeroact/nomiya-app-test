@@ -912,6 +912,26 @@
     return mx;
   }
   // 前の日の「数えた実数」を、次の日の釣銭準備金に繰り越す
+  /**
+   * movedAfterCloseCount(sales, ymd, close)
+   *  締めたあとに、その日の売上が何件動いたか（足した・直した・消した）。
+   *  止めはしないが、黙って「あるべき額」と差額が変わるのは困るので、必ず数えて出す。
+   */
+  function movedAfterCloseCount(sales, ymd, close) {
+    var at = (close || {}).closedAt;
+    if (!at) return 0;
+    var n = 0;
+    (sales || []).forEach(function (s) {
+      if (!s || s.date !== ymd) return;
+      // 消した分も数える（現金が動くから）
+      if (_s(s.updatedAt) > _s(at)) n++;
+    });
+    return n;
+  }
+  function movedAfterClose(sales, ymd, close) {
+    return movedAfterCloseCount(sales, ymd, close) > 0;
+  }
+
   function carryOver(closes, ymd) {
     var prev = "";
     Object.keys(closes || {}).forEach(function (k) {
@@ -2556,6 +2576,8 @@
     normalizeOut: normalizeOut,
     closeDraft: closeDraft,
     carryOver: carryOver,
+    movedAfterClose: movedAfterClose,
+    movedAfterCloseCount: movedAfterCloseCount,
     normalizeClose: normalizeClose,
     closeToRow: closeToRow,
     closeFromRow: closeFromRow,
