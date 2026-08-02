@@ -1817,6 +1817,50 @@
   }
 
   /**
+   * unmarkPaid(works, staffId, paidYmd, now)
+   *  「渡した」を取り消す。その人・その渡した日の分だけ、印と固めた額を外す。
+   *  返り = { works: 新しい配列, workIds: 外した出勤のid }
+   *  （workIds は、締めの出金を一緒に外すために使う）
+   */
+  function unmarkPaid(works, staffId, paidYmd, now) {
+    var iso = now || nowIso();
+    var ids = [];
+    var next = (works || []).map(function (w) {
+      if (!w || w.deletedAt || w.staffId !== staffId) return w;
+      if (String(w.paidAt || "").slice(0, 10) !== paidYmd) return w;
+      ids.push(w.id);
+      return Object.assign({}, w, { paidAt: null, paidAmount: 0, updatedAt: iso });
+    });
+    return { works: next, workIds: ids };
+  }
+
+  /**
+   * removePayouts(closes, outIds, now)
+   *  締めの出金から、指定した印の行だけを外す。
+   *  出勤を消したとき・渡したのを取り消したときに、金庫から出た記録も一緒に消すため。
+   *  触らなかった日は、時刻も含めてそのまま返す。
+   */
+  function removePayouts(closes, outIds, now) {
+    var kill = {};
+    (outIds || []).forEach(function (id) {
+      if (id) kill[id] = true;
+    });
+    var src = closes || {};
+    var out = {};
+    Object.keys(src).forEach(function (ymd) {
+      var c = src[ymd] || {};
+      var outs = (c.outs || []).filter(function (o) {
+        return !kill[(o || {}).id];
+      });
+      out[ymd] =
+        outs.length === (c.outs || []).length
+          ? c
+          : normalizeClose(Object.assign({}, c, { outs: outs }), now);
+    });
+    return out;
+  }
+
+  /**
    * payoutLog(staffList, works, sales, opt)
    *  「いつ・誰に・いくら渡したか」。渡した日 × 人 でまとめて、新しい順に返す。
    *  額は渡したときに固めた値（paidAmount）。古いデータで入っていなければ、
@@ -2485,6 +2529,8 @@
     payPlan: payPlan,
     markPaidRange: markPaidRange,
     payoutLog: payoutLog,
+    unmarkPaid: unmarkPaid,
+    removePayouts: removePayouts,
     normalizeStaff: normalizeStaff,
     normalizeWork: normalizeWork,
     workMinutes: workMinutes,

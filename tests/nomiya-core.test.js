@@ -2828,3 +2828,98 @@ describe("渡し方（どこから渡すか）", () => {
     expect(C.staffFromRow({ sid: "s1", name: "x", cash: true }).payFrom).toBe("register");
   });
 });
+
+/* =====================================================================
+   ⑨ 渡す・消すのまわりの穴（お金が合わなくなる所）
+   ===================================================================== */
+describe("渡したのを取り消す・出金を外す", () => {
+  const w = (o) =>
+    C.normalizeWork(
+      Object.assign({ ymd: "2026-08-01", staffId: "s1", inAt: "20:00", outAt: "01:00" }, o),
+      "2026-08-01T00:00:00.000Z"
+    );
+
+  it("渡したのを取り消すと、印も固めた額も外れる", () => {
+    const works = [
+      w({ id: "w1", paidAt: "2026-08-31T05:00:00.000Z", paidAmount: 5000 }),
+      w({ id: "w2", ymd: "2026-08-02", paidAt: "2026-08-31T05:00:00.000Z", paidAmount: 7000 }),
+      w({ id: "w3", ymd: "2026-08-03" }), // まだ渡していない
+    ];
+    const r = C.unmarkPaid(works, "s1", "2026-08-31", "2026-09-01T00:00:00.000Z");
+    expect(r.workIds.sort()).toEqual(["w1", "w2"]);
+    expect(r.works.filter((x) => x.paidAt).length).toBe(0);
+    expect(r.works.map((x) => x.paidAmount)).toEqual([0, 0, 0]);
+    // 元の配列は書き換えない
+    expect(works[0].paidAt).toBe("2026-08-31T05:00:00.000Z");
+  });
+
+  it("別の人・別の日の分は触らない／消した出勤も触らない", () => {
+    const works = [
+      w({ id: "w1", paidAt: "2026-08-31T05:00:00.000Z", paidAmount: 5000 }),
+      w({ id: "w2", staffId: "s2", paidAt: "2026-08-31T05:00:00.000Z", paidAmount: 6000 }),
+      w({ id: "w3", paidAt: "2026-09-30T05:00:00.000Z", paidAmount: 7000 }),
+      w({
+        id: "w4",
+        paidAt: "2026-08-31T05:00:00.000Z",
+        paidAmount: 8000,
+        deletedAt: "2026-08-31T06:00:00.000Z",
+      }),
+    ];
+    const r = C.unmarkPaid(works, "s1", "2026-08-31", "2026-09-01T00:00:00.000Z");
+    expect(r.workIds).toEqual(["w1"]);
+    expect(r.works.find((x) => x.id === "w2").paidAmount).toBe(6000);
+    expect(r.works.find((x) => x.id === "w3").paidAmount).toBe(7000);
+    expect(r.works.find((x) => x.id === "w4").paidAmount).toBe(8000);
+  });
+
+  it("締めの出金を、印を指定して外せる（他の出金は残る）", () => {
+    const closes = {
+      "2026-08-31": C.normalizeClose(
+        {
+          ymd: "2026-08-31",
+          outs: [
+            { id: "pay_w1", kind: "pay", amount: 5000, staff: "あかり" },
+            { id: "pay_range_s1_2026-08-31", kind: "pay", amount: 12000, staff: "あかり" },
+            { id: "buy1", kind: "buy", amount: 3000, memo: "氷" },
+          ],
+        },
+        "2026-08-31T00:00:00.000Z"
+      ),
+      "2026-09-01": C.normalizeClose(
+        { ymd: "2026-09-01", outs: [{ id: "pay_w9", kind: "pay", amount: 1000 }] },
+        "2026-09-01T00:00:00.000Z"
+      ),
+    };
+    const next = C.removePayouts(
+      closes,
+      ["pay_w1", "pay_range_s1_2026-08-31"],
+      "2026-09-02T00:00:00.000Z"
+    );
+    expect(next["2026-08-31"].outs.map((o) => o.id)).toEqual(["buy1"]);
+    // 触っていない日はそのまま（時刻も変えない）
+    expect(next["2026-09-01"].outs.map((o) => o.id)).toEqual(["pay_w9"]);
+    expect(next["2026-09-01"].updatedAt).toBe("2026-09-01T00:00:00.000Z");
+    // 元は書き換えない
+    expect(closes["2026-08-31"].outs.length).toBe(3);
+  });
+
+  it("知らない印を渡しても何も起きない／空でも壊れない", () => {
+    const closes = {
+      "2026-08-31": C.normalizeClose(
+        { ymd: "2026-08-31", outs: [{ id: "buy1", kind: "buy", amount: 3000 }] },
+        "2026-08-31T00:00:00.000Z"
+      ),
+    };
+    expect(C.removePayouts(closes, ["pay_zzz"])["2026-08-31"].outs.length).toBe(1);
+    expect(C.removePayouts(closes, [])["2026-08-31"].outs.length).toBe(1);
+    expect(C.removePayouts(null, ["x"])).toEqual({});
+  });
+
+  it("取り消したら、渡した記録から消える", () => {
+    const st = C.normalizeStaff({ id: "s1", name: "あかり", hourly: 1000 });
+    const works = [w({ id: "w1", paidAt: "2026-08-31T05:00:00.000Z", paidAmount: 5000 })];
+    expect(C.payoutLog([st], works, [], {}).length).toBe(1);
+    const r = C.unmarkPaid(works, "s1", "2026-08-31", "2026-09-01T00:00:00.000Z");
+    expect(C.payoutLog([st], r.works, [], {}).length).toBe(0);
+  });
+});

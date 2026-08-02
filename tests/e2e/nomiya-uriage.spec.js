@@ -3663,7 +3663,9 @@ test.describe("⑦ 渡した記録", () => {
     await page.locator("#st_ok").click();
   }
 
-  test("まとめて渡すと記録に残る。渡し方が「レジから」の人は締めの出金にも入る", async ({ page }) => {
+  test("まとめて渡すと記録に残る。渡し方が「レジから」の人は締めの出金にも入る", async ({
+    page,
+  }) => {
     const errors = await open(page);
     // 月末締め・締めたその日に渡す
     await addStaff3(page, { name: "あかり", hourly: 1000, cycle: "monthly" });
@@ -3833,6 +3835,157 @@ test.describe("⑧ 渡し方", () => {
     await page.locator("#wk_pay").click();
     await expect(page.locator("#payLog .li-amt")).toHaveText("¥6,000");
     expect(await closeOut(page, "2026-08-05")).toBe("¥0");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* =====================================================================
+   ⑨ 渡す・消すのまわり（お金が合わなくなる所を塞ぐ）
+   ===================================================================== */
+test.describe("⑨ 渡す・消すでレジが合わなくならない", () => {
+  async function setPayDay(page, ymd) {
+    await page.locator(".nav-item[data-scr='pay']").click();
+    for (let i = 0; i < 400; i++) {
+      const now = await page.evaluate(() => window.__NOMIYA.payYmd);
+      if (now === ymd) return;
+      await page.locator(`#periodPay [data-pmv="${now > ymd ? -1 : 1}"]`).click();
+    }
+    throw new Error("給料の日を " + ymd + " に合わせられなかった");
+  }
+  async function setCloseDay(page, ymd) {
+    await goto(page, "close");
+    for (let i = 0; i < 400; i++) {
+      const now = await page.evaluate(() => window.__NOMIYA.closeYmd);
+      if (now === ymd) return;
+      await page.locator(`#periodClose [data-cmv="${now > ymd ? -1 : 1}"]`).click();
+    }
+    throw new Error("締めの日を " + ymd + " に合わせられなかった");
+  }
+  async function addStaff5(page, name) {
+    await gotoSet(page, "staff");
+    await page.locator("#btnStaffAdd").click();
+    await page.locator("#st_name").fill(name);
+    await page.locator("#st_hourly").fill("1000");
+    await page.locator("#st_ok").click();
+  }
+  async function addWork(page, ymd, name) {
+    await setPayDay(page, ymd);
+    await page.locator("#btnWorkAdd").click();
+    await page.locator("#wk_staff").selectOption({ label: name });
+    await page.locator("#wk_in").fill("20:00");
+    await page.locator("#wk_out").fill("01:00");
+    await page.locator("#wk_ok").click();
+  }
+
+  test("① 出勤を消したら、締めの出金からも消える", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff5(page, "あかり");
+    await addWork(page, "2026-08-05", "あかり");
+    await setPayDay(page, "2026-08-05");
+    await page.locator("#payDayList .li").click();
+    await page.locator("#wk_pay").click();
+    await setCloseDay(page, "2026-08-05");
+    await expect(page.locator("#clOut")).toHaveText("−¥5,000");
+
+    // 出勤を消す
+    await setPayDay(page, "2026-08-05");
+    await page.locator("#payDayList .li").click();
+    await page.locator("#wk_del").click();
+    await setCloseDay(page, "2026-08-05");
+    await expect(page.locator("#clOut")).toHaveText("¥0");
+    await expect(page.locator("#clOuts")).not.toContainText("あかり");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("② 締めた日には渡せない（鍵を破らない）", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff5(page, "あかり");
+    await addWork(page, "2026-08-06", "あかり");
+    // その日を締める
+    await setCloseDay(page, "2026-08-06");
+    await page.locator("#clCount").fill("10000");
+    await page.locator("#btnClose").click();
+    await expect(page.locator("#clState")).toContainText("締めました");
+
+    // 渡そうとしても止まる
+    await setPayDay(page, "2026-08-06");
+    await page.locator("#payDue [data-due]").click();
+    await expect(page.locator(".toast")).toContainText("締めてあります");
+    expect(await page.evaluate(() => window.__NOMIYA.works[0].paidAt)).toBe(null);
+
+    // 締め直せば渡せる
+    await setCloseDay(page, "2026-08-06");
+    await page.locator("#btnClose").click();
+    await setPayDay(page, "2026-08-06");
+    await page.locator("#payDue [data-due]").click();
+    await expect(page.locator("#payLog .li-amt")).toHaveText("¥5,000");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("③ 渡したあとに出勤を直しても、渡した額は動かない", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff5(page, "あかり");
+    await addWork(page, "2026-08-07", "あかり");
+    await setPayDay(page, "2026-08-07");
+    await page.locator("#payDue [data-due]").click();
+    expect(await page.evaluate(() => window.__NOMIYA.works[0].paidAmount)).toBe(5000);
+
+    // メモだけ直す
+    await page.locator("#payDayList .li").click();
+    await page.locator("#wk_memo").fill("ヘルプ入った");
+    await page.locator("#wk_ok").click();
+    expect(
+      await page.evaluate(() => window.__NOMIYA.works[0].paidAmount),
+      "出勤を直したら固めた額が消えた"
+    ).toBe(5000);
+    await expect(page.locator("#payLog .li-amt")).toHaveText("¥5,000");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("④ 渡したのを取り消せる（記録も締めの出金も戻る）", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff5(page, "あかり");
+    await addWork(page, "2026-08-08", "あかり");
+    await setPayDay(page, "2026-08-08");
+    await page.locator("#payDue [data-due]").click();
+    await expect(page.locator("#payLog .li-amt")).toHaveText("¥5,000");
+    await setCloseDay(page, "2026-08-08");
+    await expect(page.locator("#clOut")).toHaveText("−¥5,000");
+
+    // 取り消す
+    await setPayDay(page, "2026-08-08");
+    await page.locator("#payLog [data-undopay]").click();
+    await page.locator("#mdUndoYes").click();
+    await expect(page.locator("#payLog")).toContainText("まだありません");
+    // また渡す人として出てくる（二重払いにならない形で戻る）
+    await expect(page.locator("#payDue .li-amt")).toHaveText("¥5,000");
+    expect(await page.evaluate(() => window.__NOMIYA.works[0].paidAt)).toBe(null);
+    expect(await page.evaluate(() => window.__NOMIYA.works[0].paidAmount)).toBe(0);
+    // レジの出金も戻る
+    await setCloseDay(page, "2026-08-08");
+    await expect(page.locator("#clOut")).toHaveText("¥0");
+
+    // 開き直しても取り消したまま
+    await page.reload({ waitUntil: "load" });
+    await setPayDay(page, "2026-08-08");
+    await expect(page.locator("#payLog")).toContainText("まだありません");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("④ 締めた日の分は取り消せない（鍵を破らない）", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff5(page, "あかり");
+    await addWork(page, "2026-08-09", "あかり");
+    await setPayDay(page, "2026-08-09");
+    await page.locator("#payDue [data-due]").click();
+    await setCloseDay(page, "2026-08-09");
+    await page.locator("#clCount").fill("10000");
+    await page.locator("#btnClose").click();
+
+    await setPayDay(page, "2026-08-09");
+    await page.locator("#payLog [data-undopay]").click();
+    await expect(page.locator(".toast")).toContainText("締めてあります");
+    await expect(page.locator("#payLog .li-amt")).toHaveText("¥5,000");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });

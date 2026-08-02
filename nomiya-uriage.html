@@ -5294,6 +5294,13 @@
               var from = b.getAttribute("data-from");
               var to = b.getAttribute("data-to");
               var st = staffById(sid);
+              // ★締めた日はレジの出金を増やせない（締めの鍵を破らない）
+              if (C.fromRegister(st) && closeInput(UI.payYmd).closedAt) {
+                toast(
+                  "⚠️ " + C.jpDate(UI.payYmd) + "は締めてあります。締め直してから渡してください"
+                );
+                return;
+              }
               // 渡した額をその場で固める（あとで決め方を直しても、記録は動かさない）
               var amounts = {};
               var total = 0;
@@ -5315,7 +5322,7 @@
                   UI.payYmd,
                   st.name,
                   total,
-                  "range_" + sid + "_" + from + "_" + to,
+                  "range_" + sid + "_" + UI.payYmd,
                   C.mdShort(from) + "〜" + C.mdShort(to) + " 締め分"
                 );
               }
@@ -5416,11 +5423,59 @@
                   esc(C.payFromLabel(x.payFrom)) +
                   '</div></div><div class="li-amt">' +
                   C.yen(x.amount) +
-                  "</div></div>"
+                  '</div><button class="btn btn-ghost btn-sm" type="button" data-undopay="' +
+                  esc(x.staffId) +
+                  '" data-undoymd="' +
+                  esc(x.ymd) +
+                  '" style="flex:0 0 auto">取り消す</button>' +
+                  "</div>"
                 );
               })
               .join("")
           : '<div class="empty">この月に渡した分はまだありません。</div>';
+        // 押し間違いを戻せるようにする。渡した印・固めた額・締めの出金を、まとめて外す。
+        $("payLog")
+          .querySelectorAll("[data-undopay]")
+          .forEach(function (b) {
+            b.onclick = function () {
+              var sid = b.getAttribute("data-undopay");
+              var ymd = b.getAttribute("data-undoymd");
+              var st = staffById(sid);
+              if (C.fromRegister(st) && closeInput(ymd).closedAt) {
+                toast("⚠️ " + C.jpDate(ymd) + "は締めてあります。締め直してから取り消してください");
+                return;
+              }
+              openModal(
+                "渡したのを取り消す",
+                '<div class="hint">' +
+                  esc(C.jpDate(ymd)) +
+                  " に " +
+                  esc(st ? st.name : "") +
+                  "へ渡した記録を取り消します。<br>渡した印と、レジから出した記録も一緒に外れます。" +
+                  '</div><div class="btn-right" style="margin-top:14px">' +
+                  '<button class="btn btn-ghost btn-danger btn-sm" id="mdUndoYes">取り消す</button></div>'
+              );
+              $("mdUndoYes").onclick = function () {
+                var nowIso3 = new Date().toISOString();
+                var r = C.unmarkPaid(WORKS, sid, ymd, nowIso3);
+                WORKS = r.works;
+                saveWorks();
+                CLOSES = C.removePayouts(
+                  CLOSES,
+                  r.workIds
+                    .map(function (id) {
+                      return "pay_" + id;
+                    })
+                    .concat(["pay_range_" + sid + "_" + ymd]),
+                  nowIso3
+                );
+                saveCloses();
+                closeModal();
+                renderAll();
+                toast("↩️ 取り消しました");
+              };
+            };
+          });
 
         $("paySheets").innerHTML = paySheetHtml(ym, sums);
         fitSheets("payScale", "paySheets");
@@ -6386,6 +6441,8 @@
             lend: $("wk_lend").value,
             repay: $("wk_repay").value,
             paidAt: cur ? cur.paidAt : null,
+            // 渡した額は固めたまま持ち回る（メモを直しただけで記録が変わらないように）
+            paidAmount: cur ? cur.paidAmount : 0,
             memo: $("wk_memo").value,
           });
         };
@@ -6459,6 +6516,12 @@
         };
         if ($("wk_pay")) {
           $("wk_pay").onclick = function () {
+            // ★締めた日はレジの出金を増やせない（締めの鍵を破らない）
+            var stNow = staffById($("wk_staff").value);
+            if (C.fromRegister(stNow) && closeInput(UI.payYmd).closedAt) {
+              toast("⚠️ " + C.jpDate(UI.payYmd) + "は締めてあります。締め直してから渡してください");
+              return;
+            }
             var w0 = save({ paidAt: paidStamp(UI.payYmd) });
             var st = staffById(w0.staffId);
             var d = C.payDay(st, w0, {
@@ -6487,8 +6550,12 @@
                 : x;
             });
             saveWorks();
+            // ★この出勤で渡した分が締めの出金に入っていたら、それも一緒に外す。
+            //   残すと、金庫から出していないのに出したことになってレジが合わない。
+            CLOSES = C.removePayouts(CLOSES, ["pay_" + cur.id], nowIso2);
+            saveCloses();
             closeModal();
-            renderPay();
+            renderAll();
             toast("🗑 消しました");
           };
         }
