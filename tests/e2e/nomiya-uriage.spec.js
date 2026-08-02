@@ -3511,3 +3511,50 @@ test.describe("紙に絞り込みの見出しを刷らない", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
+
+/* 売上帳の「領収書 あり/なし」の内訳は、すべてで見ているときだけ出す（司さん指示）。
+   絞って出した紙（あり・なし・調整・あとで渡す分）には載せない。 */
+test.describe("売上帳の下の内訳", () => {
+  test("すべてのときだけ 領収書あり/なし を載せる。絞ったら載せない", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, {
+      date: "2026-07-01",
+      name: "田中",
+      people: 2,
+      amount: 8000,
+      pay: "cash",
+      receipt: false,
+    });
+    await addSale(page, {
+      date: "2026-07-02",
+      name: "山本",
+      people: 2,
+      amount: 12000,
+      pay: "cash",
+      receipt: true,
+    });
+    await goto(page, "list");
+    await page.locator("#periodList .period-lb").click();
+    await page.locator("#mdFrom").fill("2026-07-01");
+    await page.locator("#mdTo").fill("2026-07-31");
+    await page.locator("#mdOk").click();
+
+    // すべて＝出す
+    await page.locator('#filRec button[data-rec="all"]').click();
+    const all = await page.locator("#listSheets .sh-foot").innerText();
+    expect(all).toContain("領収書あり");
+    expect(all).toContain("領収書なし");
+    expect(all).toContain("客単価");
+
+    // 絞ったら載せない（客単価は残す）
+    for (const rec of ["yes", "no", "adj", "later"]) {
+      await page.locator(`#filRec button[data-rec="${rec}"]`).click();
+      const foot = await page.locator("#listSheets .sh-foot").innerText();
+      expect(foot, `${rec} の紙に「領収書あり」が出ている`).not.toContain("領収書あり");
+      expect(foot, `${rec} の紙に「領収書なし」が出ている`).not.toContain("領収書なし");
+      expect(foot).toContain("客単価");
+      expect(foot).toContain("支払い方法別");
+    }
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
