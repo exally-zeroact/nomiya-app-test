@@ -2636,3 +2636,127 @@ describe("調整（選んだ分だけ、あり側に足す）", () => {
     expect(C.saleFromRow({ cid: "x", ymd: "2026-07-01", amount: 1000 }).adj).toBe(false);
   });
 });
+
+/* =====================================================================
+   ⑦ 渡した記録（いつ・誰に・いくら渡したか）
+   ★渡した額は「渡した時点の額」で固める。あとで決め方を直しても、
+     過去に渡した記録は動かさない。
+   ===================================================================== */
+describe("渡した記録", () => {
+  const st1 = C.normalizeStaff({ id: "s1", name: "あかり", hourly: 1000, cash: true });
+  const st2 = C.normalizeStaff({ id: "s2", name: "ゆい", hourly: 1000, cash: false });
+  const w = (o) =>
+    C.normalizeWork(
+      Object.assign({ ymd: "2026-08-01", staffId: "s1", inAt: "20:00", outAt: "01:00" }, o),
+      "2026-08-01T00:00:00.000Z"
+    );
+
+  it("渡した額を出勤に持てる（既定は0＝まだ持っていない）", () => {
+    expect(w({}).paidAmount).toBe(0);
+    expect(w({ paidAmount: 5000 }).paidAmount).toBe(5000);
+    expect(w({ paidAmount: "5000" }).paidAmount).toBe(5000);
+  });
+
+  it("まとめて渡すと、その時の額が1件ずつ固まる", () => {
+    const works = [w({ id: "w1", ymd: "2026-08-01" }), w({ id: "w2", ymd: "2026-08-02" })];
+    const next = C.markPaidRange(
+      works,
+      "s1",
+      "2026-08-01",
+      "2026-08-31",
+      "2026-09-01T00:00:00.000Z",
+      {
+        w1: 5000,
+        w2: 7000,
+      }
+    );
+    expect(next.map((x) => x.paidAmount)).toEqual([5000, 7000]);
+    expect(next.every((x) => x.paidAt === "2026-09-01T00:00:00.000Z")).toBe(true);
+    // 額を渡さなくても今までどおり動く（印だけ付く）
+    const noAmt = C.markPaidRange(
+      works,
+      "s1",
+      "2026-08-01",
+      "2026-08-31",
+      "2026-09-01T00:00:00.000Z"
+    );
+    expect(noAmt.map((x) => x.paidAmount)).toEqual([0, 0]);
+  });
+
+  it("いつ・誰に・いくら渡したかが、渡した日ごとに出る", () => {
+    const works = [
+      w({ id: "w1", ymd: "2026-08-01", paidAt: "2026-08-05T10:00:00.000Z", paidAmount: 5000 }),
+      w({ id: "w2", ymd: "2026-08-02", paidAt: "2026-08-05T10:00:00.000Z", paidAmount: 7000 }),
+      w({
+        id: "w3",
+        ymd: "2026-08-03",
+        staffId: "s2",
+        paidAt: "2026-08-06T10:00:00.000Z",
+        paidAmount: 9000,
+      }),
+      w({ id: "w4", ymd: "2026-08-04" }), // まだ渡していない
+    ];
+    const log = C.payoutLog([st1, st2], works, [], {});
+    expect(log.length).toBe(2);
+    // 新しい順
+    expect(log[0]).toEqual({
+      ymd: "2026-08-06",
+      staffId: "s2",
+      name: "ゆい",
+      cash: false,
+      amount: 9000,
+      days: 1,
+      from: "2026-08-03",
+      to: "2026-08-03",
+    });
+    expect(log[1]).toEqual({
+      ymd: "2026-08-05",
+      staffId: "s1",
+      name: "あかり",
+      cash: true,
+      amount: 12000, // 5,000＋7,000
+      days: 2,
+      from: "2026-08-01",
+      to: "2026-08-02",
+    });
+  });
+
+  it("あとで決め方を直しても、渡した記録の額は動かない", () => {
+    const works = [w({ id: "w1", paidAt: "2026-08-05T10:00:00.000Z", paidAmount: 5000 })];
+    // 時給を倍にしても、渡した記録は5,000のまま
+    const rich = C.normalizeStaff({ id: "s1", name: "あかり", hourly: 2000, cash: true });
+    expect(C.payoutLog([rich], works, [], {})[0].amount).toBe(5000);
+  });
+
+  it("古いデータ（額が入っていない渡し済み）は、その日の計算から出す", () => {
+    const works = [w({ id: "w1", paidAt: "2026-08-05T10:00:00.000Z" })]; // paidAmount なし
+    // 時給1,000×5時間＝5,000
+    expect(C.payoutLog([st1], works, [], {})[0].amount).toBe(5000);
+  });
+
+  it("期間で絞れる／消した出勤は出さない", () => {
+    const works = [
+      w({ id: "w1", paidAt: "2026-08-05T10:00:00.000Z", paidAmount: 5000 }),
+      w({ id: "w2", paidAt: "2026-09-05T10:00:00.000Z", paidAmount: 7000 }),
+      w({
+        id: "w3",
+        paidAt: "2026-08-06T10:00:00.000Z",
+        paidAmount: 3000,
+        deletedAt: "2026-08-07T00:00:00.000Z",
+      }),
+    ];
+    const aug = C.payoutLog([st1], works, [], { from: "2026-08-01", to: "2026-08-31" });
+    expect(aug.length).toBe(1);
+    expect(aug[0].amount).toBe(5000);
+    expect(C.payoutLog([st1], works, [], {}).length).toBe(2);
+  });
+
+  it("渡した記録もクラウドに残る", () => {
+    const x = w({ id: "w1", paidAt: "2026-08-05T10:00:00.000Z", paidAmount: 5000 });
+    const row = C.workToRow(x);
+    expect(row.paid_amount).toBe(5000);
+    expect(C.workFromRow(row).paidAmount).toBe(5000);
+    // 古い行（列がまだ無い店）から読んでも壊れない
+    expect(C.workFromRow({ wid: "w9", ymd: "2026-08-01", staff_id: "s1" }).paidAmount).toBe(0);
+  });
+});

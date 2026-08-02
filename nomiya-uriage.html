@@ -1688,6 +1688,12 @@
         <div id="payMonth"></div>
       </div>
 
+      <!-- いつ・誰に・いくら渡したか。渡した時の額で残す（あとで決め方を直しても動かない） -->
+      <div class="card">
+        <div class="card-label">渡した記録</div>
+        <div id="payLog"></div>
+      </div>
+
       <div class="hint" style="margin: 0 2px 10px">
         スタッフ・よく出るボトル・バックの種類は、右上の ⚙️ で足せます。
       </div>
@@ -5143,6 +5149,12 @@
         });
       }
       // 黄色い注意をどう出すか。店が実際に付けている/引いているなら、その注意は出さない。
+      // 渡した時刻。日付は「画面で見ている日」に合わせる。
+      // （締めの出金もその日に入るので、ここがズレると記録と現金が食い違う）
+      function paidStamp(ymd) {
+        var now = new Date().toISOString();
+        return C.isIsoDate(ymd) ? ymd + now.slice(10) : now;
+      }
       function payWarnOpt(ymd) {
         return {
           minWage: SETTINGS.minWage,
@@ -5278,16 +5290,36 @@
           .querySelectorAll("[data-due]")
           .forEach(function (b) {
             b.onclick = function () {
-              WORKS = C.markPaidRange(
-                WORKS,
-                b.getAttribute("data-due"),
-                b.getAttribute("data-from"),
-                b.getAttribute("data-to"),
-                new Date().toISOString()
-              );
+              var sid = b.getAttribute("data-due");
+              var from = b.getAttribute("data-from");
+              var to = b.getAttribute("data-to");
+              var st = staffById(sid);
+              // 渡した額をその場で固める（あとで決め方を直しても、記録は動かさない）
+              var amounts = {};
+              var total = 0;
+              WORKS.forEach(function (w) {
+                if (w.deletedAt || w.staffId !== sid || w.paidAt) return;
+                if (w.ymd < from || w.ymd > to) return;
+                var d = payDayOf(w);
+                if (!d) return;
+                amounts[w.id] = d.net;
+                total += d.net;
+              });
+              WORKS = C.markPaidRange(WORKS, sid, from, to, paidStamp(UI.payYmd), amounts);
               saveWorks();
+              // ★現金で渡すなら、渡した日の締めの出金にも入れる。
+              //   これが無いと、金庫から出したのに「あるべき額」が合わなくなる。
+              if (st && st.cash && total > 0) {
+                addPayoutToClose(
+                  UI.payYmd,
+                  st.name,
+                  total,
+                  "range_" + sid + "_" + from + "_" + to,
+                  C.mdShort(from) + "〜" + C.mdShort(to) + " 締め分"
+                );
+              }
               renderAll();
-              toast("✅ 渡しました");
+              toast("💰 " + (st ? st.name : "") + " に " + C.yen(total) + " を渡しました");
             };
           });
         $("payDue")
@@ -5348,6 +5380,46 @@
             "</tbody></table>" +
             '<div class="hint" style="margin-top:6px">「まだ」＝これから渡す分。「渡した」は日払いなどで渡し済みの分。</div>'
           : '<div class="empty">この月はまだ出勤がありません。</div>';
+
+        // 渡した記録（この月に渡したぶん・新しい順）
+        var log = C.payoutLog(STAFF, WORKS, SALES, {
+          from: r.from,
+          to: r.to,
+          settings: SETTINGS,
+        });
+        var logTotal = log.reduce(function (a, x) {
+          return a + x.amount;
+        }, 0);
+        $("payLog").innerHTML = log.length
+          ? '<div class="hint" style="margin-bottom:8px">' +
+            esc(C.jpMonth(ym)) +
+            "に渡した分　" +
+            C.yen(logTotal) +
+            "</div>" +
+            log
+              .map(function (x) {
+                return (
+                  '<div class="li"><div class="li-main"><div class="li-nm">' +
+                  esc(C.mdShort(x.ymd)) +
+                  "（" +
+                  esc(C.weekday(x.ymd)) +
+                  "）　" +
+                  esc(x.name) +
+                  '</div><div class="li-sub">' +
+                  esc(C.mdShort(x.from)) +
+                  "〜" +
+                  esc(C.mdShort(x.to)) +
+                  " 締め分　" +
+                  x.days +
+                  "日　" +
+                  (x.cash ? "現金" : "振込") +
+                  '</div></div><div class="li-amt">' +
+                  C.yen(x.amount) +
+                  "</div></div>"
+                );
+              })
+              .join("")
+          : '<div class="empty">この月に渡した分はまだありません。</div>';
 
         $("paySheets").innerHTML = paySheetHtml(ym, sums);
         fitSheets("payScale", "paySheets");
@@ -6363,15 +6435,20 @@
         };
         if ($("wk_pay")) {
           $("wk_pay").onclick = function () {
-            var w = save({ paidAt: new Date().toISOString() });
-            var st = staffById(w.staffId);
-            var d = C.payDay(st, w, {
+            var w0 = save({ paidAt: paidStamp(UI.payYmd) });
+            var st = staffById(w0.staffId);
+            var d = C.payDay(st, w0, {
               sales: C.salesByStaff(SALES, UI.payYmd, st.name, SETTINGS),
               crew: C.crewByStaff(SALES, UI.payYmd, st.name),
               settings: SETTINGS,
             });
+            // 渡した額をその場で固める（あとで決め方を直しても、記録は動かさない）
+            WORKS = WORKS.map(function (x) {
+              return x.id === w0.id ? Object.assign({}, x, { paidAmount: d.net }) : x;
+            });
+            saveWorks();
             // 現金で渡すなら、その日の締めの出金にも入れる（二度打ちしない）
-            if (st.cash && d.net > 0) addPayoutToClose(UI.payYmd, st.name, d.net, w.id);
+            if (st.cash && d.net > 0) addPayoutToClose(UI.payYmd, st.name, d.net, w0.id);
             closeModal();
             renderPay();
             toast("💰 " + st.name + " に " + C.yen(d.net) + " を渡しました");
@@ -6394,7 +6471,7 @@
       }
 
       // 日払いを渡したら、その日のレジ締めの出金に1行入れる（同じ人の同じ日は入れ替える）
-      function addPayoutToClose(ymd, name, amount, wid) {
+      function addPayoutToClose(ymd, name, amount, wid, memo) {
         var cur =
           CLOSES[ymd] || C.normalizeClose({ ymd: ymd, opening: C.carryOver(CLOSES, ymd) || 0 });
         var outs = (cur.outs || []).filter(function (o) {
@@ -6405,7 +6482,7 @@
             id: "pay_" + wid,
             kind: "pay",
             amount: amount,
-            memo: "日払い",
+            memo: memo || "日払い",
             staff: name,
           })
         );

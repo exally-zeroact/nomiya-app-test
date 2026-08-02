@@ -187,6 +187,8 @@ create table if not exists nomiya_work (
 );
 alter table nomiya_work add column if not exists amount jsonb not null default '{}'::jsonb;
 alter table nomiya_work add column if not exists picks jsonb not null default '{}'::jsonb;
+-- 渡したその時の額（あとで決め方を直しても、渡した記録が動かないように固める）
+alter table nomiya_work add column if not exists paid_amount integer not null default 0;
 create index if not exists idx_nomiya_work_acct_ymd on nomiya_work(account_id, ymd);
 create index if not exists idx_nomiya_work_acct_staff on nomiya_work(account_id, staff_id, ymd);
 

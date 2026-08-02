@@ -1298,7 +1298,9 @@
       fine: _int(r.fine), // 罰金
       lend: _int(r.lend), // この日に前借りした
       repay: _int(r.repay), // この日に返した
-      paidAt: r.paidAt || null, // 日払いで渡した時刻（渡したら入る）
+      paidAt: r.paidAt || null, // 渡した時刻（渡したら入る）
+      // ★渡したその時の額。あとで決め方を直しても、渡した記録は動かさない。
+      paidAmount: _int(r.paidAmount),
       memo: String(r.memo == null ? "" : r.memo).trim(),
       updatedAt: now || nowIso(),
       deletedAt: r.deletedAt || null,
@@ -1760,14 +1762,76 @@
    *  もう渡した分・他の人の分・消した分は触らない（二重払いを作らない）。
    *  元の配列は書き換えない。
    */
-  function markPaidRange(works, staffId, from, to, now) {
+  function markPaidRange(works, staffId, from, to, now, amounts) {
     var iso = now || nowIso();
+    var amt = amounts || {};
     return (works || []).map(function (w) {
       if (!w || w.deletedAt || w.staffId !== staffId || w.paidAt) return w;
       if (from && w.ymd < from) return w;
       if (to && w.ymd > to) return w;
-      return Object.assign({}, w, { paidAt: iso, updatedAt: iso });
+      // 渡した額をその場で固める（渡した記録が、あとの設定変更で動かないように）
+      return Object.assign({}, w, {
+        paidAt: iso,
+        paidAmount: _int(amt[w.id]),
+        updatedAt: iso,
+      });
     });
+  }
+
+  /**
+   * payoutLog(staffList, works, sales, opt)
+   *  「いつ・誰に・いくら渡したか」。渡した日 × 人 でまとめて、新しい順に返す。
+   *  額は渡したときに固めた値（paidAmount）。古いデータで入っていなければ、
+   *  その日の計算から出す。opt.from / opt.to で渡した日を絞れる。
+   */
+  function payoutLog(staffList, works, sales, opt) {
+    var o = opt || {};
+    var byId = {};
+    (staffList || []).forEach(function (st) {
+      if (st && st.id) byId[st.id] = st;
+    });
+    var rows = {};
+    (works || []).forEach(function (w) {
+      if (!w || w.deletedAt || !w.paidAt) return;
+      var st = byId[w.staffId];
+      if (!st) return;
+      var ymd = String(w.paidAt).slice(0, 10);
+      if (o.from && ymd < o.from) return;
+      if (o.to && ymd > o.to) return;
+      var amount = _int(w.paidAmount);
+      if (!amount) {
+        amount = payDay(st, w, {
+          sales: salesByStaff(sales, w.ymd, st.name, o.settings),
+          crew: crewByStaff(sales, w.ymd, st.name),
+          settings: o.settings,
+        }).net;
+      }
+      var key = ymd + "|" + st.id;
+      var r =
+        rows[key] ||
+        (rows[key] = {
+          ymd: ymd,
+          staffId: st.id,
+          name: st.name,
+          cash: st.cash !== false,
+          amount: 0,
+          days: 0,
+          from: w.ymd,
+          to: w.ymd,
+        });
+      r.amount += amount;
+      r.days += 1;
+      if (w.ymd < r.from) r.from = w.ymd;
+      if (w.ymd > r.to) r.to = w.ymd;
+    });
+    return Object.keys(rows)
+      .map(function (k) {
+        return rows[k];
+      })
+      .sort(function (a, b) {
+        if (a.ymd !== b.ymd) return a.ymd < b.ymd ? 1 : -1; // 新しい順
+        return a.name < b.name ? -1 : 1;
+      });
   }
 
   /**
@@ -1906,6 +1970,7 @@
       lend: _int(x.lend),
       repay: _int(x.repay),
       paid_at: _ts(x.paidAt),
+      paid_amount: _int(x.paidAmount),
       memo: _s(x.memo),
       updated_at: _ts(x.updatedAt) || nowIso(),
       deleted_at: _ts(x.deletedAt),
@@ -1927,6 +1992,7 @@
         lend: r.lend,
         repay: r.repay,
         paidAt: r.paid_at || null,
+        paidAmount: r.paid_amount,
         memo: _s(r.memo),
         deletedAt: r.deleted_at || null,
       },
@@ -2374,6 +2440,7 @@
     payPeriod: payPeriod,
     payPlan: payPlan,
     markPaidRange: markPaidRange,
+    payoutLog: payoutLog,
     normalizeStaff: normalizeStaff,
     normalizeWork: normalizeWork,
     workMinutes: workMinutes,

@@ -3632,3 +3632,111 @@ test.describe("紙が枠からずれない", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
+
+/* =====================================================================
+   ⑦ 渡した記録（いつ・誰に・いくら渡したか）＋ 現金は締めの出金に入る
+   ===================================================================== */
+test.describe("⑦ 渡した記録", () => {
+  async function setPayDay(page, ymd) {
+    await page.locator(".nav-item[data-scr='pay']").click();
+    for (let i = 0; i < 400; i++) {
+      const now = await page.evaluate(() => window.__NOMIYA.payYmd);
+      if (now === ymd) return;
+      await page.locator(`#periodPay [data-pmv="${now > ymd ? -1 : 1}"]`).click();
+    }
+    throw new Error("給料の日を " + ymd + " に合わせられなかった");
+  }
+  async function addWork(page, ymd, name) {
+    await setPayDay(page, ymd);
+    await page.locator("#btnWorkAdd").click();
+    await page.locator("#wk_staff").selectOption({ label: name });
+    await page.locator("#wk_in").fill("20:00");
+    await page.locator("#wk_out").fill("01:00");
+    await page.locator("#wk_ok").click();
+  }
+  async function addStaff3(page, o) {
+    await gotoSet(page, "staff");
+    await page.locator("#btnStaffAdd").click();
+    await page.locator("#st_name").fill(o.name);
+    await page.locator("#st_hourly").fill(String(o.hourly));
+    if (o.cycle) await page.locator(`#st_cycle button[data-cy='${o.cycle}']`).click();
+    await page.locator("#st_ok").click();
+  }
+
+  test("まとめて渡すと、記録に残り、締めの出金にも入る", async ({ page }) => {
+    const errors = await open(page);
+    // 月末締め・締めたその日に渡す
+    await addStaff3(page, { name: "あかり", hourly: 1000, cycle: "monthly" });
+    await addWork(page, "2026-08-03", "あかり"); // 5,000
+    await addWork(page, "2026-08-10", "あかり"); // 5,000
+
+    // 8/31が渡す日
+    await setPayDay(page, "2026-08-31");
+    await expect(page.locator("#payDue .li-amt")).toHaveText("¥10,000");
+    await expect(page.locator("#payLog")).toContainText("まだありません");
+    await page.locator("#payDue [data-due]").click();
+
+    // 渡した記録に出る
+    await expect(page.locator("#payLog")).toContainText("8/31");
+    await expect(page.locator("#payLog")).toContainText("あかり");
+    await expect(page.locator("#payLog")).toContainText("8/3〜8/10 締め分");
+    await expect(page.locator("#payLog")).toContainText("2日");
+    await expect(page.locator("#payLog")).toContainText("現金");
+    await expect(page.locator("#payLog .li-amt")).toHaveText("¥10,000");
+
+    // ★現金なので、渡した日の締めの出金に入る（金庫から出た記録が残る）
+    await goto(page, "close");
+    for (let i = 0; i < 400; i++) {
+      const now = await page.evaluate(() => window.__NOMIYA.closeYmd);
+      if (now === "2026-08-31") break;
+      await page.locator(`#periodClose [data-cmv="${now > "2026-08-31" ? -1 : 1}"]`).click();
+    }
+    await expect(page.locator("#clOuts")).toContainText("あかり");
+    // 締めの出金には「締めた期間」で入る（記録の方は出勤した日で出す）
+    await expect(page.locator("#clOuts")).toContainText("8/1〜8/31 締め分");
+    await expect(page.locator("#clOut")).toHaveText("−¥10,000");
+
+    // 開き直しても残る
+    await page.reload({ waitUntil: "load" });
+    await setPayDay(page, "2026-08-31");
+    await expect(page.locator("#payLog .li-amt")).toHaveText("¥10,000");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("あとで時給を変えても、渡した記録の額は動かない", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff3(page, { name: "ゆい", hourly: 1000 }); // 日払い
+    await addWork(page, "2026-08-03", "ゆい");
+    await setPayDay(page, "2026-08-03");
+    await page.locator("#payDue [data-due]").click();
+    await expect(page.locator("#payLog .li-amt")).toHaveText("¥5,000");
+
+    // 時給を倍にする
+    await gotoSet(page, "staff");
+    await page.locator("#staffList .li", { hasText: "ゆい" }).click();
+    await page.locator("#st_hourly").fill("2000");
+    await page.locator("#st_ok").click();
+
+    // 渡した記録は 5,000 のまま
+    await setPayDay(page, "2026-08-03");
+    await expect(page.locator("#payLog .li-amt")).toHaveText("¥5,000");
+    expect(
+      await page.evaluate(() => window.__NOMIYA.works[0].paidAmount),
+      "渡した額が固まっていない"
+    ).toBe(5000);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("日払いボタンで渡した分も、記録に残る", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff3(page, { name: "みく", hourly: 1200 });
+    await addWork(page, "2026-08-05", "みく");
+    await setPayDay(page, "2026-08-05");
+    await page.locator("#payDayList .li").click();
+    await page.locator("#wk_pay").click();
+    await expect(page.locator("#payLog")).toContainText("みく");
+    await expect(page.locator("#payLog .li-amt")).toHaveText("¥6,000");
+    expect(await page.evaluate(() => window.__NOMIYA.works[0].paidAmount)).toBe(6000);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
