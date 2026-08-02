@@ -9,7 +9,7 @@
  *  { id, date:'YYYY-MM-DD', name, people, amount(税込円), pay, receipt(bool),
  *    memo, paidDate|null, createdAt, updatedAt, deletedAt|null }
  *
- * 【支払い方法】現金 / クレジット / PayPay / 請求書送り / ツケ
+ * 【支払い方法】現金 / クレジット / 電子決済 / 請求書送り / ツケ
  *  請求書送り・ツケ は「その場でお金が入っていない」＝未回収。paidDate が入ると回収済み。
  *
  * 【消費税】飲食は税込表記が実態。請求書には内税(税込金額の中に消費税が含まれる)で内訳を出す。
@@ -30,7 +30,7 @@
   var PAY_METHODS = [
     { key: "cash", label: "現金", short: "現金", unpaid: false },
     { key: "credit", label: "クレジット", short: "クレカ", unpaid: false },
-    { key: "paypay", label: "PayPay", short: "PayPay", unpaid: false },
+    { key: "paypay", label: "電子決済", short: "電子決済", unpaid: false }, // PayPay・楽天ペイ・交通系など（鍵は paypay のまま＝過去の売上を触らない）
     { key: "invoice", label: "請求書送り", short: "請求書", unpaid: true },
     { key: "tsuke", label: "ツケ", short: "ツケ", unpaid: true },
   ];
@@ -50,7 +50,7 @@
        none   = 出していない（現金でレシートも渡していない）
        issued = 出した（発行済み）
        later  = あとで渡す（ツケはその場でお金を受け取っていないので出せない。回収時に渡す）
-       na     = 要らない（振込＝請求書が証憑 / カード・PayPay＝売上票・利用明細が証憑）
+       na     = 要らない（振込＝請求書が証憑 / カード・電子決済＝売上票・利用明細が証憑）
      ※ 集計は2つに分ける。
        「領収書あり」= issued（出した）＋ na（振込・カード＝そもそも要らない。請求書や
          売上票が証憑として残るので、領収書ありと同じ側で数える）
@@ -61,7 +61,7 @@
     { key: "issued", label: "あり", mark: "○" },
     // あとで渡す分はまだ出していない＝「なし」側なので、紙の印も空にする
     { key: "later", label: "あとで", mark: "" },
-    // na = 領収書はいらない。振込(請求書が証憑)・カード/PayPay(売上票・利用明細が証憑)のとき。
+    // na = 領収書はいらない。振込(請求書が証憑)・カード/電子決済(売上票・利用明細が証憑)のとき。
     // 「なし(none)」と分けるのが肝。まとめると、振込やカードの売上まで
     // 「領収書なし」として落とされてしまう。
     // 振込・カードは領収書が要らない分。集計で「あり」側に数えるので、紙の印も○で揃える。
@@ -81,7 +81,7 @@
   function isLater(s) {
     return normalizeReceipt(s && s.receipt) === "later";
   }
-  // 領収書がいらない支払い（振込＝請求書が証憑 / カード・PayPay＝売上票が証憑）
+  // 領収書がいらない支払い（振込＝請求書が証憑 / カード・電子決済＝売上票が証憑）
   function isNa(s) {
     return normalizeReceipt(s && s.receipt) === "na";
   }
@@ -585,7 +585,7 @@
           "振込は請求書が証憑になるので領収書は要りません。求められたら出せます（紙で税抜5万円以上なら収入印紙が必要）。"
         );
       } else {
-        out.push("カード・PayPayは売上票や利用明細が証憑になるので領収書は要りません。");
+        out.push("カード・電子決済は売上票や利用明細が証憑になるので領収書は要りません。");
       }
       return out;
     }
@@ -593,7 +593,7 @@
     var cashless = s.pay === "credit" || s.pay === "paypay";
     if (cashless && isIssued(s)) {
       out.push(
-        "カード・PayPay払いの領収書は発行義務がなく、売上票や利用明細が証憑になります。出すときは「クレジットカード払い」と書けば二重発行と誤解されず、収入印紙も不要です。"
+        "カード・電子決済（PayPayなど）の領収書は発行義務がなく、売上票や利用明細が証憑になります。出すときは「クレジットカード払い」と書けば二重発行と誤解されず、収入印紙も不要です。"
       );
     }
     if (!cashless && isIssued(s)) {
@@ -800,7 +800,7 @@
         unpaidOnly: o.unpaidOnly === false ? false : true,
       })
     ).filter(function (s) {
-      // 請求書に載るのは「請求書送り」「ツケ」だけ（現金/クレカ/PayPayはその場で完結）
+      // 請求書に載るのは「請求書送り」「ツケ」だけ（現金/クレカ/電子決済はその場で完結）
       return isUnpaidMethod(s.pay);
     });
     var sum = summarize(rows);

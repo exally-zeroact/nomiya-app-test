@@ -56,9 +56,9 @@ const SALES = [
 ];
 
 describe("支払い方法の定義", () => {
-  it("5種類・並び順が固定（現金→クレジット→PayPay→請求書送り→ツケ）", () => {
+  it("5種類・並び順が固定（現金→クレジット→電子決済→請求書送り→ツケ）", () => {
     expect(C.PAY_KEYS).toEqual(["cash", "credit", "paypay", "invoice", "tsuke"]);
-    expect(C.payLabel("paypay")).toBe("PayPay");
+    expect(C.payLabel("paypay")).toBe("電子決済"); // 表示だけ。鍵は paypay のまま
     expect(C.payLabel("invoice")).toBe("請求書送り");
   });
   it("未回収になるのは請求書送りとツケだけ", () => {
@@ -281,7 +281,7 @@ describe("未回収（請求書送り・ツケ）", () => {
     // 売上そのものは減らない（入金は回収の記録であって売上の取り消しではない）
     expect(C.summarize(C.filterSales(paid, C.rangeOfMonth("2026-07"))).amount).toBe(97000);
   });
-  it("現金・クレカ・PayPayは未回収に混ざらない", () => {
+  it("現金・クレカ・電子決済は未回収に混ざらない", () => {
     expect(C.unpaidSales(SALES).every((s) => s.pay === "invoice" || s.pay === "tsuke")).toBe(true);
   });
 });
@@ -427,7 +427,7 @@ describe("領収書の注意（黄色い注記・止めない）", () => {
     expect(n.length).toBe(1);
     expect(n[0]).toContain("クレジットカード払い");
     expect(n[0]).toContain("収入印紙も不要");
-    // PayPayも同じ扱い
+    // 電子決済も同じ扱い
     expect(C.receiptNotes(mk({ pay: "paypay", amount: 60000, receipt: "issued" }))[0]).toContain(
       "売上票"
     );
@@ -1061,7 +1061,7 @@ describe("レジ締め（現金合わせ）", () => {
     expect(d.counted).toBe(30000);
     expect(d.diff).toBe(0);
   });
-  it("カード・PayPay・請求書送りは金庫の現金に入れない（でも売上には入る）", () => {
+  it("カード・電子決済・請求書送りは金庫の現金に入れない（でも売上には入る）", () => {
     const d = C.closeDraft(S, day, { opening: 0, outs: [], counted: 13000 });
     expect(d.other).toEqual({ credit: 25000, paypay: 12000, invoice: 32000, tsuke: 0 });
     expect(d.salesTotal).toBe(8000 + 12000 + 32000 + 25000); // 77,000

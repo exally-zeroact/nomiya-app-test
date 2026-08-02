@@ -194,7 +194,7 @@ test.describe("飲み屋 売上管理", () => {
     expect(saved.length).toBe(5);
     expect(saved.map((s) => s.pay)).toEqual(["cash", "invoice", "paypay", "tsuke", "credit"]);
     expect(saved.filter((s) => s.receipt === "issued").length).toBe(2);
-    // 支払い方法ごとの既定が入る: 現金=なし / 振込=なし(na) / PayPay=なし(na) / ツケ=あとで
+    // 支払い方法ごとの既定が入る: 現金=なし / 振込=なし(na) / 電子決済=なし(na) / ツケ=あとで
     expect(saved.map((s) => s.receipt)).toEqual(["none", "issued", "na", "later", "issued"]);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
@@ -316,7 +316,7 @@ test.describe("飲み屋 売上管理", () => {
     // 領収書別は2区分（振込・カードは「あり」に含める）。合計は全体と一致する
     const recRows = page.locator("#sumRec tbody tr");
     await expect(recRows).toHaveCount(2);
-    await expect(recRows.nth(0)).toContainText("69,000"); // あり(請求書送り32,000+クレカ25,000+PayPay12,000)
+    await expect(recRows.nth(0)).toContainText("69,000"); // あり(請求書送り32,000+クレカ25,000+電子決済12,000)
     await expect(recRows.nth(1)).toContainText("13,000"); // なし(現金8,000+ツケ5,000)
 
     // 日別（3日分）
@@ -432,7 +432,7 @@ test.describe("飲み屋 売上管理", () => {
     await expect(page.locator("#sumStrip .strip-v").nth(0)).toHaveText("¥82,000");
     await expect(page.locator("#sumRecCard")).toBeVisible();
 
-    // 領収書あり = 山本商事32,000 + 鈴木25,000 + PayPay12,000（振込・カードを含む）
+    // 領収書あり = 山本商事32,000 + 鈴木25,000 + 電子決済12,000（振込・カードを含む）
     await page.locator("#sumRecTabs button[data-srec='yes']").click();
     await expect(page.locator("#sumStrip .strip-v").nth(0)).toHaveText("¥69,000");
     await expect(page.locator("#sumStrip .strip-v").nth(1)).toContainText("3");
@@ -781,7 +781,7 @@ test.describe("飲み屋 売上管理", () => {
     await expect(sumRows.nth(0)).toContainText("42,728"); // 税抜
     await expect(sumRows.nth(1)).toContainText("4,272"); // 消費税10%
     await expect(sumRows.nth(2)).toContainText("¥47,000"); // 合計
-    // 明細は2行（現金・PayPayは載らない）
+    // 明細は2行（現金・電子決済は載らない）
     await expect(page.locator("#invSheets .iv-tbl tbody tr")).toHaveCount(2);
     // 請求Noが採番される
     await expect(page.locator("#invSheets .iv-meta")).toContainText("202607-");
@@ -1803,7 +1803,7 @@ test.describe("飲み屋 売上管理", () => {
 
   test("レジ締め: 現金だけを数えて、あるべき額と差額が出る", async ({ page }) => {
     const errors = await open(page);
-    await seed(page); // 7/1 現金8,000 ／請求書送り32,000 ／7/2 PayPay12,000・ツケ5,000 ／7/5 クレカ25,000
+    await seed(page); // 7/1 現金8,000 ／請求書送り32,000 ／7/2 電子決済12,000・ツケ5,000 ／7/5 クレカ25,000
     await setCloseDay(page, "2026-07-01");
 
     // 釣銭3万＋現金売上8,000 − 出金3,000 ＝ 35,000
@@ -1972,7 +1972,7 @@ test.describe("飲み屋 売上管理", () => {
     page,
   }) => {
     const errors = await open(page);
-    await seed(page); // 7月：現金8,000／請求書送り32,000／PayPay12,000／ツケ5,000／クレカ25,000
+    await seed(page); // 7月：現金8,000／請求書送り32,000／電子決済12,000／ツケ5,000／クレカ25,000
     // 7/1を締める（氷3,000・日払い12,000を出金）
     await setCloseDay(page, "2026-07-01");
     await page.locator("#clOpen").fill("30000");

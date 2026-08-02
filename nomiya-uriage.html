@@ -33,7 +33,7 @@
       body {
         font-family: "Noto Sans JP", sans-serif;
         background: #f0faf4;
-        color: #2E7D54;
+        color: #2e7d54;
         padding-bottom: calc(72px + env(safe-area-inset-bottom));
       }
 
@@ -105,7 +105,7 @@
       .scr-title {
         font-size: 16px;
         font-weight: 700;
-        color: #2E7D54;
+        color: #2e7d54;
         margin-bottom: 4px;
       }
       .scr-sub {
@@ -156,7 +156,7 @@
         border-radius: 10px;
         font-size: 15px;
         font-family: "Noto Sans JP", sans-serif;
-        color: #2E7D54;
+        color: #2e7d54;
         outline: none;
         background: #ffffff;
         transition: border-color 0.15s;
@@ -329,7 +329,7 @@
         text-align: center;
         font-size: 14px;
         font-weight: 700;
-        color: #2E7D54;
+        color: #2e7d54;
         font-family: "DM Mono", monospace;
       }
       .period-sub {
@@ -363,7 +363,7 @@
         font-family: "DM Mono", monospace;
         font-size: 16px;
         font-weight: 500;
-        color: #2E7D54;
+        color: #2e7d54;
       }
       .stat-grid {
         display: grid;
@@ -387,7 +387,7 @@
         font-family: "DM Mono", monospace;
         font-size: 22px;
         font-weight: 500;
-        color: #2E7D54;
+        color: #2e7d54;
         line-height: 1.2;
       }
       .stat-v small {
@@ -426,7 +426,7 @@
         text-align: left;
         font-family: "Noto Sans JP", sans-serif;
         font-weight: 700;
-        color: #2E7D54;
+        color: #2e7d54;
         white-space: normal;
         word-break: break-all;
       }
@@ -486,7 +486,7 @@
       .li-nm {
         font-size: 14px;
         font-weight: 700;
-        color: #2E7D54;
+        color: #2e7d54;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -499,7 +499,7 @@
       .li-amt {
         font-family: "DM Mono", monospace;
         font-size: 15px;
-        color: #2E7D54;
+        color: #2e7d54;
         white-space: nowrap;
       }
       /* 並べ替えの ↑↓（設定のマスタだけ）。押す所は指のサイズにする。 */
@@ -543,7 +543,7 @@
       .sum-tbl td {
         font-family: "DM Mono", monospace;
         font-size: 13px;
-        color: #2E7D54;
+        color: #2e7d54;
         text-align: right;
         padding: 5px 6px;
         border-top: 1px solid #eef2f0;
@@ -604,7 +604,7 @@
       .ug-t {
         font-size: 12px;
         font-weight: 700;
-        color: #2E7D54;
+        color: #2e7d54;
       }
       .ug-c {
         font-size: 11px;
@@ -710,7 +710,7 @@
       .modal-title {
         font-size: 15px;
         font-weight: 700;
-        color: #2E7D54;
+        color: #2e7d54;
       }
       .modal-x {
         background: none;
@@ -729,7 +729,7 @@
         bottom: 86px;
         left: 50%;
         transform: translateX(-50%) translateY(10px);
-        background: #2E7D54;
+        background: #2e7d54;
         color: #ffffff;
         font-size: 12.5px;
         font-weight: 700;
@@ -780,7 +780,7 @@
         margin: 0 6px 6px 0;
         font-size: 13px;
         font-weight: 700;
-        color: #2E7D54;
+        color: #2e7d54;
       }
       .picked-it b {
         display: inline-flex;
@@ -1126,6 +1126,7 @@
         <div class="frow">
           <span class="flabel">支払い方法</span>
           <div class="chips" id="payChips"></div>
+          <span class="hint">電子決済＝PayPay・楽天ペイ・交通系など</span>
         </div>
 
         <div class="frow">
@@ -4924,7 +4925,7 @@
           '<table class="sum-tbl"><tbody>' +
           [
             ["クレジット", o.credit],
-            ["PayPay", o.paypay],
+            ["電子決済", o.paypay],
             ["請求書送り", o.invoice],
             ["ツケ（この日の分）", o.tsuke],
           ]
@@ -5096,7 +5097,7 @@
           '<tr><td>クレジット</td><td></td><td class="c-a">' +
           C.comma(d.other.credit) +
           "</td></tr>" +
-          '<tr><td>PayPay</td><td></td><td class="c-a">' +
+          '<tr><td>電子決済</td><td></td><td class="c-a">' +
           C.comma(d.other.paypay) +
           "</td></tr>" +
           '<tr><td>請求書送り</td><td></td><td class="c-a">' +
