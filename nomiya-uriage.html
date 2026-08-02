@@ -3052,23 +3052,6 @@
           });
       }
 
-      function filterCaption() {
-        var p = UI.filPay === "all" ? "すべての支払い" : C.payLabel(UI.filPay);
-        var r =
-          UI.filRec === "all"
-            ? "領収書あり・なし両方"
-            : UI.filRec === "yes"
-              ? "領収書あり"
-              : UI.filRec === "adj"
-                ? "領収書あり＋選んだ分"
-                : UI.filRec === "later"
-                  ? "領収書はあとで渡す分"
-                  : UI.filRec === "na"
-                    ? "振込・カードの分"
-                    : "領収書なし";
-        return p + " / " + r;
-      }
-
       // 売上帳のA4（複数ページ）
       function ledgerSheetsHtml(rows) {
         var pages = C.ledgerPages(rows, ROWS_FULL, ROWS_LAST);
@@ -3083,10 +3066,9 @@
             esc(SETTINGS.store || "（店名は設定で入れられます）") +
             "</div>" +
             '<div class="sh-title">売 上 帳</div>' +
+            // ★紙に「どう絞り込んだか」は刷らない（司さん指示）。期間とページだけ。
             '<div class="sh-meta"><span>' +
             esc(periodLabel()) +
-            "</span><span>" +
-            esc(filterCaption()) +
             "</span><span>" +
             (p + 1) +
             " / " +
@@ -3225,13 +3207,6 @@
       function sumScopeRows() {
         var r = periodRange();
         return C.sortSales(C.filterSales(SALES, { from: r.from, to: r.to, receipt: UI.sumRec }));
-      }
-      function scopeLabel(rec) {
-        if (rec === "yes") return "領収書あり分のみ";
-        if (rec === "no") return "領収書なし分のみ";
-        if (rec === "adj") return "領収書あり＋選んだ分";
-        if (rec === "na") return "振込・カードの分";
-        return "全体";
       }
 
       function renderSum() {
@@ -3601,10 +3576,8 @@
           '</div><div class="sh-title">売 上 報 告 書</div>' +
           '<div class="sh-meta"><span>' +
           esc(periodLabel()) +
-          "</span>" +
-          // 何を集めた紙かを、紙そのものに書いておく（後から見て分かるように）
-          (scoped ? "<span>" + esc(scopeLabel(UI.taxRec)) + "</span>" : "") +
-          "</div></div>" +
+          // ★紙に「どう絞り込んだか」は刷らない（司さん指示）
+          "</span></div></div>" +
           '<div class="sm-stats">' +
           '<div class="sm-s"><span>売上（税込）</span><b>¥' +
           C.comma(sum.amount) +

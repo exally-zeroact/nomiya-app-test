@@ -252,9 +252,9 @@ test.describe("飲み屋 売上管理", () => {
     await expect(page.locator("#listSheets tr[data-id]")).toHaveCount(1);
     await expect(page.locator("#listStrip .strip-v").nth(2)).toHaveText("¥25,000");
 
-    // 紙の見出しに絞り込みの中身が出る
-    await expect(page.locator("#listSheets .sh-meta")).toContainText("クレジット");
-    await expect(page.locator("#listSheets .sh-meta")).toContainText("領収書あり");
+    // ★紙の見出しには、どう絞り込んだかを出さない（司さん指示・2026-08-02）
+    await expect(page.locator("#listSheets .sh-meta")).not.toContainText("クレジット");
+    await expect(page.locator("#listSheets .sh-meta")).not.toContainText("領収書");
 
     await page.locator("#filPay button[data-fp='all']").click();
     await page.locator("#filRec button[data-rec='all']").click();
@@ -3404,7 +3404,9 @@ test.describe("⑥ 調整", () => {
     await goto(page, "tax");
     await page.locator('#taxRecTabs button[data-trec="adj"]').click();
     await expect(page.locator("#taxStrip")).toContainText("¥42,000");
-    await expect(page.locator("#taxSheets")).toContainText("領収書あり＋選んだ分");
+    // ★紙に「どう絞り込んだか」は刷らない
+    await expect(page.locator("#taxSheets")).not.toContainText("領収書あり");
+    await expect(page.locator("#taxSheets")).not.toContainText("選んだ分");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
@@ -3444,6 +3446,63 @@ test.describe("⑥ 調整", () => {
     ).toBe("none");
     // 選ぶ欄は「調整」のときだけ出す
     await expect(page.locator("#adjBox")).toBeHidden();
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* 紙に「どう絞り込んだか」は刷らない（司さん指示）。
+   期間・ページ・店名は出す。絞り込みの言葉は、どの紙にも出さない。 */
+test.describe("紙に絞り込みの見出しを刷らない", () => {
+  test("売上帳にも税理士の紙にも、絞り込みの言葉が出ない", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, {
+      date: "2026-07-01",
+      name: "田中",
+      people: 2,
+      amount: 8000,
+      pay: "cash",
+      receipt: false,
+    });
+    await addSale(page, {
+      date: "2026-07-02",
+      name: "山本",
+      people: 2,
+      amount: 12000,
+      pay: "cash",
+      receipt: true,
+    });
+    await goto(page, "list");
+    await page.locator("#periodList .period-lb").click();
+    await page.locator("#mdFrom").fill("2026-07-01");
+    await page.locator("#mdTo").fill("2026-07-31");
+    await page.locator("#mdOk").click();
+
+    // 見出し（紙の一番上）に、どう絞り込んだかを書かない。
+    // ※紙の下の内訳（支払い方法別・領収書 あり/なし）は前からある物なので、そのまま。
+    const ng = ["すべての支払い", "選んだ分", "分のみ", "振込・カードの分"];
+    for (const rec of ["all", "yes", "no", "adj"]) {
+      await page.locator(`#filRec button[data-rec="${rec}"]`).click();
+      const head = await page.locator("#listSheets .sh-meta").first().innerText();
+      for (const w of ng.concat(["領収書"])) {
+        expect(head, `売上帳(${rec})の見出しに「${w}」が出ている`).not.toContain(w);
+      }
+      // 期間とページは出す
+      expect(head).toContain("2026年7月1日");
+      expect(head).toContain("ページ");
+      const paper = await page.locator("#listSheets").innerText();
+      for (const w of ng) {
+        expect(paper, `売上帳(${rec})に「${w}」が出ている`).not.toContain(w);
+      }
+    }
+    for (const rec of ["all", "yes", "no", "adj"]) {
+      await goto(page, "tax");
+      await page.locator(`#taxRecTabs button[data-trec="${rec}"]`).click();
+      await page.waitForTimeout(150);
+      const paper = await page.locator("#taxSheets").innerText();
+      for (const w of ["選んだ分", "分のみ", "振込・カードの分"]) {
+        expect(paper, `税理士の紙(${rec})に「${w}」が出ている`).not.toContain(w);
+      }
+    }
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
