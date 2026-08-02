@@ -1178,6 +1178,26 @@
     });
     return out;
   }
+  // 渡し方（どこから渡すか）。アプリが「日払いだから金庫から」と決めつけない。
+  //   register = レジから（その日の締めの出金に入る＝金庫の現金が減る）
+  //   hand     = 手元の現金（別で用意した金。レジは減らない）
+  //   bank     = 振込
+  var PAY_FROMS = [
+    { key: "register", label: "レジから" },
+    { key: "hand", label: "手元の現金" },
+    { key: "bank", label: "振込" },
+  ];
+  function payFromLabel(key) {
+    for (var i = 0; i < PAY_FROMS.length; i++) {
+      if (PAY_FROMS[i].key === key) return PAY_FROMS[i].label;
+    }
+    return PAY_FROMS[0].label;
+  }
+  // レジ（金庫）から出す人か。締めの出金に入れるかどうかは、ここだけを見る。
+  function fromRegister(staff) {
+    return !!staff && staff.payFrom === "register";
+  }
+
   var EMPLOY_KINDS = [
     { key: "employee", label: "雇用（時給・日給）" },
     { key: "contract", label: "業務委託（歩合）" },
@@ -1249,7 +1269,25 @@
       payAfter: Math.max(0, Math.min(60, _int(r.payAfter))),
       birth: isIsoDate(r.birth) ? r.birth : "", // 生年月日（任意）。18歳未満の深夜の注意に使う
       employ: r.employ === "contract" ? "contract" : "employee",
-      cash: r.cash === false ? false : true, // 現金で渡すか（振込ならfalse）
+      // 渡し方（レジから / 手元の現金 / 振込）。決めていない古いデータは、
+      // 振込の人なら bank、それ以外は register に寄せる（勝手に現金にしない）。
+      payFrom: (function () {
+        var v = String(r.payFrom || "");
+        if (
+          PAY_FROMS.some(function (x) {
+            return x.key === v;
+          })
+        )
+          return v;
+        return r.cash === false ? "bank" : "register";
+      })(),
+      // 現金かどうかは渡し方から決まる（2か所がバラバラにならないように）
+      cash: (function () {
+        var v = String(r.payFrom || "");
+        if (v === "bank") return false;
+        if (v === "register" || v === "hand") return true;
+        return r.cash === false ? false : true;
+      })(),
       memo: String(r.memo == null ? "" : r.memo).trim(),
       updatedAt: now || nowIso(),
       deletedAt: r.deletedAt || null,
@@ -1814,6 +1852,7 @@
           staffId: st.id,
           name: st.name,
           cash: st.cash !== false,
+          payFrom: st.payFrom || "register",
           amount: 0,
           days: 0,
           from: w.ymd,
@@ -1924,6 +1963,7 @@
       pay_after: _int(x.payAfter),
       employ: _s(x.employ),
       cash: !!x.cash,
+      pay_from: _s(x.payFrom),
       memo: _s(x.memo),
       updated_at: _ts(x.updatedAt) || nowIso(),
       deleted_at: _ts(x.deletedAt),
@@ -1949,6 +1989,7 @@
         payAfter: r.pay_after,
         employ: _s(r.employ),
         cash: r.cash,
+        payFrom: _s(r.pay_from),
         memo: _s(r.memo),
         deletedAt: r.deleted_at || null,
       },
@@ -2433,6 +2474,9 @@
     staffUses: staffUses,
     EMPLOY_KINDS: EMPLOY_KINDS,
     PAY_CYCLES: PAY_CYCLES,
+    PAY_FROMS: PAY_FROMS,
+    payFromLabel: payFromLabel,
+    fromRegister: fromRegister,
     backBaseAmt: backBaseAmt,
     ageOn: ageOn,
     WDAYS: WD,

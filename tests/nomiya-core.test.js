@@ -2704,6 +2704,7 @@ describe("渡した記録", () => {
       staffId: "s2",
       name: "ゆい",
       cash: false,
+      payFrom: "bank",
       amount: 9000,
       days: 1,
       from: "2026-08-03",
@@ -2714,6 +2715,7 @@ describe("渡した記録", () => {
       staffId: "s1",
       name: "あかり",
       cash: true,
+      payFrom: "register",
       amount: 12000, // 5,000＋7,000
       days: 2,
       from: "2026-08-01",
@@ -2758,5 +2760,71 @@ describe("渡した記録", () => {
     expect(C.workFromRow(row).paidAmount).toBe(5000);
     // 古い行（列がまだ無い店）から読んでも壊れない
     expect(C.workFromRow({ wid: "w9", ymd: "2026-08-01", staff_id: "s1" }).paidAmount).toBe(0);
+  });
+});
+
+/* =====================================================================
+   ⑧ 渡し方（レジから / 手元の現金 / 振込）を人ごとに決める
+   ★アプリが「日払いだから金庫から」と決めつけない。店が決める。
+   ===================================================================== */
+describe("渡し方（どこから渡すか）", () => {
+  const mk = (o) => C.normalizeStaff(Object.assign({ id: "s1", name: "あかり" }, o));
+
+  it("3つから選ぶ。決めていなければ「レジから」", () => {
+    expect(C.PAY_FROMS.map((x) => x.key)).toEqual(["register", "hand", "bank"]);
+    expect(mk({}).payFrom).toBe("register");
+    expect(mk({ payFrom: "hand" }).payFrom).toBe("hand");
+    expect(mk({ payFrom: "bank" }).payFrom).toBe("bank");
+    expect(mk({ payFrom: "へんな値" }).payFrom).toBe("register");
+  });
+
+  it("今までの「振込の人」は、そのまま振込になる（勝手に現金にしない）", () => {
+    expect(mk({ cash: false }).payFrom).toBe("bank");
+    expect(mk({ cash: true }).payFrom).toBe("register");
+    // 新しい決め方が入っていれば、そちらが勝つ
+    expect(mk({ cash: false, payFrom: "hand" }).payFrom).toBe("hand");
+  });
+
+  it("現金かどうかは、渡し方から決まる（バラバラにならない）", () => {
+    expect(mk({ payFrom: "register" }).cash).toBe(true);
+    expect(mk({ payFrom: "hand" }).cash).toBe(true);
+    expect(mk({ payFrom: "bank" }).cash).toBe(false);
+  });
+
+  it("レジから出す人かどうかが、1か所で分かる", () => {
+    expect(C.fromRegister(mk({ payFrom: "register" }))).toBe(true);
+    expect(C.fromRegister(mk({ payFrom: "hand" }))).toBe(false);
+    expect(C.fromRegister(mk({ payFrom: "bank" }))).toBe(false);
+    expect(C.fromRegister(null)).toBe(false);
+  });
+
+  it("渡した記録にも、どこから渡したかが出る", () => {
+    const st = mk({ payFrom: "hand", hourly: 1000 });
+    const w = C.normalizeWork(
+      {
+        id: "w1",
+        ymd: "2026-08-01",
+        staffId: "s1",
+        paidAt: "2026-08-05T10:00:00.000Z",
+        paidAmount: 5000,
+      },
+      "2026-08-01T00:00:00.000Z"
+    );
+    const log = C.payoutLog([st], [w], [], {});
+    expect(log[0].payFrom).toBe("hand");
+    expect(log[0].cash).toBe(true);
+    expect(C.payFromLabel("register")).toBe("レジから");
+    expect(C.payFromLabel("hand")).toBe("手元の現金");
+    expect(C.payFromLabel("bank")).toBe("振込");
+  });
+
+  it("渡し方はクラウドにも残る", () => {
+    const st = mk({ payFrom: "hand" });
+    const row = C.staffToRow(st);
+    expect(row.pay_from).toBe("hand");
+    expect(C.staffFromRow(row).payFrom).toBe("hand");
+    // 古い行（列がまだ無い店）は、振込かどうかから決める
+    expect(C.staffFromRow({ sid: "s1", name: "x", cash: false }).payFrom).toBe("bank");
+    expect(C.staffFromRow({ sid: "s1", name: "x", cash: true }).payFrom).toBe("register");
   });
 });

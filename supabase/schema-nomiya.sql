@@ -159,6 +159,8 @@ alter table nomiya_staff add column if not exists close_wday integer not null de
 alter table nomiya_staff add column if not exists pay_after integer not null default 0;
 -- 生年月日（任意）。18歳未満の深夜の注意にだけ使う
 alter table nomiya_staff add column if not exists birth date;
+-- 渡し方（register=レジから / hand=手元の現金 / bank=振込）。空なら cash から決める
+alter table nomiya_staff add column if not exists pay_from text not null default 'register';
 create index if not exists idx_nomiya_staff_acct on nomiya_staff(account_id, name);
 
 -- ── 日々の実績（1人×1日） ────────────────────────────────────────────

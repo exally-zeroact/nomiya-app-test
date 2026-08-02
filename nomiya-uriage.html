@@ -5307,10 +5307,18 @@
               });
               WORKS = C.markPaidRange(WORKS, sid, from, to, paidStamp(UI.payYmd), amounts);
               saveWorks();
-              // ★まとめ払いは、金庫から出すとは限らない（別で用意した金から払う方が普通）。
-              //   なので締めの出金には自動で入れない。渡した記録にだけ残す。
-              //   レジから出した月は、締めの「＋出金を足す」で足せる。
-              //   （その日の売上からそのまま渡す日払いだけは、今までどおり自動で入る）
+              // ★金庫から出すかどうかは、人ごとの「渡し方」で店が決める。
+              //   レジから＝その日の締めの出金に入れる（金庫の現金が減る）。
+              //   手元の現金・振込＝入れない。
+              if (C.fromRegister(st) && total > 0) {
+                addPayoutToClose(
+                  UI.payYmd,
+                  st.name,
+                  total,
+                  "range_" + sid + "_" + from + "_" + to,
+                  C.mdShort(from) + "〜" + C.mdShort(to) + " 締め分"
+                );
+              }
               renderAll();
               toast("💰 " + (st ? st.name : "") + " に " + C.yen(total) + " を渡しました");
             };
@@ -5405,7 +5413,7 @@
                   " 締め分　" +
                   x.days +
                   "日　" +
-                  (x.cash ? "現金" : "振込") +
+                  esc(C.payFromLabel(x.payFrom)) +
                   '</div></div><div class="li-amt">' +
                   C.yen(x.amount) +
                   "</div></div>"
@@ -5755,6 +5763,7 @@
         if (st.cycle === "weekly") cy += "(" + C.WDAYS[st.closeWday] + ")";
         if (st.payAfter) cy += "・" + st.payAfter + "日後に渡す";
         t.push(cy);
+        if (st.payFrom !== "register") t.push(C.payFromLabel(st.payFrom));
         if (st.employ === "contract") t.push("業務委託");
         return t.join(" / ");
       }
@@ -5968,6 +5977,17 @@
             '<input class="finput" type="date" id="st_birth" value="' +
             esc(cur.birth || "") +
             '"><span class="hint">入れておくと、18歳未満の人が22時以降になったとき注意が出ます。</span></div>' +
+            '<div class="frow"><span class="flabel">渡し方</span><div class="chips" id="st_payfrom">' +
+            C.PAY_FROMS.map(function (x) {
+              return (
+                '<button class="chip chip-sm" type="button" data-pf="' +
+                x.key +
+                '">' +
+                esc(x.label) +
+                "</button>"
+              );
+            }).join("") +
+            '</div><span class="hint">レジからにすると、渡した分がその日の締めの出金に入ります。</span></div>' +
             '<div class="frow"><span class="flabel">立場</span><div class="chips" id="st_employ">' +
             C.EMPLOY_KINDS.map(function (c) {
               return (
@@ -5989,6 +6009,7 @@
         var cycle = cur.cycle;
         var wday = cur.closeWday;
         var employ = cur.employ;
+        var payFrom = cur.payFrom;
         var use = {};
         PAY_ITEMS().forEach(function (x) {
           use[x.key] = C.staffUses(cur, x.key);
@@ -6048,6 +6069,15 @@
               };
             });
           syncCycleHint();
+          $("st_payfrom")
+            .querySelectorAll("[data-pf]")
+            .forEach(function (b) {
+              b.classList.toggle("on", b.getAttribute("data-pf") === payFrom);
+              b.onclick = function () {
+                payFrom = b.getAttribute("data-pf");
+                sync();
+              };
+            });
           $("st_employ")
             .querySelectorAll("[data-em]")
             .forEach(function (b) {
@@ -6109,6 +6139,7 @@
             closeWday: wday,
             payAfter: $("st_payafter").value,
             birth: $("st_birth").value,
+            payFrom: payFrom,
             employ: employ,
           });
           STAFF = STAFF.filter(function (x) {
@@ -6441,7 +6472,7 @@
             });
             saveWorks();
             // 現金で渡すなら、その日の締めの出金にも入れる（二度打ちしない）
-            if (st.cash && d.net > 0) addPayoutToClose(UI.payYmd, st.name, d.net, w0.id);
+            if (C.fromRegister(st) && d.net > 0) addPayoutToClose(UI.payYmd, st.name, d.net, w0.id);
             closeModal();
             renderPay();
             toast("💰 " + st.name + " に " + C.yen(d.net) + " を渡しました");
