@@ -547,14 +547,17 @@ test.describe("飲み屋 売上管理", () => {
     });
     await addSale(page, { date: "2026-07-01", name: "田中", people: 2, amount: 8000, pay: "cash" });
 
-    // 紙の領収書欄は 振込=○（領収書あり側）/ 現金=空
+    // ★紙に領収書の列は出さない（司さん指示）。中身は 振込=不要 / 現金=なし で持つ
     await goto(page, "list");
     await page.locator("#periodList .period-lb").click();
     await page.locator("#mdFrom").fill("2026-07-01");
     await page.locator("#mdTo").fill("2026-07-31");
     await page.locator("#mdOk").click();
-    const marks = await page.locator("#listSheets tr[data-id] .c-r").allInnerTexts();
-    expect(marks.map((m) => m.trim())).toEqual(["○", ""]);
+    await expect(page.locator("#listSheets .c-r")).toHaveCount(0);
+    await expect(page.locator("#listSheets thead")).not.toContainText("領収書");
+    expect(
+      await page.evaluate(() => window.__NOMIYA.sales.map((s) => s.pay + ":" + s.receipt).sort())
+    ).toEqual(["cash:none", "invoice:na"]);
 
     // 「領収書なし」で絞ると現金だけ（振込は落ちない）
     await page.locator("#filRec button[data-rec='no']").click();
@@ -609,7 +612,8 @@ test.describe("飲み屋 売上管理", () => {
     await page.locator("#mdFrom").fill("2026-07-01");
     await page.locator("#mdTo").fill("2026-07-31");
     await page.locator("#mdOk").click();
-    await expect(page.locator("#listSheets tr[data-id] .c-r")).toHaveText("");
+    // ★紙に領収書の列は無い。中身は「あとで渡す」のまま
+    expect(await page.evaluate(() => window.__NOMIYA.sales[0].receipt)).toBe("later");
     // 「あとで渡す分」で絞れる
     await page.locator("#filRec button[data-rec='later']").click();
     await expect(page.locator("#listSheets tr[data-id]")).toHaveCount(1);
@@ -633,7 +637,8 @@ test.describe("飲み屋 売上管理", () => {
 
     await goto(page, "list");
     await page.locator("#filRec button[data-rec='yes']").click();
-    await expect(page.locator("#listSheets tr[data-id] .c-r")).toHaveText("○");
+    // 発行済みになったので「領収書あり」で拾える（紙に列は出さない）
+    await expect(page.locator("#listSheets tr[data-id]")).toHaveCount(1);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 

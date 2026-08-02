@@ -3112,15 +3112,14 @@
                   ? '<span class="c-paid">済</span>'
                   : '<span class="c-un">未</span>'
                 : "") +
-              '</td><td class="c-r">' +
-              esc(C.receiptMark(s.receipt)) +
+              // ★領収書の列は紙に出さない（司さん指示・2026-08-02）
               '</td><td class="c-bk">' +
               esc(s.memo || "") +
               "</td></tr>";
           } else {
             body +=
               '<tr class="blank"><td class="c-d"></td><td class="c-w"></td><td class="c-n"></td>' +
-              '<td class="c-p"></td><td class="c-a"></td><td class="c-m"></td><td class="c-r"></td>' +
+              '<td class="c-p"></td><td class="c-a"></td><td class="c-m"></td>' +
               '<td class="c-bk"></td></tr>';
           }
         }
@@ -3128,7 +3127,7 @@
           '<table class="sh-tbl"><thead><tr>' +
           '<th class="c-d">日付</th><th class="c-w">曜</th><th class="c-n">名前</th>' +
           '<th class="c-p">人数</th><th class="c-a">金額</th><th class="c-m">支払方法</th>' +
-          '<th class="c-r">領収書</th><th class="c-bk">備考</th>' +
+          '<th class="c-bk">備考</th>' +
           "</tr></thead><tbody>" +
           body +
           "</tbody></table>"
@@ -4260,7 +4259,6 @@
         ".pay-tbl .c-p{width:44px;text-align:right;font-family:'DM Mono',monospace;}",
         ".pay-tbl .c-a{width:74px;text-align:right;font-family:'DM Mono',monospace;}",
         ".pay-tbl tfoot td{border-top:2px solid #1a4a2e;}",
-        ".sh-tbl .c-r{width:46px;text-align:center;}",
         ".sh-tbl .c-bk{text-align:left;font-size:11px;color:#333333;}",
         ".sh-tbl .c-un{color:#b06d17;font-size:10px;margin-left:3px;}",
         ".sh-tbl .c-paid{color:#2f7d5a;font-size:10px;margin-left:3px;}",
