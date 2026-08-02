@@ -292,6 +292,68 @@ check("他人のアカウントでは書けない（RLSが効いている）", !
   );
 }
 
+/* ── 入金（ツケ・請求書送りの回収） ─────────────────────── */
+{
+  const pid = TAG + "-pay1";
+  const rp = await sb.from("nomiya_payments").upsert(
+    [
+      {
+        account_id: ACC,
+        pid,
+        ymd: "2026-08-01",
+        name: "田中",
+        amount: 4000,
+        how: "cash",
+        memo: TAG,
+        updated_at: new Date().toISOString(),
+      },
+    ],
+    { onConflict: "account_id,pid" }
+  );
+  check("入金を入れられる", !rp.error, rp.error && rp.error.message);
+
+  const gp = await sb.from("nomiya_payments").select("*").eq("pid", pid).maybeSingle();
+  check(
+    "入金が、そのまま戻ってくる（額・受け取り方）",
+    !gp.error && gp.data && gp.data.amount === 4000 && gp.data.how === "cash",
+    gp.error || gp.data
+  );
+
+  // 入金で埋まった印（paid_by）が売上に付けられる
+  const rb = await sb.from("nomiya_sales").upsert(
+    [
+      {
+        account_id: ACC,
+        cid: TAG + "-paidby",
+        ymd: "2026-07-01",
+        name: "田中",
+        people: 2,
+        amount: 4000,
+        pay: "tsuke",
+        receipt: "none",
+        paid_date: "2026-08-01",
+        paid_by: "payment",
+        memo: TAG,
+        updated_at: new Date().toISOString(),
+      },
+    ],
+    { onConflict: "account_id,cid" }
+  );
+  const gb = await sb
+    .from("nomiya_sales")
+    .select("paid_by, paid_date")
+    .eq("cid", TAG + "-paidby")
+    .maybeSingle();
+  check(
+    "入金で埋まった印が、そのまま戻ってくる",
+    !rb.error && !gb.error && gb.data && gb.data.paid_by === "payment",
+    rb.error || gb.error || gb.data
+  );
+
+  const dp = await sb.from("nomiya_payments").delete().eq("pid", pid);
+  check("入金を片付けられる", !dp.error, dp.error && dp.error.message);
+}
+
 /* ── RLS: ログアウトすると自分の行も見えない（他人からは覗けない） ───── */
 {
   const anon = createClient(URL, KEY, { auth: { persistSession: false } });

@@ -755,6 +755,7 @@ describe("クラウド同期（端末が作業台・クラウドは控え）", (
         memo: "",
         paidDate: null,
         paidCash: false,
+        paidBy: "", // 入金の記録で埋まった分は payment
         adj: false, // 「調整」に入れる印（人が1件ずつ選ぶ）
         staff: "",
         crew: [], // ついた人（ヘルプ・場内など）。無ければ空
@@ -3051,5 +3052,227 @@ describe("締めたあとに動いた", () => {
     ];
     expect(C.movedAfterCloseCount(rows, "2026-08-05", closed)).toBe(2);
     expect(C.movedAfterCloseCount(rows, "2026-08-05", null)).toBe(0);
+  });
+});
+
+/* =====================================================================
+   ⑮ 入金（部分入金・取り消し・未回収の残高）
+   ★入金は1件ずつ記録して、古いツケから順に充てる（消込）。
+     充てた結果は保存しない＝毎回計算する（正が1つ）。
+   ===================================================================== */
+describe("入金の記録", () => {
+  const now = "2026-08-20T00:00:00.000Z";
+  it("入金1件の形（変な値は落とす）", () => {
+    const p = C.normalizePayment(
+      { name: " 田中 ", ymd: "2026-08-20", amount: "5000", how: "cash" },
+      now
+    );
+    expect(p.name).toBe("田中");
+    expect(p.amount).toBe(5000);
+    expect(p.how).toBe("cash");
+    expect(p.id).toBeTruthy();
+    expect(p.updatedAt).toBe(now);
+    expect(C.normalizePayment({ name: "x", ymd: "こわれた", amount: -100 }, now).ymd).toBe("");
+    expect(C.normalizePayment({ name: "x", amount: -100 }, now).amount).toBe(0);
+    expect(C.normalizePayment({ name: "x", how: "へんな値" }, now).how).toBe("bank");
+  });
+  it("入金 ⇄ DBの行 を往復しても変わらない", () => {
+    const p = C.normalizePayment(
+      { name: "田中", ymd: "2026-08-20", amount: 5000, how: "cash", memo: "半分" },
+      now
+    );
+    expect(C.paymentFromRow(C.paymentToRow(p))).toEqual(p);
+  });
+});
+
+describe("未回収の残高（古いツケから順に充てる）", () => {
+  const now = "2026-08-01T00:00:00.000Z";
+  const sale = (o) =>
+    C.normalizeSale(
+      Object.assign(
+        { date: "2026-08-01", name: "田中", people: 2, amount: 12000, pay: "tsuke" },
+        o
+      ),
+      now
+    );
+  const SALES = [
+    sale({ id: "s1", date: "2026-08-01", amount: 12000 }),
+    sale({ id: "s2", date: "2026-08-05", amount: 8000 }),
+    sale({ id: "s3", date: "2026-08-03", amount: 30000, name: "佐藤", pay: "invoice" }),
+    sale({ id: "s4", date: "2026-08-04", amount: 5000, pay: "cash" }), // 現金＝未回収でない
+  ];
+  const pay = (o) =>
+    C.normalizePayment(Object.assign({ name: "田中", ymd: "2026-08-20", amount: 5000 }, o), now);
+
+  it("入金が無ければ、打った分がそのまま残る", () => {
+    const r = C.receivables(SALES, []);
+    expect(r.map((x) => [x.name, x.left])).toEqual([
+      ["田中", 20000],
+      ["佐藤", 30000],
+    ]);
+    expect(r[0].count).toBe(2);
+    expect(r[0].oldest).toBe("2026-08-01");
+  });
+  it("一部だけ入ったら、古い方から埋まって残りが出る", () => {
+    const r = C.receivables(SALES, [pay({ amount: 5000 })]);
+    const t = r.find((x) => x.name === "田中");
+    expect(t.billed).toBe(20000);
+    expect(t.paid).toBe(5000);
+    expect(t.left).toBe(15000);
+    // 古い s1(12,000) に5,000充てて、残り7,000。s2 は手つかず
+    expect(t.rows.map((x) => [x.id, x.applied, x.left])).toEqual([
+      ["s1", 5000, 7000],
+      ["s2", 0, 8000],
+    ]);
+  });
+  it("2回に分けて入ったら、順に埋まって最後は0になる", () => {
+    const r = C.receivables(SALES, [
+      pay({ amount: 5000 }),
+      pay({ id: "p2", ymd: "2026-08-25", amount: 15000 }),
+    ]);
+    const t = r.find((x) => x.name === "田中");
+    expect(t.left).toBe(0);
+    expect(t.rows.map((x) => x.left)).toEqual([0, 0]);
+    expect(t.done).toBe(true);
+  });
+  it("多く入ったら、残りは0で「預かり」に出る（マイナスにしない）", () => {
+    const r = C.receivables(SALES, [pay({ amount: 25000 })]);
+    const t = r.find((x) => x.name === "田中");
+    expect(t.left).toBe(0);
+    expect(t.over).toBe(5000);
+  });
+  it("入金を消したら、元に戻る", () => {
+    const p = pay({ amount: 20000 });
+    expect(C.receivables(SALES, [p]).find((x) => x.name === "田中").left).toBe(0);
+    const deleted = Object.assign({}, p, { deletedAt: "2026-08-21T00:00:00.000Z" });
+    expect(C.receivables(SALES, [deleted]).find((x) => x.name === "田中").left).toBe(20000);
+  });
+  it("古い入金済み（入金日が入っている売上）は、もう残高に入れない", () => {
+    const old = SALES.map((s) =>
+      s.id === "s1" ? Object.assign({}, s, { paidDate: "2026-08-10" }) : s
+    );
+    const t = C.receivables(old, []).find((x) => x.name === "田中");
+    expect(t.left).toBe(8000);
+    expect(t.rows.map((x) => x.id)).toEqual(["s2"]);
+  });
+  it("何日経ったかが出る", () => {
+    const t = C.receivables(SALES, [], { today: "2026-08-31" }).find((x) => x.name === "田中");
+    expect(t.days).toBe(30); // 一番古い 8/1 から
+    expect(C.receivables(SALES, [], {})[0].days).toBe(null); // 今日を渡さなければ数えない
+  });
+  it("消した売上・現金の売上は入れない／残高0の人は出さない", () => {
+    const gone = SALES.map((s) =>
+      s.id === "s3" ? Object.assign({}, s, { deletedAt: "2026-08-06T00:00:00.000Z" }) : s
+    );
+    expect(C.receivables(gone, []).map((x) => x.name)).toEqual(["田中"]);
+    const paid = [pay({ amount: 20000 })];
+    expect(C.receivables(SALES, paid, { hideDone: true }).map((x) => x.name)).toEqual(["佐藤"]);
+  });
+  it("その日に現金で受け取った入金の合計が出る（レジに入る分）", () => {
+    const list = [
+      pay({ ymd: "2026-08-20", amount: 5000, how: "cash" }),
+      pay({ ymd: "2026-08-20", amount: 3000, how: "bank" }),
+      pay({ ymd: "2026-08-21", amount: 7000, how: "cash" }),
+    ];
+    expect(C.cashPaidOn(list, "2026-08-20")).toBe(5000);
+    expect(C.cashPaidOn(list, "2026-08-21")).toBe(7000);
+    expect(C.cashPaidOn(list, "2026-08-22")).toBe(0);
+  });
+});
+
+describe("新しい入金も、レジの現金に入る", () => {
+  const now = "2026-08-01T00:00:00.000Z";
+  const sale = (o) =>
+    C.normalizeSale(
+      Object.assign(
+        { date: "2026-08-01", name: "田中", people: 2, amount: 12000, pay: "tsuke" },
+        o
+      ),
+      now
+    );
+  it("その日に現金で受け取った入金は「現金で回収したツケ」に入る", () => {
+    const sales = [
+      sale({ id: "s1" }),
+      sale({ id: "s2", date: "2026-08-20", amount: 5000, pay: "cash" }),
+    ];
+    const pays = [
+      C.normalizePayment({ name: "田中", ymd: "2026-08-20", amount: 7000, how: "cash" }, now),
+      C.normalizePayment({ name: "田中", ymd: "2026-08-20", amount: 3000, how: "bank" }, now),
+    ];
+    const d = C.closeDraft(sales, "2026-08-20", { ymd: "2026-08-20", opening: 10000 }, pays);
+    expect(d.cashSales).toBe(5000);
+    expect(d.collected).toBe(7000); // 振込の3,000は入らない
+    expect(d.should).toBe(10000 + 5000 + 7000);
+  });
+  it("入金を渡さなくても、今までどおり動く（古い入金済みの分）", () => {
+    const sales = [sale({ id: "s1", paidDate: "2026-08-20", paidCash: true })];
+    const d = C.closeDraft(sales, "2026-08-20", { ymd: "2026-08-20", opening: 0 });
+    expect(d.collected).toBe(12000);
+    expect(d.should).toBe(12000);
+  });
+  it("古い入金済みと、新しい入金の両方があっても足し合わせる", () => {
+    const sales = [
+      sale({ id: "s1", paidDate: "2026-08-20", paidCash: true, amount: 4000 }),
+      sale({ id: "s2", amount: 9000 }),
+    ];
+    const pays = [
+      C.normalizePayment({ name: "田中", ymd: "2026-08-20", amount: 9000, how: "cash" }, now),
+    ];
+    const d = C.closeDraft(sales, "2026-08-20", { ymd: "2026-08-20", opening: 0 }, pays);
+    expect(d.collected).toBe(13000);
+  });
+});
+
+describe("入金で埋まった売上に「入金済み」の印を付ける（二重に数えない）", () => {
+  const now = "2026-08-01T00:00:00.000Z";
+  const sale = (o) =>
+    C.normalizeSale(
+      Object.assign(
+        { date: "2026-08-01", name: "田中", people: 2, amount: 12000, pay: "tsuke" },
+        o
+      ),
+      now
+    );
+
+  it("印は売上ごとに持つ（誰が入金済みにしたか）", () => {
+    expect(sale({}).paidBy).toBe("");
+    expect(sale({ paidDate: "2026-08-20", paidBy: "payment" }).paidBy).toBe("payment");
+    // 行に出して読み戻しても変わらない
+    const s = sale({ paidDate: "2026-08-20", paidBy: "payment" });
+    expect(C.saleFromRow(C.saleToRow(s)).paidBy).toBe("payment");
+  });
+
+  it("税理士の紙の「回収」は、入金の記録から出す（印の付いた売上は数えない）", () => {
+    const sales = [sale({ id: "s1", paidDate: "2026-08-20", paidBy: "payment" })];
+    const pays = [
+      C.normalizePayment({ name: "田中", ymd: "2026-08-20", amount: 12000, how: "cash" }, now),
+    ];
+    const m = C.monthlyCash(sales, {}, "2026-08-01", "2026-08-31", pays);
+    expect(m.collectedCash).toBe(12000);
+    expect(m.collectedBank).toBe(0);
+  });
+
+  it("前の作りで入金済みにした分は、今までどおり数える", () => {
+    const sales = [sale({ id: "s1", paidDate: "2026-08-20", paidCash: true })];
+    const m = C.monthlyCash(sales, {}, "2026-08-01", "2026-08-31");
+    expect(m.collectedCash).toBe(12000);
+  });
+
+  it("入金の記録と、印の付いた売上を、二重に数えない", () => {
+    const sales = [sale({ id: "s1", paidDate: "2026-08-20", paidBy: "payment", amount: 12000 })];
+    const pays = [
+      C.normalizePayment({ name: "田中", ymd: "2026-08-20", amount: 12000, how: "bank" }, now),
+    ];
+    const m = C.monthlyCash(sales, {}, "2026-08-01", "2026-08-31", pays);
+    expect(m.collectedCash + m.collectedBank).toBe(12000);
+  });
+
+  it("レジ締めでも二重にならない（印の付いた分は現金扱いしない）", () => {
+    const sales = [sale({ id: "s1", paidDate: "2026-08-20", paidBy: "payment" })];
+    const pays = [
+      C.normalizePayment({ name: "田中", ymd: "2026-08-20", amount: 12000, how: "cash" }, now),
+    ];
+    const d = C.closeDraft(sales, "2026-08-20", { ymd: "2026-08-20", opening: 0 }, pays);
+    expect(d.collected).toBe(12000);
   });
 });

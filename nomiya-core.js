@@ -266,6 +266,9 @@
       paidDate: isUnpaidMethod(r.pay) ? r.paidDate || null : null,
       // ツケ・請求書送りを回収したとき、現金で受け取ったか（レジの現金が増えるかどうか）
       paidCash: isUnpaidMethod(r.pay) && r.paidDate ? !!r.paidCash : false,
+      // 入金の記録で埋まった分は "payment"。前の作りで入金済みにした分は空。
+      // これを見て、税理士の紙とレジ締めで二重に数えないようにする。
+      paidBy: r.paidBy === "payment" ? "payment" : "",
       // 「調整」に入れる印。人が1件ずつ選ぶ物で、領収書の記録（なし）は変えない。
       adj: !!r.adj,
       createdAt: r.createdAt || nowIso,
@@ -491,6 +494,153 @@
       total: yes.amount + picked.amount,
       rows: g,
     };
+  }
+
+  /* ===================================================================
+     入金（ツケ・請求書送りの回収）
+     ─ 考え方：入金は1件ずつ記録して、古いツケから順に充てる（消込）。
+       充てた結果は保存しない＝毎回その場で計算する。正が1つで済み、
+       入金を消せば充当もやり直される（＝取り消しが1タップ）。
+       ※入金日が入っている古い売上は「もう入金済み」として残高に入れない
+         （前の作りで入金済みにした分を、そのまま生かす）。
+     =================================================================== */
+  var PAY_HOWS = [
+    { key: "bank", label: "振込・カード" },
+    { key: "cash", label: "現金で受け取った" },
+  ];
+  function normalizePayment(raw, now) {
+    var r = raw || {};
+    return {
+      id: r.id || makeId(),
+      ymd: isIsoDate(r.ymd) ? r.ymd : "",
+      name: String(r.name == null ? "" : r.name).trim(),
+      amount: Math.max(0, _int(r.amount)),
+      how: r.how === "cash" ? "cash" : "bank",
+      memo: String(r.memo == null ? "" : r.memo).trim(),
+      createdAt: r.createdAt || now || nowIso(),
+      updatedAt: now || nowIso(),
+      deletedAt: r.deletedAt || null,
+    };
+  }
+  function paymentToRow(p) {
+    return {
+      pid: _s(p.id),
+      ymd: _date(p.ymd),
+      name: _s(p.name),
+      amount: _int(p.amount),
+      how: _s(p.how),
+      memo: _s(p.memo),
+      created_at: _ts(p.createdAt),
+      updated_at: _ts(p.updatedAt) || nowIso(),
+      deleted_at: _ts(p.deletedAt),
+    };
+  }
+  function paymentFromRow(r) {
+    return {
+      id: _s(r.pid),
+      ymd: _s(r.ymd),
+      name: _s(r.name),
+      amount: _int(r.amount),
+      how: r.how === "cash" ? "cash" : "bank",
+      memo: _s(r.memo),
+      createdAt: _s(r.created_at),
+      updatedAt: _s(r.updated_at),
+      deletedAt: r.deleted_at || null,
+    };
+  }
+  function syncPlanPayments(localArr, remoteArr) {
+    return syncPlan(localArr, remoteArr, function (x) {
+      return x.id;
+    });
+  }
+  /** その日に現金で受け取った入金の合計（レジの現金が増える分） */
+  function cashPaidOn(payments, ymd) {
+    var t = 0;
+    if (!payments || !payments.length || typeof payments.forEach !== "function") return 0;
+    payments.forEach(function (p) {
+      if (!p || p.deletedAt || p.how !== "cash" || p.ymd !== ymd) return;
+      t += _int(p.amount);
+    });
+    return t;
+  }
+  /**
+   * receivables(sales, payments, opt)
+   *  相手ごとの「まだもらっていない額」。古いツケから順に入金を充てる。
+   *  返り = [{ name, billed, paid, left, over, count, oldest, days, done, rows:[{id,date,amount,applied,left}] }]
+   *  opt.today   … 入れると、一番古い日から何日経ったかを数える
+   *  opt.hideDone… 残り0の人を出さない
+   */
+  function receivables(sales, payments, opt) {
+    var o = opt || {};
+    var byName = {};
+    var order = [];
+    (sales || []).forEach(function (s) {
+      // 未回収になりうる売上だけ。前の作りで入金済みにした分は入れない。
+      // 入金の記録で埋まった分(paidBy=payment)は、ここで毎回充て直す＝入れる。
+      // でないと入金を1件足すたびに、埋まった売上が消えて残りが狂う。
+      if (!isAlive(s) || !isUnpaidMethod(s.pay)) return;
+      if (s.paidDate && s.paidBy !== "payment") return;
+      var n = String(s.name || "");
+      if (!byName[n]) {
+        byName[n] = { rows: [], paid: 0 };
+        order.push(n);
+      }
+      byName[n].rows.push({
+        id: s.id,
+        date: s.date,
+        amount: _int(s.amount),
+        applied: 0,
+        left: _int(s.amount),
+      });
+    });
+    (payments || []).forEach(function (p) {
+      if (!p || p.deletedAt) return;
+      var n = String(p.name || "");
+      if (!byName[n]) return; // 相手に未回収が無ければ、充てる先が無い
+      byName[n].paid += _int(p.amount);
+    });
+    var out = [];
+    order.forEach(function (n) {
+      var g = byName[n];
+      g.rows.sort(function (a, b) {
+        if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+        return a.id < b.id ? -1 : 1;
+      });
+      var rest = g.paid;
+      var billed = 0;
+      g.rows.forEach(function (r) {
+        billed += r.amount;
+        var use = Math.min(rest, r.amount);
+        r.applied = use;
+        r.left = r.amount - use;
+        rest -= use;
+      });
+      var left = Math.max(0, billed - g.paid);
+      var row = {
+        name: n,
+        billed: billed,
+        paid: g.paid,
+        left: left,
+        over: Math.max(0, g.paid - billed), // 多くもらった分（預かり）
+        count: g.rows.length,
+        oldest: g.rows.length ? g.rows[0].date : "",
+        days: null,
+        done: left === 0,
+        rows: g.rows,
+      };
+      if (isIsoDate(o.today) && row.oldest) {
+        row.days = Math.round(
+          (_dateOf(o.today).getTime() - _dateOf(row.oldest).getTime()) / 86400000
+        );
+      }
+      if (o.hideDone && row.done) return;
+      out.push(row);
+    });
+    // 古い順（一番待たされている相手が上）
+    return out.sort(function (a, b) {
+      if (a.oldest !== b.oldest) return a.oldest < b.oldest ? -1 : 1;
+      return a.name < b.name ? -1 : 1;
+    });
   }
 
   function unpaidSales(sales) {
@@ -860,7 +1010,7 @@
    * closeDraft(sales, ymd, close)
    *  その日の締めの中身を出す。close = { opening, outs[], counted, closedAt }
    */
-  function closeDraft(sales, ymd, close) {
+  function closeDraft(sales, ymd, close, payments) {
     var c = close || {};
     var day = filterSales(sales, { from: ymd, to: ymd });
     var cashSales = 0;
@@ -876,6 +1026,8 @@
         collected += Math.floor(Number(s.amount) || 0);
       }
     });
+    // 新しい入金（相手ごとに記録する方式）で、その日に現金で受け取った分も足す
+    collected += cashPaidOn(payments, ymd);
     var outs = (c.outs || []).map(normalizeOut);
     var outTotal = outs.reduce(function (a, o) {
       return a + o.amount;
@@ -1003,7 +1155,7 @@
    *   - ツケ・請求書送りの未回収（期間の終わりの時点）と、期間内に回収した額（現金/振込）
    *   - 手許現金（最後に締めた日の実数）とレジの過不足の合計
    */
-  function monthlyCash(sales, closes, from, to) {
+  function monthlyCash(sales, closes, from, to, payments) {
     var cs = closes || {};
     var days = Object.keys(cs)
       .filter(function (k) {
@@ -1048,11 +1200,22 @@
     var collectedBank = 0;
     (sales || []).filter(isAlive).forEach(function (s) {
       if (!isUnpaidMethod(s.pay) || !s.paidDate) return;
+      // 入金の記録で埋まった分は、記録の方から数える（二重にしない）
+      if (s.paidBy === "payment") return;
       if (from && s.paidDate < from) return;
       if (to && s.paidDate > to) return;
       if (s.paidCash) collectedCash += Math.floor(Number(s.amount) || 0);
       else collectedBank += Math.floor(Number(s.amount) || 0);
     });
+    if (payments && payments.length) {
+      payments.forEach(function (p) {
+        if (!p || p.deletedAt || !p.ymd) return;
+        if (from && p.ymd < from) return;
+        if (to && p.ymd > to) return;
+        if (p.how === "cash") collectedCash += _int(p.amount);
+        else collectedBank += _int(p.amount);
+      });
+    }
 
     // 期間の終わりの時点で、まだ回収できていない分
     var rest = (sales || []).filter(function (s) {
@@ -2212,6 +2375,7 @@
       staff: _s(s.staff),
       crew: s.crew || [], // ついた人（ヘルプ・場内など）
       paid_cash: !!s.paidCash,
+      paid_by: _s(s.paidBy),
       adj: !!s.adj,
       created_at: _ts(s.createdAt),
       // 「いつの更新か」は同期の勝ち負けを決める鍵。空では送らない（無ければ今）
@@ -2233,6 +2397,7 @@
       memo: _s(r.memo),
       paidDate: r.paid_date || null,
       paidCash: !!r.paid_cash,
+      paidBy: _s(r.paid_by),
       adj: !!r.adj,
       staff: _s(r.staff),
       crew: r.crew || [],
@@ -2543,6 +2708,13 @@
     byPayMethod: byPayMethod,
     byReceipt: byReceipt,
     byDay: byDay,
+    PAY_HOWS: PAY_HOWS,
+    normalizePayment: normalizePayment,
+    paymentToRow: paymentToRow,
+    paymentFromRow: paymentFromRow,
+    syncPlanPayments: syncPlanPayments,
+    cashPaidOn: cashPaidOn,
+    receivables: receivables,
     unpaidSales: unpaidSales,
     unpaidByName: unpaidByName,
     unpaidGroups: unpaidGroups,

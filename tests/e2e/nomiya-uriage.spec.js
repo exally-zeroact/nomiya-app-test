@@ -349,7 +349,7 @@ test.describe("飲み屋 売上管理", () => {
 
     // 田中の7月分を入金済みにする → 未回収は山本商事だけになる
     await page.locator("#btnPaid").click();
-    await page.locator("#mdPaidOk").click();
+    await page.locator("#pyOk").click();
     await expect(page.locator("#invBadge")).toHaveText("1");
     // 7月分の請求書は中身が変わらない（あとから出し直せる）
     await expect(page.locator("#invName option[value='田中']")).toHaveCount(1);
@@ -407,8 +407,8 @@ test.describe("飲み屋 売上管理", () => {
 
     await page.locator("#invName").selectOption("山本商事");
     await page.locator("#btnPaid").click();
-    await page.locator("#mdPaidDate").fill("2026-08-10");
-    await page.locator("#mdPaidOk").click();
+    await page.locator("#pyDate").fill("2026-08-10");
+    await page.locator("#pyOk").click();
 
     // 未回収は田中のツケだけになる（バッジが2→1）
     await expect(page.locator("#invBadge")).toHaveText("1");
@@ -626,9 +626,9 @@ test.describe("飲み屋 売上管理", () => {
     await setInvMonth(page, "2026-07");
     await page.locator("#invName").selectOption("鈴木");
     await page.locator("#btnPaid").click();
-    await expect(page.locator("#mdPaidRc")).toBeChecked();
-    await page.locator("#mdPaidDate").fill("2026-08-10");
-    await page.locator("#mdPaidOk").click();
+    await expect(page.locator("#pyRc")).toBeChecked();
+    await page.locator("#pyDate").fill("2026-08-10");
+    await page.locator("#pyOk").click();
 
     const saved = await page.evaluate(() => window.__NOMIYA.sales[0]);
     expect(saved.receipt).toBe("issued");
@@ -797,7 +797,7 @@ test.describe("飲み屋 売上管理", () => {
 
     // 「この請求分を入金済みにする」で未回収が減る（紙は7月分のまま）
     await page.locator("#btnPaid").click();
-    await page.locator("#mdPaidOk").click();
+    await page.locator("#pyOk").click();
     await expect(page.locator("#invBadge")).toHaveText("1");
     await expect(page.locator("#invName option[value='山本商事']")).toHaveCount(1);
     await expect(page.locator("#invSheets .iv-grand b")).toHaveText("¥47,000");
@@ -1873,9 +1873,9 @@ test.describe("飲み屋 売上管理", () => {
     await goto(page, "inv");
     await page.locator("#invName").selectOption("田中");
     await page.locator("#btnPaid").click();
-    await page.locator("#mdPaidDate").fill("2026-07-01");
-    await page.locator("#mdPaidHow button[data-how='cash']").click();
-    await page.locator("#mdPaidOk").click();
+    await page.locator("#pyDate").fill("2026-07-01");
+    await page.locator("#pyHow button[data-how='cash']").click();
+    await page.locator("#pyOk").click();
 
     await setCloseDay(page, "2026-07-01");
     await expect(page.locator("#clColl")).toHaveText("¥5,000");
@@ -1886,8 +1886,8 @@ test.describe("飲み屋 売上管理", () => {
     await goto(page, "inv");
     await page.locator("#invName").selectOption("山本商事");
     await page.locator("#btnPaid").click();
-    await page.locator("#mdPaidDate").fill("2026-07-01");
-    await page.locator("#mdPaidOk").click(); // 既定は「振込・カード」
+    await page.locator("#pyDate").fill("2026-07-01");
+    await page.locator("#pyOk").click(); // 既定は「振込・カード」
     await setCloseDay(page, "2026-07-01");
     await expect(page.locator("#clColl")).toHaveText("¥5,000");
     await expect(page.locator("#clShould")).toHaveText("¥13,000");
@@ -4307,6 +4307,231 @@ test.describe("⑭ 締めたあとに動いたら出す", () => {
     await page.locator("#btnClose").click();
     await expect(page.locator("#clMoved")).toHaveText("");
     await expect(page.locator("#clDiff")).toHaveText("¥0");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* ⑮ 入金管理 ─ 未回収と入金
+   ツケ・請求書送りの「まだもらっていない金」を、入金1件ずつで潰していく。
+   入金は記録として持ち、どの売上に充てたかは毎回計算する（だから取り消せば元に戻る）。 */
+test.describe("飲み屋 入金管理", () => {
+  async function inv(page, seg) {
+    await goto(page, "inv");
+    await page.locator(`#invSeg [data-iseg='${seg}']`).click();
+    await expect(page.locator(`#pane-${seg}`)).toBeVisible();
+  }
+  async function pay(page, name, o) {
+    await inv(page, "due");
+    await page.locator(`[data-due-name='${name}']`).click();
+    await page.locator("#pyDate").fill(o.ymd);
+    if (o.amount != null) await page.locator("#pyAmount").fill(String(o.amount));
+    if (o.how) await page.locator(`#pyHow [data-how='${o.how}']`).click();
+    if (o.memo) await page.locator("#pyMemo").fill(o.memo);
+    await page.locator("#pyOk").click();
+  }
+  async function twoTsuke(page) {
+    await addSale(page, {
+      date: "2026-07-01",
+      name: "田中",
+      people: 2,
+      amount: 10000,
+      pay: "tsuke",
+    });
+    await addSale(page, {
+      date: "2026-07-20",
+      name: "田中",
+      people: 2,
+      amount: 6000,
+      pay: "tsuke",
+    });
+  }
+  async function closeDay(page, ymd) {
+    await goto(page, "close");
+    for (let i = 0; i < 400; i++) {
+      const now = await page.evaluate(() => window.__NOMIYA.closeYmd);
+      if (now === ymd) return;
+      await page.locator(`#periodClose [data-cmv="${now > ymd ? -1 : 1}"]`).click();
+    }
+    throw new Error("締めの日を " + ymd + " に合わせられなかった");
+  }
+
+  test("未回収: 誰にいくら残っているかが、古い順に出る", async ({ page }) => {
+    const errors = await open(page);
+    await twoTsuke(page);
+    await inv(page, "due");
+    await expect(page.locator("#dueStrip")).toContainText("¥16,000");
+    await expect(page.locator("#dueStrip")).toContainText("1 人");
+    await expect(page.locator("#dueList .li")).toHaveCount(1);
+    await expect(page.locator("[data-due-name='田中']")).toContainText("¥16,000");
+    await expect(page.locator("[data-due-name='田中']")).toContainText("2件");
+    // 一番古い日から数える
+    await expect(page.locator("[data-due-name='田中'] .li-sub")).toContainText("7/1");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("入金: 一部だけ入っても、残りが正しく減る（古いツケから順に充てる）", async ({ page }) => {
+    const errors = await open(page);
+    await twoTsuke(page);
+    await pay(page, "田中", { ymd: "2026-08-01", amount: 4000, how: "cash" });
+
+    await expect(page.locator("[data-due-name='田中']")).toContainText("¥12,000");
+    await expect(page.locator("[data-due-name='田中']")).toContainText("入金 ¥4,000");
+    // 一部だけなので、売上はまだ「未回収」のまま（入金済みにしない）
+    const paid = await page.evaluate(() =>
+      window.__NOMIYA.sales.map((s) => [s.amount, s.paidDate, s.paidBy])
+    );
+    expect(paid).toEqual([
+      [10000, null, ""],
+      [6000, null, ""],
+    ]);
+
+    // 記録に残る
+    await inv(page, "paid");
+    await expect(page.locator("#paidList .li")).toHaveCount(1);
+    await expect(page.locator("#paidList .li")).toContainText("田中");
+    await expect(page.locator("#paidList .li")).toContainText("¥4,000");
+    await expect(page.locator("#paidList .li")).toContainText("現金で受け取った");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("入金: 古い分が埋まりきると、その売上だけ入金済みになる", async ({ page }) => {
+    const errors = await open(page);
+    await twoTsuke(page);
+    await pay(page, "田中", { ymd: "2026-08-01", amount: 10000 });
+
+    const paid = await page.evaluate(() =>
+      window.__NOMIYA.sales.map((s) => [s.amount, s.paidDate, s.paidBy])
+    );
+    expect(paid).toEqual([
+      [10000, "2026-08-01", "payment"],
+      [6000, null, ""],
+    ]);
+    await expect(page.locator("[data-due-name='田中']")).toContainText("¥6,000");
+
+    // 2回目の入金で、1件目の印が外れない
+    await pay(page, "田中", { ymd: "2026-08-05", amount: 6000 });
+    const paid2 = await page.evaluate(() =>
+      window.__NOMIYA.sales.map((s) => [s.paidDate, s.paidBy])
+    );
+    // 1件目は8/1に埋まった日のまま。2件目は今回の入金日で埋まる。
+    expect(paid2).toEqual([
+      ["2026-08-01", "payment"],
+      ["2026-08-05", "payment"],
+    ]);
+    await expect(page.locator("#dueList")).toContainText("まだもらってない分はありません");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("入金: 取り消すと、未回収も売上の印も元に戻る", async ({ page }) => {
+    const errors = await open(page);
+    await twoTsuke(page);
+    await pay(page, "田中", { ymd: "2026-08-01", amount: 16000 });
+    expect(await page.evaluate(() => window.__NOMIYA.sales.filter((s) => s.paidDate).length)).toBe(
+      2
+    );
+
+    await inv(page, "paid");
+    await page.locator("[data-unpay]").click();
+    await page.locator("#mdUnpayYes").click();
+
+    await expect(page.locator("#paidList")).toContainText("まだ入金はありません");
+    expect(await page.evaluate(() => window.__NOMIYA.sales.filter((s) => s.paidDate).length)).toBe(
+      0
+    );
+    await inv(page, "due");
+    await expect(page.locator("[data-due-name='田中']")).toContainText("¥16,000");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("入金: 多くもらったら、預かりとして注意が出る（止めない）", async ({ page }) => {
+    const errors = await open(page);
+    await twoTsuke(page);
+    await pay(page, "田中", { ymd: "2026-08-01", amount: 20000 });
+    await inv(page, "due");
+    await expect(page.locator("#dueNote")).toContainText("¥4,000 多くもらっています");
+    await expect(page.locator("#dueList")).toContainText("まだもらってない分はありません");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("入金: 現金で受け取った分は、その日のレジのあるべき額に入る", async ({ page }) => {
+    const errors = await open(page);
+    await twoTsuke(page);
+    await addSale(page, {
+      date: "2026-08-01",
+      name: "佐藤",
+      people: 2,
+      amount: 3000,
+      pay: "cash",
+    });
+    await pay(page, "田中", { ymd: "2026-08-01", amount: 10000, how: "cash" });
+
+    await closeDay(page, "2026-08-01");
+    await page.locator("#clOpen").fill("30000");
+    // 釣銭30,000 ＋ 現金売上3,000 ＋ 現金回収10,000 ＝ 43,000
+    await expect(page.locator("#clShould")).toHaveText("¥43,000");
+
+    // 振込で受け取った分はレジに入らない
+    await pay(page, "田中", { ymd: "2026-08-01", amount: 6000, how: "bank" });
+    await closeDay(page, "2026-08-01");
+    await expect(page.locator("#clShould")).toHaveText("¥43,000");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("入金: 請求書送りも同じ場所で回収できる", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, {
+      date: "2026-07-10",
+      name: "山本商事",
+      people: 4,
+      amount: 32000,
+      pay: "invoice",
+      receipt: true,
+    });
+    await inv(page, "due");
+    await expect(page.locator("[data-due-name='山本商事']")).toContainText("¥32,000");
+    await pay(page, "山本商事", { ymd: "2026-08-31", how: "bank", memo: "振込" });
+    await expect(page.locator("#dueList")).toContainText("まだもらってない分はありません");
+    await inv(page, "paid");
+    await expect(page.locator("#paidList .li")).toContainText("振込・カード");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("入金: 税理士の紙の「この期間に回収」に、入金がそのまま出る", async ({ page }) => {
+    const errors = await open(page);
+    await twoTsuke(page);
+    await pay(page, "田中", { ymd: "2026-08-01", amount: 10000, how: "cash" });
+    await pay(page, "田中", { ymd: "2026-08-02", amount: 6000, how: "bank" });
+
+    await goto(page, "tax");
+    await page.locator("#periodTax .period-lb").click();
+    await page.locator("#mdFrom").fill("2026-08-01");
+    await page.locator("#mdTo").fill("2026-08-31");
+    await page.locator("#mdOk").click();
+    const paper = page.locator("#taxSheets");
+    // 二重に数えない（売上16,000が別で足されて32,000にならない）
+    await expect(paper).toContainText("この期間に回収（現金）");
+    const cash = await paper
+      .locator("tr", { hasText: "この期間に回収（現金）" })
+      .locator("td.r")
+      .innerText();
+    const bank = await paper
+      .locator("tr", { hasText: "この期間に回収（振込・カード）" })
+      .locator("td.r")
+      .innerText();
+    expect([cash.trim(), bank.trim()]).toEqual(["10,000", "6,000"]);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("入金: 打ち直して同期しても消えない（クラウドに届いている）", async ({ page }) => {
+    const errors = await open(page);
+    await twoTsuke(page);
+    await pay(page, "田中", { ymd: "2026-08-01", amount: 4000, how: "cash", memo: "半分" });
+    await expect.poll(() => cloudRows(page, "nomiya_payments")).toHaveLength(1);
+    await page.evaluate(() => localStorage.removeItem("nomiya_payments_v1"));
+    await page.reload({ waitUntil: "load" });
+    await inv(page, "paid");
+    await expect(page.locator("#paidList .li")).toHaveCount(1);
+    await expect(page.locator("#paidList .li")).toContainText("半分");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });

@@ -32,6 +32,7 @@ const TABLES = [
   "nomiya_closes",
   "nomiya_staff",
   "nomiya_work",
+  "nomiya_payments",
 ];
 
 console.log("倉庫: " + URL);
@@ -60,7 +61,7 @@ for (const t of TABLES) {
 console.log("");
 console.log(
   ng === 0
-    ? "PROBE RESULT: OK（7表とも HTTP 200 ＝ DDL適用済み）"
+    ? "PROBE RESULT: OK（8表とも HTTP 200 ＝ DDL適用済み）"
     : "PROBE RESULT: NG（" +
         ng +
         " 表が 200 でない ＝ まだ supabase/schema-nomiya.sql を当てていない）"

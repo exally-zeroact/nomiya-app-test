@@ -47,6 +47,7 @@ create table if not exists nomiya_sales (
   memo       text not null default '',
   paid_date  date,
   paid_cash  boolean not null default false,      -- ツケ回収を現金で受けたか（レジ締めの現金に効く）
+  paid_by    text not null default '',            -- 'payment'=入金の記録で埋まった分（二重に数えないための印）
   staff      text not null default '',              -- 担当（誰の客か）＝歩合が付く人
   crew       jsonb not null default '[]'::jsonb,   -- ついた人 [{name,role}]（ヘルプ・場内など）
   created_at timestamptz not null default now(),
@@ -61,6 +62,8 @@ alter table nomiya_sales add column if not exists paid_cash boolean not null def
 alter table nomiya_sales add column if not exists crew jsonb not null default '[]'::jsonb;
 -- 「調整」に入れる印（人が1件ずつ選ぶ。領収書の記録そのものは変えない）
 alter table nomiya_sales add column if not exists adj boolean not null default false;
+-- 入金の記録で埋まった分の印（空＝前の作りで入金済みにした分）
+alter table nomiya_sales add column if not exists paid_by text not null default '';
 
 -- ── 宛先（請求書送りの相手） ──────────────────────────────────────────
 --   name  = 会社名（そのまま売上の名前になる＝突合の鍵）
@@ -238,3 +241,28 @@ create policy own_nomiya_settings on nomiya_settings for all
 --   where schemaname='public' and tablename in
 --     ('nomiya_sales','nomiya_partners','nomiya_settings','nomiya_invoices',
 --      'nomiya_closes','nomiya_staff','nomiya_work');
+
+-- ── 入金（ツケ・請求書送りの回収） ──────────────────────────────────
+--   入金は1件ずつ記録して、古いツケから順に充てる（消込）。
+--   充てた結果は持たない＝毎回アプリが計算する。入金を消せば充当もやり直される。
+--   how = bank(振込・カード) / cash(現金で受け取った→レジの現金が増える)
+create table if not exists nomiya_payments (
+  id         uuid primary key default gen_random_uuid(),
+  account_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  pid        text not null,                      -- アプリが作るID
+  ymd        date,                               -- 入金日
+  name       text not null default '',           -- 相手（売上の名前と同じ）
+  amount     integer not null default 0,
+  how        text not null default 'bank',
+  memo       text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  unique (account_id, pid)
+);
+create index if not exists idx_nomiya_payments_acct on nomiya_payments(account_id, name, ymd);
+
+alter table nomiya_payments enable row level security;
+drop policy if exists own_nomiya_payments on nomiya_payments;
+create policy own_nomiya_payments on nomiya_payments for all
+  using (account_id = auth.uid()) with check (account_id = auth.uid());
