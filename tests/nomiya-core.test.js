@@ -755,6 +755,7 @@ describe("クラウド同期（端末が作業台・クラウドは控え）", (
         memo: "",
         paidDate: null,
         paidCash: false,
+        adj: false, // 「調整」に入れる印（人が1件ずつ選ぶ）
         staff: "",
         crew: [], // ついた人（ヘルプ・場内など）。無ければ空
         createdAt: "2026-07-01T00:00:00.000Z",
@@ -2547,5 +2548,91 @@ describe("内税の計算（1円もずらさない）", () => {
   it("税抜のバックの元も、1円ずれない", () => {
     expect(C.backBaseAmt(11000, { backBase: "nuki", rate: 0.1 })).toBe(10000);
     expect(C.backBaseAmt(11000, { backBase: "service", rate: 0.1, serviceRate: 10 })).toBe(9090);
+  });
+});
+
+/* =====================================================================
+   ⑥ 調整（領収書なしの中から、人が1件ずつ選んで「あり」側に足す）
+   ★選ぶのは人。アプリは選ばれた物を覚えて、合計を出すだけ。
+     目標額から自動で選ぶ・ランダムで拾うは作らない。
+   ===================================================================== */
+describe("調整（選んだ分だけ、あり側に足す）", () => {
+  const mk = (o) =>
+    C.normalizeSale(
+      Object.assign(
+        { date: "2026-07-01", name: "客", people: 2, amount: 10000, pay: "cash", receipt: "none" },
+        o
+      ),
+      "2026-07-01T00:00:00.000Z"
+    );
+  const SALES = [
+    mk({ id: "a1", amount: 30000, receipt: "issued" }), // 領収書あり
+    mk({ id: "a2", amount: 20000, pay: "credit", receipt: "na" }), // カード＝あり側
+    mk({ id: "n1", amount: 12000 }), // なし
+    mk({ id: "n2", amount: 8000, adj: true }), // なし・調整に入れる印
+    mk({ id: "n3", amount: 5000 }), // なし
+  ];
+
+  it("印は売上ごとに持つ。既定は付いていない", () => {
+    expect(mk({}).adj).toBe(false);
+    expect(mk({ adj: true }).adj).toBe(true);
+    expect(mk({ adj: "1" }).adj).toBe(true);
+    // 領収書の記録そのものは変えない（実際に出していないことは残す）
+    expect(mk({ adj: true }).receipt).toBe("none");
+  });
+
+  it("「調整」で見ると、あり側＋印を付けたなし だけが出る", () => {
+    const rows = C.filterSales(SALES, { receipt: "adj" });
+    expect(rows.map((s) => s.id).sort()).toEqual(["a1", "a2", "n2"]);
+    expect(C.summarize(rows).amount).toBe(58000);
+  });
+
+  it("印を付けても、「あり」「なし」の見え方は今までどおり", () => {
+    expect(C.filterSales(SALES, { receipt: "yes" }).map((s) => s.id)).toEqual(["a1", "a2"]);
+    expect(C.filterSales(SALES, { receipt: "no" }).map((s) => s.id)).toEqual(["n1", "n2", "n3"]);
+  });
+
+  it("印を付けられるのは「なし」側だけ（ありに印は付けさせない）", () => {
+    expect(C.canAdj(SALES[0])).toBe(false); // 領収書あり
+    expect(C.canAdj(SALES[1])).toBe(false); // カード＝不要
+    expect(C.canAdj(SALES[2])).toBe(true); // なし
+    expect(
+      C.canAdj(
+        C.normalizeSale(
+          { date: "2026-07-01", name: "x", people: 1, amount: 1, pay: "tsuke", receipt: "later" },
+          "2026-07-01T00:00:00.000Z"
+        )
+      )
+    ).toBe(true);
+  });
+
+  it("いくら足しているかが、その場で分かる", () => {
+    const t = C.adjTotals(SALES);
+    expect(t.yes).toEqual({ count: 2, amount: 50000 });
+    expect(t.picked).toEqual({ count: 1, amount: 8000 });
+    expect(t.rest).toEqual({ count: 2, amount: 17000 });
+    expect(t.total).toBe(58000);
+  });
+
+  it("印を外せば元に戻る（何も壊れない）", () => {
+    const off = SALES.map((s) => (s.id === "n2" ? Object.assign({}, s, { adj: false }) : s));
+    expect(C.filterSales(off, { receipt: "adj" }).map((s) => s.id)).toEqual(["a1", "a2"]);
+    expect(C.adjTotals(off).picked).toEqual({ count: 0, amount: 0 });
+  });
+
+  it("消した売上は、どの見方でも数えない", () => {
+    const del = SALES.map((s) =>
+      s.id === "n2" ? Object.assign({}, s, { deletedAt: "2026-07-02T00:00:00.000Z" }) : s
+    );
+    expect(C.filterSales(del, { receipt: "adj" }).map((s) => s.id)).toEqual(["a1", "a2"]);
+    expect(C.adjTotals(del).picked.count).toBe(0);
+  });
+
+  it("印はクラウドにも残る（新しいスマホでも同じ選び方）", () => {
+    const row = C.saleToRow(mk({ id: "n9", adj: true }));
+    expect(row.adj).toBe(true);
+    expect(C.saleFromRow(row).adj).toBe(true);
+    // 古い行（列がまだ無い店）から読んでも壊れない
+    expect(C.saleFromRow({ cid: "x", ymd: "2026-07-01", amount: 1000 }).adj).toBe(false);
   });
 });

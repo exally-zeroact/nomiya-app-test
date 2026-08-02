@@ -59,6 +59,8 @@ create index if not exists idx_nomiya_sales_acct_upd on nomiya_sales(account_id,
 -- 既に作ってある店にも足す（あとから列を増やすときはこの形で書く）
 alter table nomiya_sales add column if not exists paid_cash boolean not null default false;
 alter table nomiya_sales add column if not exists crew jsonb not null default '[]'::jsonb;
+-- 「調整」に入れる印（人が1件ずつ選ぶ。領収書の記録そのものは変えない）
+alter table nomiya_sales add column if not exists adj boolean not null default false;
 
 -- ── 宛先（請求書送りの相手） ──────────────────────────────────────────
 --   name  = 会社名（そのまま売上の名前になる＝突合の鍵）

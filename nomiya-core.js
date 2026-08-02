@@ -266,6 +266,8 @@
       paidDate: isUnpaidMethod(r.pay) ? r.paidDate || null : null,
       // ツケ・請求書送りを回収したとき、現金で受け取ったか（レジの現金が増えるかどうか）
       paidCash: isUnpaidMethod(r.pay) && r.paidDate ? !!r.paidCash : false,
+      // 「調整」に入れる印。人が1件ずつ選ぶ物で、領収書の記録（なし）は変えない。
+      adj: !!r.adj,
       createdAt: r.createdAt || nowIso,
       updatedAt: nowIso,
       deletedAt: r.deletedAt || null,
@@ -311,6 +313,8 @@
         return false;
       if (o.receipt === "na" && !isNa(s)) return false;
       if (o.receipt === "later" && !isLater(s)) return false;
+      // 'adj'=あり側＋「調整に入れる」印を付けたなし。印は人が1件ずつ選ぶ。
+      if (o.receipt === "adj" && !(isIssued(s) || isNa(s) || s.adj)) return false;
       if (o.name && s.name !== o.name) return false;
       if (q && String(s.name).indexOf(q) < 0 && String(s.memo || "").indexOf(q) < 0) return false;
       if (o.unpaidOnly && !(isUnpaidMethod(s.pay) && !s.paidDate)) return false;
@@ -449,6 +453,46 @@
   /* ===================================================================
      未回収（請求書送り・ツケ で paidDate が無いもの）
      =================================================================== */
+  /**
+   * canAdj(sale)
+   *  「調整に入れる」印を付けられるのは、領収書を出していない分だけ。
+   *  もともと あり側（発行済み・カード/振込）の物には付けさせない。
+   */
+  function canAdj(sale) {
+    var s = sale || {};
+    return !(isIssued(s) || isNa(s));
+  }
+  /**
+   * adjTotals(sales)
+   *  いま何をいくら足しているかを、そのまま出す。
+   *    yes    = もともと あり側
+   *    picked = なしの中から選んだ分
+   *    rest   = 選んでいない なし
+   *    total  = yes + picked（＝「調整」で見たときの額）
+   */
+  function adjTotals(sales) {
+    var list = (sales || []).filter(isAlive);
+    var g = { yes: [], picked: [], rest: [] };
+    list.forEach(function (s) {
+      if (!canAdj(s)) g.yes.push(s);
+      else if (s.adj) g.picked.push(s);
+      else g.rest.push(s);
+    });
+    var one = function (rows) {
+      var t = summarize(rows);
+      return { count: t.count, amount: t.amount };
+    };
+    var yes = one(g.yes);
+    var picked = one(g.picked);
+    return {
+      yes: yes,
+      picked: picked,
+      rest: one(g.rest),
+      total: yes.amount + picked.amount,
+      rows: g,
+    };
+  }
+
   function unpaidSales(sales) {
     return (sales || []).filter(function (s) {
       return isAlive(s) && isUnpaidMethod(s.pay) && !s.paidDate;
@@ -1942,6 +1986,7 @@
       staff: _s(s.staff),
       crew: s.crew || [], // ついた人（ヘルプ・場内など）
       paid_cash: !!s.paidCash,
+      adj: !!s.adj,
       created_at: _ts(s.createdAt),
       // 「いつの更新か」は同期の勝ち負けを決める鍵。空では送らない（無ければ今）
       updated_at: _ts(s.updatedAt) || nowIso(),
@@ -1962,6 +2007,7 @@
       memo: _s(r.memo),
       paidDate: r.paid_date || null,
       paidCash: !!r.paid_cash,
+      adj: !!r.adj,
       staff: _s(r.staff),
       crew: r.crew || [],
       createdAt: r.created_at || "",
@@ -2268,6 +2314,8 @@
     normalizeSale: normalizeSale,
     makeId: makeId,
     filterSales: filterSales,
+    canAdj: canAdj,
+    adjTotals: adjTotals,
     sortSales: sortSales,
     summarize: summarize,
     byPayMethod: byPayMethod,

@@ -3300,3 +3300,150 @@ test.describe("⑤ 店ごとの決め方（グレー枠）", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
+
+/* =====================================================================
+   ⑥ 調整（人が1件ずつ選んで「あり」側に足す）
+   ===================================================================== */
+test.describe("⑥ 調整", () => {
+  // 領収書ありが1件（30,000）／なしが3件（12,000・8,000・5,000）
+  async function seedAdj(page) {
+    const rows = [
+      { date: "2026-07-01", name: "山本商事", people: 4, amount: 30000, pay: "cash", rec: true },
+      { date: "2026-07-02", name: "田中", people: 2, amount: 12000, pay: "cash" },
+      { date: "2026-07-03", name: "佐藤", people: 3, amount: 8000, pay: "cash" },
+      { date: "2026-07-04", name: "鈴木", people: 2, amount: 5000, pay: "cash" },
+    ];
+    for (const s of rows) {
+      await goto(page, "input");
+      await page.locator("#inDate").fill(s.date);
+      await page.locator(`#payChips button[data-pay="${s.pay}"]`).click();
+      await page.locator("#inName").fill(s.name);
+      await page.locator("#inPeople").fill(String(s.people));
+      await page.locator("#inAmount").fill(String(s.amount));
+      if (s.rec) await page.locator('#recChips button[data-rec="issued"]').click();
+      await page.locator("#btnSave").click();
+    }
+    await goto(page, "list");
+    await page.locator("#periodList .period-lb").click();
+    await page.locator("#mdFrom").fill("2026-07-01");
+    await page.locator("#mdTo").fill("2026-07-31");
+    await page.locator("#mdOk").click();
+  }
+
+  test("なしの中から自分で選んだ分だけが、あり側に足される", async ({ page }) => {
+    const errors = await open(page);
+    await seedAdj(page);
+
+    // 「あり」だけなら 30,000
+    await page.locator('#filRec button[data-rec="yes"]').click();
+    await expect(page.locator("#listStrip")).toContainText("¥30,000");
+
+    // 「調整」を押すと、選ぶ欄が出る。まだ何も選んでいないので 30,000 のまま
+    await page.locator('#filRec button[data-rec="adj"]').click();
+    await expect(page.locator("#adjBox")).toBeVisible();
+    await expect(page.locator("#adjPick .li")).toHaveCount(3); // なしの3件
+    await expect(page.locator("#listStrip")).toContainText("¥30,000");
+    await expect(page.locator("#adjSum")).toContainText("30,000");
+
+    // 田中(12,000)を選ぶ → 42,000
+    await page.locator("#adjPick .li", { hasText: "田中" }).click();
+    await expect(page.locator("#listStrip")).toContainText("¥42,000");
+    await expect(page.locator("#adjPick .li", { hasText: "田中" })).toContainText("☑");
+    // 帳簿（紙）にも田中が出る
+    await expect(page.locator("#listSheets")).toContainText("田中");
+
+    // 佐藤(8,000)も選ぶ → 50,000
+    await page.locator("#adjPick .li", { hasText: "佐藤" }).click();
+    await expect(page.locator("#listStrip")).toContainText("¥50,000");
+    // 選んでいない鈴木は紙に出ない
+    await expect(page.locator("#listSheets")).not.toContainText("鈴木");
+
+    // もう一度押すと外れる → 42,000 に戻る
+    await page.locator("#adjPick .li", { hasText: "佐藤" }).click();
+    await expect(page.locator("#listStrip")).toContainText("¥42,000");
+    await expect(page.locator("#adjPick .li", { hasText: "佐藤" })).toContainText("☐");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("選べるのは領収書なしの分だけ。ありの分は選ぶ欄に出ない", async ({ page }) => {
+    const errors = await open(page);
+    await seedAdj(page);
+    await page.locator('#filRec button[data-rec="adj"]').click();
+    await expect(page.locator("#adjPick")).not.toContainText("山本商事");
+    await expect(page.locator("#adjPick")).toContainText("田中");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("いくら足しているかが、その場で分かる", async ({ page }) => {
+    const errors = await open(page);
+    await seedAdj(page);
+    await page.locator('#filRec button[data-rec="adj"]').click();
+    await page.locator("#adjPick .li", { hasText: "田中" }).click();
+    const t = await page.locator("#adjSum").innerText();
+    expect(t).toContain("領収書あり");
+    expect(t).toContain("30,000");
+    expect(t).toContain("＋ 選んだ分");
+    expect(t).toContain("12,000");
+    expect(t).toContain("合わせて");
+    expect(t).toContain("42,000");
+    expect(t).toContain("残り");
+    expect(t).toContain("13,000"); // 8,000 + 5,000
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("集計と税理士の紙も「調整」で出せる", async ({ page }) => {
+    const errors = await open(page);
+    await seedAdj(page);
+    await page.locator('#filRec button[data-rec="adj"]').click();
+    await page.locator("#adjPick .li", { hasText: "田中" }).click();
+
+    await goto(page, "sum");
+    await page.locator('#sumRecTabs button[data-srec="adj"]').click();
+    await expect(page.locator("#sumStrip")).toContainText("¥42,000");
+
+    await goto(page, "tax");
+    await page.locator('#taxRecTabs button[data-trec="adj"]').click();
+    await expect(page.locator("#taxStrip")).toContainText("¥42,000");
+    await expect(page.locator("#taxSheets")).toContainText("領収書あり＋選んだ分");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("選んだ印は、開き直しても残る", async ({ page }) => {
+    const errors = await open(page);
+    await seedAdj(page);
+    await page.locator('#filRec button[data-rec="adj"]').click();
+    await page.locator("#adjPick .li", { hasText: "田中" }).click();
+    await expect(page.locator("#listStrip")).toContainText("¥42,000");
+
+    await page.reload({ waitUntil: "load" });
+    await goto(page, "list");
+    await page.locator("#periodList .period-lb").click();
+    await page.locator("#mdFrom").fill("2026-07-01");
+    await page.locator("#mdTo").fill("2026-07-31");
+    await page.locator("#mdOk").click();
+    await page.locator('#filRec button[data-rec="adj"]').click();
+    await expect(page.locator("#adjPick .li", { hasText: "田中" })).toContainText("☑");
+    await expect(page.locator("#listStrip")).toContainText("¥42,000");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("調整は「あり」「なし」の見え方を変えない（記録は書き換えない）", async ({ page }) => {
+    const errors = await open(page);
+    await seedAdj(page);
+    await page.locator('#filRec button[data-rec="adj"]').click();
+    await page.locator("#adjPick .li", { hasText: "田中" }).click();
+
+    // 田中は領収書なしのまま
+    await page.locator('#filRec button[data-rec="no"]').click();
+    await expect(page.locator("#listStrip")).toContainText("¥25,000"); // 12,000+8,000+5,000
+    await expect(page.locator("#listSheets")).toContainText("田中");
+    await page.locator('#filRec button[data-rec="yes"]').click();
+    await expect(page.locator("#listStrip")).toContainText("¥30,000");
+    expect(
+      await page.evaluate(() => window.__NOMIYA.sales.find((s) => s.name === "田中").receipt)
+    ).toBe("none");
+    // 選ぶ欄は「調整」のときだけ出す
+    await expect(page.locator("#adjBox")).toBeHidden();
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});

@@ -1179,8 +1179,20 @@
             <button class="chip chip-sm on" type="button" data-rec="all">すべて</button>
             <button class="chip chip-sm" type="button" data-rec="yes">あり</button>
             <button class="chip chip-sm" type="button" data-rec="no">なし</button>
+            <button class="chip chip-sm" type="button" data-rec="adj">調整</button>
             <button class="chip chip-sm" type="button" data-rec="later">あとで渡す分</button>
           </div>
+        </div>
+
+        <!-- 調整＝領収書なしの中から、どれを「あり」側に足すかを1件ずつ自分で選ぶ。
+             選ぶのは人。アプリは選ばれた分を覚えて合計を出すだけ。 -->
+        <div class="card" id="adjBox" style="display: none">
+          <div class="card-label">調整に入れる分を選ぶ</div>
+          <div class="hint" style="margin-bottom: 8px">
+            領収書なしの売上を押すと、上の帳簿と紙に足されます。もう一度押すと外れます。
+          </div>
+          <div id="adjSum"></div>
+          <div id="adjPick"></div>
         </div>
 
         <div class="strip" id="listStrip"></div>
@@ -1201,6 +1213,7 @@
           <button class="chip chip-sm on" type="button" data-srec="all">全体</button>
           <button class="chip chip-sm" type="button" data-srec="yes">領収書あり</button>
           <button class="chip chip-sm" type="button" data-srec="no">領収書なし</button>
+          <button class="chip chip-sm" type="button" data-srec="adj">調整</button>
         </div>
         <div class="strip" id="sumStrip"></div>
 
@@ -1230,6 +1243,7 @@
             <button class="chip chip-sm on" type="button" data-trec="all">全体</button>
             <button class="chip chip-sm" type="button" data-trec="yes">領収書あり</button>
             <button class="chip chip-sm" type="button" data-trec="no">領収書なし</button>
+            <button class="chip chip-sm" type="button" data-trec="adj">調整</button>
           </div>
         </div>
 
@@ -2957,6 +2971,85 @@
         $("listSheets").innerHTML = ledgerSheetsHtml(rows);
         bindSheetRows($("listSheets"));
         fitSheets("listScale", "listSheets");
+        renderAdjPick();
+      }
+
+      /* 調整＝領収書なしの中から、どれを足すかを1件ずつ自分で選ぶ。
+         いくら足しているかを必ず見せる（何を出しているか分からんまま印刷させない）。 */
+      function renderAdjPick() {
+        var box = $("adjBox");
+        box.style.display = UI.filRec === "adj" ? "" : "none";
+        if (UI.filRec !== "adj") return;
+        var r = periodRange();
+        var inPeriod = C.filterSales(SALES, { from: r.from, to: r.to, pay: UI.filPay });
+        var t = C.adjTotals(inPeriod);
+        $("adjSum").innerHTML =
+          '<table class="sum-tbl"><tbody>' +
+          '<tr><td style="text-align:left">領収書あり</td><td>' +
+          t.yes.count +
+          "件</td><td>" +
+          C.comma(t.yes.amount) +
+          "</td></tr>" +
+          '<tr><td style="text-align:left">＋ 選んだ分</td><td>' +
+          t.picked.count +
+          "件</td><td>" +
+          C.comma(t.picked.amount) +
+          "</td></tr>" +
+          '<tr><td style="text-align:left"><b>合わせて</b></td><td></td><td><b>' +
+          C.comma(t.total) +
+          "</b></td></tr>" +
+          '<tr><td style="text-align:left">残り</td><td>' +
+          t.rest.count +
+          "件</td><td>" +
+          C.comma(t.rest.amount) +
+          "</td></tr></tbody></table>";
+
+        var cand = C.sortSales(
+          inPeriod.filter(function (s) {
+            return C.canAdj(s);
+          })
+        );
+        $("adjPick").innerHTML = cand.length
+          ? cand
+              .map(function (s) {
+                return (
+                  '<div class="li" data-adj="' +
+                  esc(s.id) +
+                  '"><div class="li-main"><div class="li-nm">' +
+                  (s.adj ? "☑ " : "☐ ") +
+                  esc(s.name || "（名前なし）") +
+                  '</div><div class="li-sub">' +
+                  esc(C.mdShort(s.date)) +
+                  "（" +
+                  esc(C.weekday(s.date)) +
+                  "）　" +
+                  esc(C.payLabel(s.pay)) +
+                  "　" +
+                  s.people +
+                  '人</div></div><div class="li-amt">' +
+                  C.yen(s.amount) +
+                  "</div></div>"
+                );
+              })
+              .join("")
+          : '<div class="empty">この期間に、領収書なしの売上はありません。</div>';
+        $("adjPick")
+          .querySelectorAll("[data-adj]")
+          .forEach(function (el) {
+            el.onclick = function () {
+              var id = el.getAttribute("data-adj");
+              var i = SALES.findIndex(function (x) {
+                return x.id === id;
+              });
+              if (i < 0) return;
+              SALES[i] = Object.assign({}, SALES[i], {
+                adj: !SALES[i].adj,
+                updatedAt: new Date().toISOString(),
+              });
+              saveSales();
+              renderAll();
+            };
+          });
       }
 
       function filterCaption() {
@@ -2966,11 +3059,13 @@
             ? "領収書あり・なし両方"
             : UI.filRec === "yes"
               ? "領収書あり"
-              : UI.filRec === "later"
-                ? "領収書はあとで渡す分"
-                : UI.filRec === "na"
-                  ? "振込・カードの分"
-                  : "領収書なし";
+              : UI.filRec === "adj"
+                ? "領収書あり＋選んだ分"
+                : UI.filRec === "later"
+                  ? "領収書はあとで渡す分"
+                  : UI.filRec === "na"
+                    ? "振込・カードの分"
+                    : "領収書なし";
         return p + " / " + r;
       }
 
@@ -3134,6 +3229,7 @@
       function scopeLabel(rec) {
         if (rec === "yes") return "領収書あり分のみ";
         if (rec === "no") return "領収書なし分のみ";
+        if (rec === "adj") return "領収書あり＋選んだ分";
         if (rec === "na") return "振込・カードの分";
         return "全体";
       }
@@ -3505,7 +3601,10 @@
           '</div><div class="sh-title">売 上 報 告 書</div>' +
           '<div class="sh-meta"><span>' +
           esc(periodLabel()) +
-          "</span></div></div>" +
+          "</span>" +
+          // 何を集めた紙かを、紙そのものに書いておく（後から見て分かるように）
+          (scoped ? "<span>" + esc(scopeLabel(UI.taxRec)) + "</span>" : "") +
+          "</div></div>" +
           '<div class="sm-stats">' +
           '<div class="sm-s"><span>売上（税込）</span><b>¥' +
           C.comma(sum.amount) +
