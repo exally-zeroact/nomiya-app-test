@@ -161,6 +161,8 @@ alter table nomiya_staff add column if not exists pay_after integer not null def
 alter table nomiya_staff add column if not exists birth date;
 -- 渡し方（register=レジから / hand=手元の現金 / bank=振込）。空なら cash から決める
 alter table nomiya_staff add column if not exists pay_from text not null default 'register';
+-- 並び順（0＝まだ決めていない＝入れた順）
+alter table nomiya_staff add column if not exists ord integer not null default 0;
 create index if not exists idx_nomiya_staff_acct on nomiya_staff(account_id, name);
 
 -- ── 日々の実績（1人×1日） ────────────────────────────────────────────

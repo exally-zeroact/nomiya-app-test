@@ -4117,3 +4117,141 @@ test.describe("⑩ 消す", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
+
+/* 誰も選べない状態で出勤を入れさせない（入れても画面から消えて迷子になるだけ）。 */
+test.describe("⑪ スタッフがいないときの出勤", () => {
+  test("スタッフが1人もいなければ、出勤の画面は開かずに理由が出る", async ({ page }) => {
+    const errors = await open(page);
+    await goto(page, "pay");
+    await page.locator("#btnWorkAdd").click();
+    await expect(page.locator(".toast")).toContainText("先にスタッフを足してください");
+    await expect(page.locator("#modalOv")).not.toHaveClass(/open/);
+    expect(await page.evaluate(() => window.__NOMIYA.works.length)).toBe(0);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* 渡した記録を紙にできる（賃金台帳の代わりに綴じられるように） */
+test.describe("⑫ 渡した記録の紙", () => {
+  test("月ごとにA4で出せて、印刷は同じ画面のまま", async ({ page }) => {
+    const errors = await open(page);
+    await gotoSet(page, "staff");
+    await page.locator("#btnStaffAdd").click();
+    await page.locator("#st_name").fill("あかり");
+    await page.locator("#st_hourly").fill("1000");
+    await page.locator("#st_ok").click();
+
+    await goto(page, "pay");
+    for (let i = 0; i < 400; i++) {
+      const now = await page.evaluate(() => window.__NOMIYA.payYmd);
+      if (now === "2026-08-12") break;
+      await page.locator(`#periodPay [data-pmv="${now > "2026-08-12" ? -1 : 1}"]`).click();
+    }
+    await page.locator("#btnWorkAdd").click();
+    await page.locator("#wk_staff").selectOption({ label: "あかり" });
+    await page.locator("#wk_in").fill("20:00");
+    await page.locator("#wk_out").fill("01:00");
+    await page.locator("#wk_ok").click();
+    await page.locator("#payDue [data-due]").click();
+
+    // 紙が出る
+    await expect(page.locator("#logSheets .sh-title")).toHaveText("渡 し た 記 録");
+    await expect(page.locator("#logSheets")).toContainText("2026年8月");
+    await expect(page.locator("#logSheets")).toContainText("あかり");
+    await expect(page.locator("#logSheets")).toContainText("レジから");
+    await expect(page.locator("#logSheets")).toContainText("5,000");
+    await expect(page.locator("#logSheets .sheet")).toHaveCount(1);
+
+    // 印刷は同じ画面のまま（新しい窓を開かない）
+    await page.locator("#btnPrintLog").click();
+    await page.waitForTimeout(300);
+    await expect(page.locator("#printArea .sh-title")).toHaveText("渡 し た 記 録");
+    expect(await page.evaluate(() => window.__printed)).toBe(1);
+    await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("渡した分が無い月は、紙もボタンも出さない", async ({ page }) => {
+    const errors = await open(page);
+    await goto(page, "pay");
+    await expect(page.locator("#logBox")).toBeHidden();
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* =====================================================================
+   ⑬ スタッフとバックの種類の並べ替え
+   ===================================================================== */
+test.describe("⑬ 並べ替え", () => {
+  test("スタッフを↑↓で並べ替えると、出勤の選ぶ欄もその順になる", async ({ page }) => {
+    const errors = await open(page);
+    await gotoSet(page, "staff");
+    for (const n of ["あかり", "ゆい", "みく"]) {
+      await page.locator("#btnStaffAdd").click();
+      await page.locator("#st_name").fill(n);
+      await page.locator("#st_hourly").fill("1000");
+      await page.locator("#st_ok").click();
+    }
+    expect(await page.locator("#staffList .li-nm").allInnerTexts()).toEqual([
+      "あかり",
+      "ゆい",
+      "みく",
+    ]);
+    // みくを一番上へ
+    await page.locator("#staffList .li").nth(2).locator("[data-stup]").click();
+    await page.locator("#staffList .li").nth(1).locator("[data-stup]").click();
+    expect(await page.locator("#staffList .li-nm").allInnerTexts()).toEqual([
+      "みく",
+      "あかり",
+      "ゆい",
+    ]);
+    // 端は押せない
+    await expect(page.locator("#staffList .li").nth(0).locator("[data-stup]")).toBeDisabled();
+    await expect(page.locator("#staffList .li").nth(2).locator("[data-stdown]")).toBeDisabled();
+
+    // 出勤の「だれ」も同じ順
+    await goto(page, "pay");
+    await page.locator("#btnWorkAdd").click();
+    expect(await page.locator("#wk_staff option").allInnerTexts()).toEqual([
+      "みく",
+      "あかり",
+      "ゆい",
+    ]);
+    await page.locator("#modalX").click();
+
+    // 開き直しても残る
+    await page.reload({ waitUntil: "load" });
+    await gotoSet(page, "staff");
+    expect(await page.locator("#staffList .li-nm").allInnerTexts()).toEqual([
+      "みく",
+      "あかり",
+      "ゆい",
+    ]);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("バックの種類も↑↓で並べ替えられる（出勤の欄の順も変わる）", async ({ page }) => {
+    const errors = await open(page);
+    await gotoSet(page, "item");
+    expect((await page.locator("#kindList .li-nm").allInnerTexts()).slice(0, 3)).toEqual([
+      "本指名",
+      "場内指名",
+      "同伴",
+    ]);
+    await page.locator("#kindList .li").nth(2).locator("[data-kdup]").click();
+    expect((await page.locator("#kindList .li-nm").allInnerTexts()).slice(0, 3)).toEqual([
+      "本指名",
+      "同伴",
+      "場内指名",
+    ]);
+    // 開き直しても残る
+    await page.reload({ waitUntil: "load" });
+    await gotoSet(page, "item");
+    expect((await page.locator("#kindList .li-nm").allInnerTexts()).slice(0, 3)).toEqual([
+      "本指名",
+      "同伴",
+      "場内指名",
+    ]);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});

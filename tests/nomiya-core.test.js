@@ -2923,3 +2923,79 @@ describe("渡したのを取り消す・出金を外す", () => {
     expect(C.payoutLog([st], r.works, [], {}).length).toBe(0);
   });
 });
+
+/* =====================================================================
+   ⑬ スタッフとバックの種類の並べ替え（人数が増えると押しにくい）
+   ===================================================================== */
+describe("スタッフの並べ替え", () => {
+  const mk = (id, name, ord) => C.normalizeStaff({ id: id, name: name, ord: ord });
+  const LIST = [mk("s1", "あかり"), mk("s2", "ゆい"), mk("s3", "みく")];
+
+  it("並べ替えていない店は、入れた順のまま", () => {
+    expect(C.aliveStaff(LIST).map((x) => x.name)).toEqual(["あかり", "ゆい", "みく"]);
+    expect(mk("s1", "x").ord).toBe(0);
+  });
+  it("順番を決めたら、その順で出る", () => {
+    const l = [mk("s1", "あかり", 3), mk("s2", "ゆい", 1), mk("s3", "みく", 2)];
+    expect(C.aliveStaff(l).map((x) => x.name)).toEqual(["ゆい", "みく", "あかり"]);
+  });
+  it("↑↓で動かせて、全員に順番が振り直される", () => {
+    const moved = C.moveStaff(LIST, "s3", -1);
+    expect(C.aliveStaff(moved).map((x) => x.name)).toEqual(["あかり", "みく", "ゆい"]);
+    expect(C.aliveStaff(moved).map((x) => x.ord)).toEqual([1, 2, 3]);
+    expect(LIST[0].ord).toBe(0); // 元は書き換えない
+    expect(C.aliveStaff(C.moveStaff(LIST, "s1", 1)).map((x) => x.name)).toEqual([
+      "ゆい",
+      "あかり",
+      "みく",
+    ]);
+  });
+  it("端では動かない・知らないIDでも壊れない・外した人は数に入れない", () => {
+    expect(C.aliveStaff(C.moveStaff(LIST, "s1", -1)).map((x) => x.name)).toEqual([
+      "あかり",
+      "ゆい",
+      "みく",
+    ]);
+    expect(C.aliveStaff(C.moveStaff(LIST, "s3", 1)).map((x) => x.name)).toEqual([
+      "あかり",
+      "ゆい",
+      "みく",
+    ]);
+    expect(C.moveStaff(LIST, "zz", 1).length).toBe(3);
+    expect(C.moveStaff(null, "s1", 1)).toEqual([]);
+    const withDead = LIST.concat([
+      C.normalizeStaff({ id: "s9", name: "外した人", deletedAt: "2026-08-01T00:00:00.000Z" }),
+    ]);
+    expect(C.moveStaff(withDead, "s3", -1).length).toBe(4);
+  });
+  it("並び順もクラウドに残る", () => {
+    const row = C.staffToRow(mk("s1", "あかり", 2));
+    expect(row.ord).toBe(2);
+    expect(C.staffFromRow(row).ord).toBe(2);
+    expect(C.staffFromRow({ sid: "s1", name: "x" }).ord).toBe(0);
+  });
+});
+
+describe("バックの種類の並べ替え", () => {
+  const cfg = {
+    backKinds: [
+      { key: "a", label: "本指名" },
+      { key: "b", label: "同伴" },
+      { key: "c", label: "ボトル" },
+    ],
+  };
+  it("↑↓で入れ替わる", () => {
+    expect(C.moveBackKind(cfg, "c", -1).map((x) => x.label)).toEqual(["本指名", "ボトル", "同伴"]);
+    expect(C.moveBackKind(cfg, "a", 1).map((x) => x.label)).toEqual(["同伴", "本指名", "ボトル"]);
+  });
+  it("端では動かない・知らないキーでも壊れない", () => {
+    expect(C.moveBackKind(cfg, "a", -1).map((x) => x.key)).toEqual(["a", "b", "c"]);
+    expect(C.moveBackKind(cfg, "c", 1).map((x) => x.key)).toEqual(["a", "b", "c"]);
+    expect(C.moveBackKind(cfg, "zz", 1).map((x) => x.key)).toEqual(["a", "b", "c"]);
+  });
+  it("まだ決めていない店は、はじめの5つが入った状態から動かせる", () => {
+    const moved = C.moveBackKind({}, "douhan", -1);
+    expect(moved.length).toBe(5);
+    expect(moved.map((x) => x.key).slice(0, 3)).toEqual(["shimei", "douhan", "jonai"]);
+  });
+});

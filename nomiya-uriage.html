@@ -1144,7 +1144,7 @@
         </div>
 
         <div class="err" id="inErr"></div>
-        <div style="margin-top: 12px" id="saveArea">
+        <div style="margin-top: 12px">
           <button class="btn btn-primary" id="btnSave">保存する</button>
         </div>
         <div class="btn-row" id="editArea" style="display: none; margin-top: 8px">
@@ -1692,6 +1692,16 @@
       <div class="card">
         <div class="card-label">渡した記録</div>
         <div id="payLog"></div>
+      </div>
+
+      <!-- 紙にして綴じられるように（渡した分がある月だけ出す） -->
+      <div id="logBox" style="display: none">
+        <div class="btn-row no-print">
+          <button class="btn btn-ghost" id="btnPrintLog">🖨 渡した記録を印刷 / PDFにする</button>
+        </div>
+        <div class="sheet-scale" id="logScale">
+          <div class="sheet-scale-inner" id="logSheets"></div>
+        </div>
       </div>
 
       <div class="hint" style="margin: 0 2px 10px">
@@ -5477,8 +5487,58 @@
             };
           });
 
+        // 渡した記録の紙（渡した分がある月だけ）
+        $("logBox").style.display = log.length ? "" : "none";
+        $("logSheets").innerHTML = log.length ? payLogSheetHtml(ym, log, logTotal) : "";
+        if (log.length) fitSheets("logScale", "logSheets");
+
         $("paySheets").innerHTML = paySheetHtml(ym, sums);
         fitSheets("payScale", "paySheets");
+      }
+
+      /* 渡した記録のA4（月ごと1枚）。誰にいつ、いくら渡したかを紙で残す。 */
+      function payLogSheetHtml(ym, log, total) {
+        return (
+          '<div class="sheet">' +
+          '<div class="sh-head"><div class="sh-store">' +
+          esc(SETTINGS.store || "") +
+          '</div><div class="sh-title">渡 し た 記 録</div>' +
+          '<div class="sh-meta"><span>' +
+          esc(C.jpMonth(ym)) +
+          "分</span></div></div>" +
+          '<table class="sh-tbl pay-tbl"><thead><tr>' +
+          "<th>渡した日</th><th>名前</th><th>対象</th><th>日数</th><th>渡し方</th><th>金額</th>" +
+          "</tr></thead><tbody>" +
+          log
+            .map(function (x) {
+              return (
+                "<tr><td>" +
+                esc(C.mdShort(x.ymd)) +
+                "（" +
+                esc(C.weekday(x.ymd)) +
+                "）</td><td>" +
+                esc(x.name) +
+                "</td><td>" +
+                esc(C.mdShort(x.from)) +
+                "〜" +
+                esc(C.mdShort(x.to)) +
+                "</td><td>" +
+                x.days +
+                "</td><td>" +
+                esc(C.payFromLabel(x.payFrom)) +
+                '</td><td class="c-a"><b>' +
+                C.comma(x.amount) +
+                "</b></td></tr>"
+              );
+            })
+            .join("") +
+          "</tbody><tfoot><tr><td>合計</td><td></td><td></td><td></td><td></td>" +
+          '<td class="c-a"><b>' +
+          C.comma(total) +
+          "</b></td></tr></tfoot></table>" +
+          '<div class="sm-note">金額は渡したときの額。あとで決め方を直しても、この記録は変わりません。</div>' +
+          "</div>"
+        );
       }
 
       /* キャストに渡す明細（1人・1区切りで1枚）。
@@ -5582,16 +5642,26 @@
         var alive = C.aliveStaff(STAFF);
         $("staffList").innerHTML = alive.length
           ? alive
-              .map(function (st) {
+              .map(function (st, i) {
                 return (
-                  '<div class="li" data-staff="' +
+                  '<div class="li"><div class="li-main" data-staff="' +
                   esc(st.id) +
-                  '"><div class="li-main"><div class="li-nm">' +
+                  '"><div class="li-nm">' +
                   esc(st.name) +
                   (st.role ? "　" + esc(st.role) : "") +
                   '</div><div class="li-sub">' +
                   esc(staffRule(st)) +
-                  "</div></div></div>"
+                  '</div></div><div class="ord">' +
+                  '<button class="ord-b" type="button" title="上へ" data-stup="' +
+                  esc(st.id) +
+                  '"' +
+                  (i === 0 ? " disabled" : "") +
+                  ">↑</button>" +
+                  '<button class="ord-b" type="button" title="下へ" data-stdown="' +
+                  esc(st.id) +
+                  '"' +
+                  (i === alive.length - 1 ? " disabled" : "") +
+                  ">↓</button></div></div>"
                 );
               })
               .join("")
@@ -5601,6 +5671,16 @@
           .forEach(function (el) {
             el.onclick = function () {
               openStaff(el.getAttribute("data-staff"));
+            };
+          });
+        $("staffList")
+          .querySelectorAll("[data-stup],[data-stdown]")
+          .forEach(function (b) {
+            b.onclick = function () {
+              var up = b.getAttribute("data-stup");
+              STAFF = C.moveStaff(STAFF, up || b.getAttribute("data-stdown"), up ? -1 : 1);
+              saveStaff();
+              renderMasters();
             };
           });
 
@@ -5704,13 +5784,23 @@
       function renderKindList() {
         var kinds = BACK_KINDS();
         $("kindList").innerHTML = kinds
-          .map(function (k) {
+          .map(function (k, i) {
             return (
-              '<div class="li" data-kind="' +
+              '<div class="li"><div class="li-main" data-kind="' +
               esc(k.key) +
-              '"><div class="li-main"><div class="li-nm">' +
+              '"><div class="li-nm">' +
               esc(k.label) +
-              "</div></div></div>"
+              '</div></div><div class="ord">' +
+              '<button class="ord-b" type="button" title="上へ" data-kdup="' +
+              esc(k.key) +
+              '"' +
+              (i === 0 ? " disabled" : "") +
+              ">↑</button>" +
+              '<button class="ord-b" type="button" title="下へ" data-kddown="' +
+              esc(k.key) +
+              '"' +
+              (i === kinds.length - 1 ? " disabled" : "") +
+              ">↓</button></div></div>"
             );
           })
           .join("");
@@ -5719,6 +5809,22 @@
           .forEach(function (el) {
             el.onclick = function () {
               openKind(el.getAttribute("data-kind"));
+            };
+          });
+        $("kindList")
+          .querySelectorAll("[data-kdup],[data-kddown]")
+          .forEach(function (b) {
+            b.onclick = function () {
+              var up = b.getAttribute("data-kdup");
+              SETTINGS = Object.assign({}, SETTINGS, {
+                backKinds: C.moveBackKind(
+                  SETTINGS,
+                  up || b.getAttribute("data-kddown"),
+                  up ? -1 : 1
+                ),
+              });
+              saveSettings();
+              renderAll();
             };
           });
       }
@@ -6317,7 +6423,6 @@
             '<input class="finput" id="wk_memo" value="' +
             esc(cur ? cur.memo : "") +
             '"></div>' +
-            '<div class="err" id="wk_err"></div>' +
             '<div id="wk_calc" class="hint" style="margin-top:6px"></div>' +
             '<div style="margin-top:12px"><button class="btn btn-primary" id="wk_ok">保存する</button></div>' +
             (cur && !cur.paidAt
@@ -7010,6 +7115,9 @@
         };
         $("btnPrintPay").onclick = function () {
           printSheets("paySheets", "給与一覧");
+        };
+        $("btnPrintLog").onclick = function () {
+          printSheets("logSheets", "渡した記録");
         };
         $("btnPrintCast").onclick = function () {
           printSheets("castSheets", "給与明細");
