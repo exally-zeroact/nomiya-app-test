@@ -1646,7 +1646,9 @@
       <div class="btn-row no-print">
         <button class="btn btn-ghost" id="btnPrintClose">🖨 印刷 / PDFにする</button>
       </div>
-      <div class="sheet-scale" id="closeScale"><div id="closeSheets"></div></div>
+      <div class="sheet-scale" id="closeScale">
+        <div class="sheet-scale-inner" id="closeSheets"></div>
+      </div>
     </section>
 
     <!-- ==================== 給料（キャスト・スタッフ） ==================== -->
@@ -1693,7 +1695,9 @@
       <div class="btn-row no-print">
         <button class="btn btn-ghost" id="btnPrintPay">🖨 印刷 / PDFにする</button>
       </div>
-      <div class="sheet-scale" id="payScale"><div id="paySheets"></div></div>
+      <div class="sheet-scale" id="payScale">
+        <div class="sheet-scale-inner" id="paySheets"></div>
+      </div>
     </section>
 
     <!-- ==================== NAV ==================== -->
@@ -1709,11 +1713,11 @@
       <button class="nav-item active" data-scr="input" type="button">
         <span class="nav-ic">✍️</span><span class="nav-lb">入力</span>
       </button>
-      <button class="nav-item" data-scr="close" type="button">
-        <span class="nav-ic">🧰</span><span class="nav-lb">締め</span>
-      </button>
       <button class="nav-item" data-scr="pay" type="button">
         <span class="nav-ic">💰</span><span class="nav-lb">給料</span>
+      </button>
+      <button class="nav-item" data-scr="close" type="button">
+        <span class="nav-ic">🧰</span><span class="nav-lb">締め</span>
       </button>
     </nav>
 

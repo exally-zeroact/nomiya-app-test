@@ -2714,7 +2714,7 @@ test.describe("③ 設定の歯車とマスタ", () => {
     const errors = await open(page);
 
     const labels = await page.locator(".bottom-nav .nav-item .nav-lb").allInnerTexts();
-    expect(labels).toEqual(["一覧", "請求書", "入力", "締め", "給料"]);
+    expect(labels).toEqual(["一覧", "請求書", "入力", "給料", "締め"]);
     // 真ん中＝3番目が入力（親指が届く位置）
     expect(labels[2]).toBe("入力");
     for (const gone of ["set", "sum", "tax"]) {
@@ -3555,6 +3555,80 @@ test.describe("売上帳の下の内訳", () => {
       expect(foot).toContain("客単価");
       expect(foot).toContain("支払い方法別");
     }
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* A4の紙は、どの画面でも「枠の左上から、枠の中に収まって」出る。
+   （縮小の起点が中央になっていると、右下にずれて右が切れる＝実機で出た） */
+test.describe("紙が枠からずれない", () => {
+  test("iPhone幅で、どの紙も枠の左上から始まり、はみ出さない", async ({ page }) => {
+    const errors = await open(page);
+    await page.setViewportSize({ width: 390, height: 780 });
+
+    // 売上・締め・給料それぞれに中身を入れて、紙が出る状態にする
+    await addSale(page, {
+      date: "2026-07-01",
+      name: "田中",
+      people: 2,
+      amount: 8000,
+      pay: "cash",
+      receipt: false,
+    });
+    await gotoSet(page, "staff");
+    await page.locator("#btnStaffAdd").click();
+    await page.locator("#st_name").fill("あかり");
+    await page.locator("#st_hourly").fill("1500");
+    await page.locator("#st_ok").click();
+    await goto(page, "pay");
+    await page.locator("#btnWorkAdd").click();
+    await page.locator("#wk_staff").selectOption({ label: "あかり" });
+    await page.locator("#wk_in").fill("20:00");
+    await page.locator("#wk_out").fill("01:00");
+    await page.locator("#wk_ok").click();
+
+    const check = async (name, scr, wrapId, sheetsId) => {
+      await goto(page, scr);
+      await page.waitForTimeout(400);
+      const m = await page.evaluate(
+        ([w, s]) => {
+          const wrap = document.getElementById(w);
+          const sheet = document.getElementById(s).querySelector(".sheet");
+          if (!sheet) return null;
+          const a = wrap.getBoundingClientRect();
+          const b = sheet.getBoundingClientRect();
+          return {
+            left: Math.round(b.left - a.left),
+            over: Math.round(b.right - a.right),
+            width: Math.round(b.width),
+            wrapW: Math.round(a.width),
+          };
+        },
+        [wrapId, sheetsId]
+      );
+      expect(m, `${name} の紙が出ていない`).not.toBeNull();
+      expect(m.left, `${name}: 紙が枠の左から ${m.left}px ずれている`).toBeLessThanOrEqual(1);
+      expect(m.left, `${name}: 紙が枠の左より外に出ている`).toBeGreaterThanOrEqual(-1);
+      expect(m.over, `${name}: 紙が枠の右から ${m.over}px はみ出している`).toBeLessThanOrEqual(1);
+      expect(m.width, `${name}: 紙が枠の幅を超えている`).toBeLessThanOrEqual(m.wrapW + 1);
+    };
+
+    await goto(page, "list");
+    await page.locator("#periodList .period-lb").click();
+    await page.locator("#mdFrom").fill("2026-07-01");
+    await page.locator("#mdTo").fill("2026-07-31");
+    await page.locator("#mdOk").click();
+    await check("売上帳", "list", "listScale", "listSheets");
+    await check("税理士の紙", "tax", "taxScale", "taxSheets");
+    await check("請求書", "inv", "invScale", "invSheets");
+    await check("日報（締め）", "close", "closeScale", "closeSheets");
+    await check("給与一覧", "pay", "payScale", "paySheets");
+
+    // 渡す明細も同じ
+    await goto(page, "pay");
+    await page.locator("#payDue [data-slip]").first().click();
+    await page.waitForTimeout(400);
+    await check("渡す明細", "pay", "castScale", "castSheets");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
