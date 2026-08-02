@@ -5307,17 +5307,10 @@
               });
               WORKS = C.markPaidRange(WORKS, sid, from, to, paidStamp(UI.payYmd), amounts);
               saveWorks();
-              // ★現金で渡すなら、渡した日の締めの出金にも入れる。
-              //   これが無いと、金庫から出したのに「あるべき額」が合わなくなる。
-              if (st && st.cash && total > 0) {
-                addPayoutToClose(
-                  UI.payYmd,
-                  st.name,
-                  total,
-                  "range_" + sid + "_" + from + "_" + to,
-                  C.mdShort(from) + "〜" + C.mdShort(to) + " 締め分"
-                );
-              }
+              // ★まとめ払いは、金庫から出すとは限らない（別で用意した金から払う方が普通）。
+              //   なので締めの出金には自動で入れない。渡した記録にだけ残す。
+              //   レジから出した月は、締めの「＋出金を足す」で足せる。
+              //   （その日の売上からそのまま渡す日払いだけは、今までどおり自動で入る）
               renderAll();
               toast("💰 " + (st ? st.name : "") + " に " + C.yen(total) + " を渡しました");
             };

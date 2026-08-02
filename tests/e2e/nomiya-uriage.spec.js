@@ -3663,7 +3663,7 @@ test.describe("⑦ 渡した記録", () => {
     await page.locator("#st_ok").click();
   }
 
-  test("まとめて渡すと、記録に残り、締めの出金にも入る", async ({ page }) => {
+  test("まとめて渡すと記録に残る。金庫からは出さない（レジの出金に入れない）", async ({ page }) => {
     const errors = await open(page);
     // 月末締め・締めたその日に渡す
     await addStaff3(page, { name: "あかり", hourly: 1000, cycle: "monthly" });
@@ -3684,17 +3684,17 @@ test.describe("⑦ 渡した記録", () => {
     await expect(page.locator("#payLog")).toContainText("現金");
     await expect(page.locator("#payLog .li-amt")).toHaveText("¥10,000");
 
-    // ★現金なので、渡した日の締めの出金に入る（金庫から出た記録が残る）
+    // ★まとめ払いは金庫から出すとは限らないので、締めの出金には入れない
     await goto(page, "close");
     for (let i = 0; i < 400; i++) {
       const now = await page.evaluate(() => window.__NOMIYA.closeYmd);
       if (now === "2026-08-31") break;
       await page.locator(`#periodClose [data-cmv="${now > "2026-08-31" ? -1 : 1}"]`).click();
     }
-    await expect(page.locator("#clOuts")).toContainText("あかり");
-    // 締めの出金には「締めた期間」で入る（記録の方は出勤した日で出す）
-    await expect(page.locator("#clOuts")).toContainText("8/1〜8/31 締め分");
-    await expect(page.locator("#clOut")).toHaveText("−¥10,000");
+    await expect(page.locator("#clOuts")).not.toContainText("あかり");
+    await expect(page.locator("#clOut")).toHaveText("¥0");
+    // レジから出した月は、締めの「＋出金を足す」で自分で足せる
+    await expect(page.locator("#btnOutAdd")).toBeVisible();
 
     // 開き直しても残る
     await page.reload({ waitUntil: "load" });
