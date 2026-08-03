@@ -356,6 +356,40 @@
     };
   }
 
+  /**
+   * normalizeTime(v)
+   *  打った物を "HH:MM" に直す。2000 → 20:00 ／ 930 → 09:30 ／ 9 → 09:00。
+   *  時計の輪っかを回さずに、テンキーで打てるようにするための物。
+   *  読めない物・時刻にならない物は空で返す（勝手な時刻を作らない）。
+   */
+  function normalizeTime(v) {
+    if (v == null) return "";
+    // 全角の数字とコロンを半角に直してから見る（スマホの日本語入力で混ざる）
+    var t = String(v)
+      .replace(/[０-９]/g, function (c) {
+        return String.fromCharCode(c.charCodeAt(0) - 0xfee0);
+      })
+      .replace(/[：．。\s]/g, ":")
+      .trim();
+    var m = t.match(/^(\d{1,2}):(\d{1,2})$/);
+    var h, mi;
+    if (m) {
+      h = Number(m[1]);
+      mi = Number(m[2]);
+    } else {
+      if (!/^\d{1,4}$/.test(t)) return "";
+      if (t.length <= 2) {
+        h = Number(t);
+        mi = 0;
+      } else {
+        h = Number(t.slice(0, t.length - 2));
+        mi = Number(t.slice(-2));
+      }
+    }
+    if (!(h >= 0 && h <= 23) || !(mi >= 0 && mi <= 59)) return "";
+    return (h < 10 ? "0" + h : String(h)) + ":" + (mi < 10 ? "0" + mi : String(mi));
+  }
+
   function ratio(part, whole) {
     return whole > 0 ? part / whole : 0;
   }
@@ -363,7 +397,8 @@
   // 支払い方法別（5種すべてを常に同じ順で返す＝0件でも行が消えない）
   function byPayMethod(sales) {
     var list = (sales || []).filter(isAlive);
-    var total = summarize(list).amount;
+    var all = summarize(list);
+    var total = all.amount;
     return PAY_METHODS.map(function (m) {
       var rows = list.filter(function (s) {
         return s.pay === m.key;
@@ -377,6 +412,9 @@
         people: sum.people,
         amount: sum.amount,
         ratio: ratio(sum.amount, total),
+        // 組に対しての割合。金額だけ見ていると「現金の客が多い」を見誤る
+        //（10万の請求書1組と、5,000円の現金10組は、金額では逆に見える）
+        countRatio: ratio(sum.count, all.count),
       };
     });
   }
@@ -384,7 +422,8 @@
   // 領収書あり（発行済み）/ なし（未発行＝なし＋あとで）
   function byReceipt(sales) {
     var list = (sales || []).filter(isAlive);
-    var total = summarize(list).amount;
+    var all = summarize(list);
+    var total = all.amount;
     return [
       {
         key: "yes",
@@ -413,6 +452,7 @@
         people: sum.people,
         amount: sum.amount,
         ratio: ratio(sum.amount, total),
+        countRatio: ratio(sum.count, all.count),
       };
     });
   }
@@ -1296,13 +1336,26 @@
        差引 = 支給 − 控除
      =================================================================== */
   // バックの種類の「はじめの5つ」。店はここから足す・変える・消せる（固定ではない）。
+  //   once = 1日に1回しかない物（同伴）。本数を聞かず「あり／なし」で入れる。
   var BACK_KINDS = [
     { key: "shimei", label: "本指名" },
     { key: "jonai", label: "場内指名" },
-    { key: "douhan", label: "同伴" },
+    { key: "douhan", label: "同伴", once: true },
     { key: "drink", label: "ドリンク" },
     { key: "bottle", label: "ボトル" },
   ];
+  function copyKinds() {
+    return BACK_KINDS.map(function (k) {
+      return { key: k.key, label: k.label, once: !!k.once };
+    });
+  }
+  // 決め打ちの種類の「1回だけ」。店が決めた一覧に once が書いていなければこれを使う。
+  function defaultOnce(key) {
+    for (var i = 0; i < BACK_KINDS.length; i++) {
+      if (BACK_KINDS[i].key === key) return !!BACK_KINDS[i].once;
+    }
+    return false;
+  }
 
   /**
    * backKinds(settings)
@@ -1312,7 +1365,7 @@
    */
   function backKinds(settings) {
     var raw = (settings || {}).backKinds;
-    if (!raw || !raw.length) return BACK_KINDS.slice();
+    if (!raw || !raw.length) return copyKinds();
     var seen = {};
     var out = [];
     raw.forEach(function (x) {
@@ -1320,9 +1373,10 @@
       var label = String((x && x.label) || "").trim();
       if (!key || !label || seen[key]) return;
       seen[key] = true;
-      out.push({ key: key, label: label });
+      // once を書いていない種類は、決め打ちの決まり（同伴だけ1回）に従う
+      out.push({ key: key, label: label, once: x.once == null ? defaultOnce(key) : !!x.once });
     });
-    return out.length ? out : BACK_KINDS.slice();
+    return out.length ? out : copyKinds();
   }
   // 給料で「使う項目」。店ごとにやり方が違うので、人ごとに要る物だけ選ばせる。
   //   group: back=バック / pay=支給side / deduct=控除side（画面の並べ方に使う）
@@ -1344,6 +1398,22 @@
   function staffUses(staff, key) {
     var u = (staff || {}).use || {};
     return u[key] === false ? false : true;
+  }
+  /**
+   * emptyUse(kinds)
+   *  何も選んでいない状態（全部オフ）。足したばかりの人に使う。
+   *  ※前からいる人の use は空 `{}`＝全部オンのまま。ここは新しく足す人にだけ使う。
+   *    （既にいる人の数字を、あとから勝手に変えないため）
+   */
+  function emptyUse(kinds) {
+    var out = {};
+    PAY_ITEMS.forEach(function (x) {
+      out[x.key] = false;
+    });
+    (kinds || []).forEach(function (k) {
+      if (k && k.key) out[k.key] = false;
+    });
+    return out;
   }
   function normalizeUse(raw) {
     var u = raw || {};
@@ -1633,6 +1703,8 @@
       var p = picked[k.key] || { n: 0, sold: 0, back: 0, ownPct: 0 };
       var cw = crew[k.key] || { n: 0, sold: 0 };
       var n = _int((w.count || {})[k.key]) + p.n + cw.n;
+      // 同伴のような「1日1回」の物は、いくつ打っても1回として数える
+      if (k.once && n > 1) n = 1;
       var unit = _int((st.back || {})[k.key]);
       var pct = _num((st.backPct || {})[k.key]);
       var typed = _int((w.amount || {})[k.key]) + cw.sold; // 手で打った額＋ついた会計の額
@@ -1737,6 +1809,45 @@
    *  1人ぶんの期間まとめ（月払いの人の「今月いくら」）
    *  opt.settings = 店の設定（バックの種類・商品・歩合の元）。無ければ今までどおり。
    */
+  /**
+   * usedKinds(staffList, settings)
+   *  「誰か1人でも使う」バックの種類。給料の一覧の列に使う。
+   *  誰も使わない種類で紙を汚さないが、1人でも使えば必ず列に出す（打ったのに出ない、を無くす）。
+   *  スタッフが0人のときは店の種類をそのまま返す（列が消えて表が崩れないように）。
+   */
+  function usedKinds(staffList, settings) {
+    var kinds = backKinds(settings || {});
+    var alive = (staffList || []).filter(isAlive);
+    if (!alive.length) return kinds;
+    return kinds.filter(function (k) {
+      return alive.some(function (st) {
+        return staffUses(st, k.key);
+      });
+    });
+  }
+
+  /**
+   * countedKinds(staffList, settings)
+   *  「本数で数える」種類だけ。給料の一覧の“数”の列に使う。
+   *  ％で決めている種類は本数を打たない（売った額で決まる）ので、
+   *  それだけの種類を列に出すと 0 が並ぶだけで、かえって誤解を招く。
+   *  1人でも「1本いくら」で決めていれば出す。
+   */
+  function countedKinds(staffList, settings) {
+    var kinds = backKinds(settings || {});
+    var alive = (staffList || []).filter(isAlive);
+    if (!alive.length) return kinds;
+    return kinds.filter(function (k) {
+      return alive.some(function (st) {
+        return (
+          staffUses(st, k.key) &&
+          !(_num((st.backPct || {})[k.key]) > 0) &&
+          _int((st.back || {})[k.key]) > 0
+        );
+      });
+    });
+  }
+
   function paySummary(staff, works, sales, from, to, opt) {
     var o = opt || {};
     var kinds = backKinds(o.settings || {});
@@ -1755,6 +1866,9 @@
       gensen: 0,
       backTotal: 0,
       commission: 0,
+      // 保証を入れる前の額と、保証で足した分。紙に「保証」の行を出すために持つ。
+      earned: 0,
+      guaranteeAdd: 0,
       gross: 0,
       fine: 0,
       kousei: 0,
@@ -1769,10 +1883,14 @@
       unpaidNet: 0,
       counts: {},
       amounts: {},
+      // 種類ごとのバック額。明細と一覧はここを見る（合計だけだと場内指名が消える）
+      backAmts: {},
     };
     kinds.forEach(function (k) {
+      if (!staffUses(staff, k.key)) return; // 使わない項目は列ごと出さない
       t.counts[k.key] = 0;
       t.amounts[k.key] = 0;
+      t.backAmts[k.key] = 0;
     });
     rows
       .sort(function (a, b) {
@@ -1791,6 +1909,8 @@
         t.gensen += d.gensen;
         t.backTotal += d.backTotal;
         t.commission += d.commission;
+        t.earned += d.earned;
+        t.guaranteeAdd += Math.max(0, d.gross - d.earned);
         t.gross += d.gross;
         t.fine += d.fine;
         t.kousei += d.kousei;
@@ -1806,8 +1926,10 @@
         }
         // 本数・売った額は「押した銘柄ぶん」も入った、計算に使った値をそのまま足す
         d.backs.forEach(function (b) {
+          if (!b.used) return; // 使わない項目は0円なので、内訳にも出さない
           t.counts[b.key] = (t.counts[b.key] || 0) + b.count;
           t.amounts[b.key] = (t.amounts[b.key] || 0) + b.sold;
+          t.backAmts[b.key] = (t.backAmts[b.key] || 0) + b.amount;
         });
       });
     t.rows = rows;
@@ -2296,7 +2418,7 @@
    *  端では何もしない。外した人は数に入れないが、消しもしない。
    *  元の配列は書き換えない。
    */
-  function moveStaff(list, id, dir) {
+  function moveStaff(list, id, dir, now) {
     var raw = (list || []).slice();
     var shown = aliveStaff(raw);
     var i = -1;
@@ -2312,9 +2434,12 @@
     shown.forEach(function (x, k) {
       ord[x.id] = k + 1;
     });
+    // ★並べ替えも「直した」こと。時刻を新しくしないと、クラウドに残っている
+    //   古い並び（同じ時刻）に負けて、開き直したときに元へ戻る。
+    var nowIso3 = now || nowIso();
     return raw.map(function (x) {
       var key = (x || {}).id;
-      return key && ord[key] ? Object.assign({}, x, { ord: ord[key] }) : x;
+      return key && ord[key] ? Object.assign({}, x, { ord: ord[key], updatedAt: nowIso3 }) : x;
     });
   }
   /**
@@ -2756,6 +2881,10 @@
     syncPlanCloses: syncPlanCloses,
     monthlyCash: monthlyCash,
     backKinds: backKinds,
+    usedKinds: usedKinds,
+    countedKinds: countedKinds,
+    emptyUse: emptyUse,
+    normalizeTime: normalizeTime,
     PAY_ITEMS: PAY_ITEMS,
     staffUses: staffUses,
     EMPLOY_KINDS: EMPLOY_KINDS,

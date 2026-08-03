@@ -119,6 +119,27 @@ async function openPartners(page) {
   await expect(page.locator("#partnerList")).toBeVisible();
 }
 
+// 足したばかりの人は「使う項目」が全部オフから始まる。
+// ここから下の試験は「今までどおり全部使う店」なので、まず全部オンにしてから値を入れる。
+// （オフの欄は隠れているので、順番を逆にすると入力そのものができない）
+async function useAll(page) {
+  const off = await page
+    .locator("#st_use [data-use]")
+    .evaluateAll((els) => els.filter((e) => !e.classList.contains("on")).map((e) => e.dataset.use));
+  for (const k of off) await page.locator(`#st_use [data-use='${k}']`).click();
+}
+
+// 請求書の相手は、代行請求書アプリと同じドロップダウンで選ぶ。
+async function pickCompany(page, name) {
+  await goto(page, "inv");
+  await page.locator("#invName").selectOption(name);
+}
+async function companyNames(page) {
+  return await page
+    .locator("#invName option")
+    .evaluateAll((els) => els.map((e) => e.value).filter(Boolean));
+}
+
 // 請求書タブは既定が「今月」。テストの売上は2026年7月なので、月バーを明示して合わせる。
 // （これをしないと、今日が7月でなくなった時に全部落ちる＝時計の時限爆弾）
 async function setInvMonth(page, ym) {
@@ -322,9 +343,9 @@ test.describe("飲み屋 売上管理", () => {
     // 日別（3日分）
     await expect(page.locator("#sumDay tbody tr")).toHaveCount(3);
 
-    // 未回収は請求書タブの「請求する相手」に名前だけ並ぶ（金額は紙に出る）
+    // 未回収は請求書タブの「請求する相手」に並ぶ
     await goto(page, "inv");
-    const opts = await page.locator("#invName option").allInnerTexts();
+    const opts = await companyNames(page);
     expect(opts.map((t) => t.trim())).toEqual(["山本商事", "田中"]);
     await expect(page.locator("#invSheets .iv-grand")).toContainText("¥32,000");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
@@ -344,7 +365,7 @@ test.describe("飲み屋 売上管理", () => {
     });
     await goto(page, "inv");
     // 田中は ツケ5,000 + 請求書送り7,000 = 12,000（金額は紙の合計で確かめる）
-    await page.locator("#invName").selectOption("田中");
+    await pickCompany(page, "田中");
     await expect(page.locator("#invSheets .iv-grand")).toContainText("¥12,000");
 
     // 田中の7月分を入金済みにする → 未回収は山本商事だけになる
@@ -354,7 +375,7 @@ test.describe("飲み屋 売上管理", () => {
     // 7月分の請求書は中身が変わらない（あとから出し直せる）
     await expect(page.locator("#invName option[value='田中']")).toHaveCount(1);
     await expect(page.locator("#invSheets .iv-grand")).toContainText("¥12,000");
-    await page.locator("#invName").selectOption("山本商事");
+    await pickCompany(page, "山本商事");
     await expect(page.locator("#invSheets .iv-grand")).toContainText("¥32,000");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
@@ -405,7 +426,7 @@ test.describe("飲み屋 売上管理", () => {
     await seed(page);
     await goto(page, "inv");
 
-    await page.locator("#invName").selectOption("山本商事");
+    await pickCompany(page, "山本商事");
     await page.locator("#btnPaid").click();
     await page.locator("#pyDate").fill("2026-08-10");
     await page.locator("#pyOk").click();
@@ -624,7 +645,7 @@ test.describe("飲み屋 売上管理", () => {
     // 請求書タブは既定が「今月」。テストの売上は2026年7月なので、月を明示して合わせる
     // （合わせないと、今日が7月でなくなった瞬間に落ちる＝時計の時限爆弾）
     await setInvMonth(page, "2026-07");
-    await page.locator("#invName").selectOption("鈴木");
+    await pickCompany(page, "鈴木");
     await page.locator("#btnPaid").click();
     await expect(page.locator("#pyRc")).toBeChecked();
     await page.locator("#pyDate").fill("2026-08-10");
@@ -773,7 +794,7 @@ test.describe("飲み屋 売上管理", () => {
     });
 
     await goto(page, "inv");
-    await page.locator("#invName").selectOption("山本商事");
+    await pickCompany(page, "山本商事");
 
     await expect(page.locator("#invSheets .iv-to")).toContainText("山本商事　御中");
     await expect(page.locator("#invSheets .iv-grand b")).toHaveText("¥47,000");
@@ -883,7 +904,7 @@ test.describe("飲み屋 売上管理", () => {
     await gotoSet(page, "self");
     await page.locator("#setRate button[data-rate='0.08']").click();
     await goto(page, "inv");
-    await page.locator("#invName").selectOption("山本商事");
+    await pickCompany(page, "山本商事");
     await expect(page.locator("#invSheets .iv-sum tr").nth(1)).toContainText("2,370");
     await expect(page.locator("#invSheets .iv-bank")).toContainText("伊予銀行");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
@@ -1111,11 +1132,8 @@ test.describe("飲み屋 売上管理", () => {
     await expect(label()).toHaveText("2026年7月分");
 
     // その月に請求書送り・ツケがある相手だけ出る
-    expect((await page.locator("#invName option").allInnerTexts()).map((t) => t.trim())).toEqual([
-      "山本商事",
-      "田中",
-    ]);
-    await page.locator("#invName").selectOption("山本商事");
+    expect(await companyNames(page)).toEqual(["山本商事", "田中"]);
+    await pickCompany(page, "山本商事");
     await expect(page.locator("#invSheets .iv-grand b")).toHaveText("¥32,000");
     // 紙に「◯月分（期間）」が出る
     await expect(page.locator("#invSheets .iv-cap")).toContainText("2026年7月分");
@@ -1124,9 +1142,7 @@ test.describe("飲み屋 売上管理", () => {
     // ◀ で6月分。中身も番号も6月のものに変わる
     await page.locator('#periodInv [data-imv="-1"]').click();
     await expect(label()).toHaveText("2026年6月分");
-    expect((await page.locator("#invName option").allInnerTexts()).map((t) => t.trim())).toEqual([
-      "山本商事",
-    ]);
+    expect(await companyNames(page)).toEqual(["山本商事"]);
     await expect(page.locator("#invSheets .iv-grand b")).toHaveText("¥9,000");
     await expect(page.locator("#invSheets .iv-cap")).toContainText("2026年6月分");
     // 過ぎた月なので請求日は締め日（その月の末日）
@@ -1180,7 +1196,7 @@ test.describe("飲み屋 売上管理", () => {
 
     // 会社の一覧は設定の中。直したら請求書の画面に戻って確かめる
     await goto(page, "inv");
-    await page.locator("#invName").selectOption("山本商事");
+    await pickCompany(page, "山本商事");
     await expect(page.locator("#invSheets .iv-to")).toHaveText("山本商事　御中");
     await expect(page.locator("#invSheets .iv-tosub")).toHaveText("総務部 山本 様");
     // 相手の住所は出さない（登録する欄も置いていない）
@@ -1209,7 +1225,7 @@ test.describe("飲み屋 売上管理", () => {
     }
 
     // 登録していない相手（ツケの田中）は名前＋御中のまま
-    await page.locator("#invName").selectOption("田中");
+    await pickCompany(page, "田中");
     await expect(page.locator("#invSheets .iv-to")).toHaveText("田中　御中");
     await expect(page.locator("#invSheets .iv-tosub")).toHaveCount(0);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
@@ -1229,7 +1245,7 @@ test.describe("飲み屋 売上管理", () => {
       "株式会社山本商事"
     );
     await goto(page, "inv");
-    await page.locator("#invName").selectOption("株式会社山本商事");
+    await pickCompany(page, "株式会社山本商事");
     await expect(page.locator("#invSheets .iv-to")).toHaveText("株式会社山本商事　様");
     // 売上帳にも新しい名前で出る（件数は増えていない）
     await goto(page, "list");
@@ -1260,7 +1276,7 @@ test.describe("飲み屋 売上管理", () => {
     await expect(page.locator("#partnerList .empty")).toBeVisible();
     // 開き直したので請求書タブは「今月」に戻っている。テストの売上の月に合わせ直す
     await setInvMonth(page, "2026-07");
-    await page.locator("#invName").selectOption("株式会社山本商事");
+    await pickCompany(page, "株式会社山本商事");
     await expect(page.locator("#invSheets .iv-to")).toHaveText("株式会社山本商事　御中");
     expect(await page.evaluate(() => window.__NOMIYA.sales.length)).toBe(5);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
@@ -1612,9 +1628,9 @@ test.describe("飲み屋 売上管理", () => {
     // 2枚出す＝001と002が採番される
     //（1枚だけだと台帳が消えても偶然001に戻るので、試験として成り立たない）
     await goto(page, "inv");
-    await page.locator("#invName").selectOption("山本商事");
+    await pickCompany(page, "山本商事");
     const no1 = (await page.locator("#invSheets .iv-meta").innerText()).match(/No\.\s*(\S+)/)[1];
-    await page.locator("#invName").selectOption("田中");
+    await pickCompany(page, "田中");
     const no2 = (await page.locator("#invSheets .iv-meta").innerText()).match(/No\.\s*(\S+)/)[1];
     expect(no1).toBe("202607-001");
     expect(no2).toBe("202607-002");
@@ -1636,7 +1652,7 @@ test.describe("飲み屋 売上管理", () => {
       no2,
     ]);
     await setInvMonth(page, "2026-07");
-    await page.locator("#invName").selectOption("田中");
+    await pickCompany(page, "田中");
     const again = (await page.locator("#invSheets .iv-meta").innerText()).match(/No\.\s*(\S+)/)[1];
     expect(again, "台帳が端末にしか無いと番号が001に戻る＝重複・欠番").toBe(no2);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
@@ -1871,7 +1887,7 @@ test.describe("飲み屋 売上管理", () => {
     await seed(page);
     // 田中のツケ5,000を 7/1 に現金で回収する
     await goto(page, "inv");
-    await page.locator("#invName").selectOption("田中");
+    await pickCompany(page, "田中");
     await page.locator("#btnPaid").click();
     await page.locator("#pyDate").fill("2026-07-01");
     await page.locator("#pyHow button[data-how='cash']").click();
@@ -1884,7 +1900,7 @@ test.describe("飲み屋 売上管理", () => {
 
     // 振込で受け取ったなら金庫は増えない
     await goto(page, "inv");
-    await page.locator("#invName").selectOption("山本商事");
+    await pickCompany(page, "山本商事");
     await page.locator("#btnPaid").click();
     await page.locator("#pyDate").fill("2026-07-01");
     await page.locator("#pyOk").click(); // 既定は「振込・カード」
@@ -2065,6 +2081,7 @@ test.describe("飲み屋 売上管理", () => {
   async function addStaff(page, o) {
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await page.locator("#st_name").fill(o.name);
     if (o.hourly) await page.locator("#st_hourly").fill(String(o.hourly));
     if (o.daily) await page.locator("#st_daily").fill(String(o.daily));
@@ -2164,6 +2181,7 @@ test.describe("飲み屋 売上管理", () => {
     await addStaff(page, { name: "あかり", rate: 10 });
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await page.locator("#st_name").fill("ゆい");
     const helpKey = await page.evaluate(() => window.__NOMIYA.settings.backKinds.slice(-1)[0].key);
     await page.locator(`#st_b_${helpKey}`).fill("500");
@@ -2347,6 +2365,7 @@ test.describe("飲み屋 売上管理", () => {
     // 足した種類が、従業員の「使う項目」にも決め方にも出る
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await expect(page.locator("#st_use [data-use]")).toHaveCount(12); // 6種類＋6項目
     await expect(page.locator("#st_use")).toContainText("シャンパン");
     await page.locator("#modalX").click();
@@ -2425,7 +2444,7 @@ test.describe("飲み屋 売上管理", () => {
     await page.locator("#wk_in").fill("20:00");
     await page.locator("#wk_out").fill("01:30");
     await page.locator("#wk_c_shimei").fill("2");
-    await page.locator("#wk_c_douhan").fill("1");
+    await page.locator("#wk_once_douhan [data-once='1']").click();
     await page.locator("#wk_sales").fill("60000");
     await page.locator("#wk_fine").fill("1000");
     // 保存する前に、その場で計算が出る
@@ -2553,26 +2572,53 @@ test.describe("飲み屋 売上管理", () => {
     expect(m.h).toBe(1123);
     expect(m.sh, "給与一覧がA4からはみ出している").toBeLessThanOrEqual(1123);
     await expect(page.locator("#paySheets")).toContainText("給 与 一 覧");
-    // 合計の行に歯抜けが無い
-    // （日数・時間・本指名・同伴・基本・バック・歩合・支給・控除・差引・渡し済み・これから渡す）
+    // 合計の行に歯抜けが無い。列は「店で選んでいる項目ぜんぶ」。
+    const head = await page
+      .locator("#paySheets thead th")
+      .evaluateAll((t) => t.map((x) => x.textContent.trim()));
+    expect(head).toEqual([
+      "名前",
+      "日数",
+      "時間",
+      "本指名",
+      "場内指名",
+      "同伴",
+      "ドリンク",
+      "ボトル",
+      "基本",
+      "バック",
+      "歩合",
+      "保証",
+      "支給",
+      "厚生費",
+      "罰金",
+      "返済",
+      "控除",
+      "差引",
+      "前借り",
+      "渡し済み",
+      "これから渡す",
+    ]);
     const foot = await page
       .locator("#paySheets tfoot tr td")
       .evaluateAll((tds) => tds.map((td) => td.textContent.trim()));
     expect(foot[0]).toBe("合計");
-    expect(foot.length).toBe(13);
+    expect(foot.length).toBe(head.length);
+    const at = (name) => foot[head.indexOf(name)];
     // ★1日も渡していないので、これから渡す額＝差引と同じ（二重払いの逆＝払い漏れも防ぐ）
-    expect(foot[11]).toBe("0"); // 渡し済み
-    expect(foot[12]).toBe(foot[10]); // これから渡す ＝ 差引
+    expect(at("渡し済み")).toBe("0");
+    expect(at("これから渡す")).toBe(at("差引"));
     expect(foot.slice(1), "合計の行が歯抜け").not.toContain("");
-    expect(foot[1]).toBe("6"); // 6人×1日
-    expect(foot[2]).toBe("30.0"); // 5h×6人
-    expect(foot[3]).toBe("12"); // 本指名2×6人
-    expect(foot[5]).toBe("36,000"); // 基本 1,200×5h×6人
-    expect(foot[6]).toBe("24,000"); // バック 2,000×2×6人
-    // 控除の内訳が紙に出る
-    await expect(page.locator("#paySheets .pay-sub")).toContainText("罰金");
-    await expect(page.locator("#paySheets .pay-sub")).toContainText("厚生費");
-    await expect(page.locator("#paySheets .pay-sub")).toContainText("前借りの返済");
+    expect(at("日数")).toBe("6"); // 6人×1日
+    expect(at("時間")).toBe("30.0"); // 5h×6人
+    expect(at("本指名")).toBe("12"); // 本指名2×6人
+    expect(at("場内指名")).toBe("0"); // 打っていない項目も、選んでいれば列に出る
+    expect(at("基本")).toBe("36,000"); // 基本 1,200×5h×6人
+    expect(at("バック")).toBe("24,000"); // バック 2,000×2×6人
+    // 控除の中身は列で全部出す（下に文で書き足さない）
+    expect(at("罰金")).not.toBe("");
+    expect(at("厚生費")).not.toBe("");
+    expect(at("返済")).not.toBe("");
     await page.locator("#btnPrintPay").click();
     expect(await page.evaluate(() => window.__printed)).toBe(1);
     await expect(page.locator("#printArea .sheet")).toHaveCount(1);
@@ -2839,6 +2885,7 @@ test.describe("③ 設定の歯車とマスタ", () => {
     // スタッフも設定で足す
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await page.locator("#st_name").fill("あかり");
     await page.locator("#st_b_bottle").fill("3000");
     await page.locator("#st_ok").click();
@@ -2898,6 +2945,7 @@ test.describe("③ 設定の歯車とマスタ", () => {
     // 押すボタンの並びも同じ順（並べ替えた意味がある）
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await page.locator("#st_name").fill("あかり");
     await page.locator("#st_b_bottle").fill("3000");
     await page.locator("#st_ok").click();
@@ -2963,6 +3011,7 @@ test.describe("④ 締め方", () => {
   async function addStaffWithCycle(page, o) {
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await page.locator("#st_name").fill(o.name);
     await page.locator("#st_hourly").fill(String(o.hourly));
     await page.locator(`#st_cycle button[data-cy='${o.cycle}']`).click();
@@ -3033,6 +3082,7 @@ test.describe("④ 締め方", () => {
     const errors = await open(page);
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await expect(page.locator("#st_row_wday")).toBeHidden(); // 既定は日払い
     await page.locator("#st_cycle button[data-cy='weekly']").click();
     await expect(page.locator("#st_row_wday")).toBeVisible();
@@ -3054,6 +3104,7 @@ test.describe("④ 締め方", () => {
     // 締め方を決めていない人は日払い＝その日に渡す（今までの動きを変えない）
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await page.locator("#st_name").fill("さき");
     await page.locator("#st_hourly").fill("1000");
     await page.locator("#st_ok").click();
@@ -3084,6 +3135,7 @@ test.describe("⑤ 店ごとの決め方（グレー枠）", () => {
   async function addStaff2(page, o) {
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await page.locator("#st_name").fill(o.name);
     if (o.hourly) await page.locator("#st_hourly").fill(String(o.hourly));
     if (o.daily) await page.locator("#st_daily").fill(String(o.daily));
@@ -3577,6 +3629,7 @@ test.describe("紙が枠からずれない", () => {
     });
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await page.locator("#st_name").fill("あかり");
     await page.locator("#st_hourly").fill("1500");
     await page.locator("#st_ok").click();
@@ -3657,6 +3710,7 @@ test.describe("⑦ 渡した記録", () => {
   async function addStaff3(page, o) {
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await page.locator("#st_name").fill(o.name);
     await page.locator("#st_hourly").fill(String(o.hourly));
     if (o.cycle) await page.locator(`#st_cycle button[data-cy='${o.cycle}']`).click();
@@ -3758,6 +3812,7 @@ test.describe("⑧ 渡し方", () => {
   async function addStaff4(page, o) {
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await page.locator("#st_name").fill(o.name);
     await page.locator("#st_hourly").fill(String(o.hourly));
     await page.locator(`#st_cycle button[data-cy='${o.cycle || "daily"}']`).click();
@@ -3786,6 +3841,7 @@ test.describe("⑧ 渡し方", () => {
     const errors = await open(page);
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await expect(page.locator("#st_payfrom button[data-pf='register']")).toHaveClass(/on/);
     expect(await page.locator("#st_payfrom .chip").allInnerTexts()).toEqual([
       "レジから",
@@ -3864,6 +3920,7 @@ test.describe("⑨ 渡す・消すでレジが合わなくならない", () => {
   async function addStaff5(page, name) {
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await page.locator("#st_name").fill(name);
     await page.locator("#st_hourly").fill("1000");
     await page.locator("#st_ok").click();
@@ -4008,6 +4065,7 @@ test.describe("⑩ 消す", () => {
     const errors = await open(page);
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await page.locator("#st_name").fill("あかり");
     await page.locator("#st_hourly").fill("1000");
     await page.locator("#st_ok").click();
@@ -4044,6 +4102,7 @@ test.describe("⑩ 消す", () => {
     await page.locator("#it_ok").click();
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await page.locator("#st_name").fill("あかり");
     await page.locator("#st_b_bottle").fill("3000");
     await page.locator("#st_ok").click();
@@ -4137,6 +4196,7 @@ test.describe("⑫ 渡した記録の紙", () => {
     const errors = await open(page);
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
+    await useAll(page);
     await page.locator("#st_name").fill("あかり");
     await page.locator("#st_hourly").fill("1000");
     await page.locator("#st_ok").click();
@@ -4188,6 +4248,7 @@ test.describe("⑬ 並べ替え", () => {
     await gotoSet(page, "staff");
     for (const n of ["あかり", "ゆい", "みく"]) {
       await page.locator("#btnStaffAdd").click();
+      await useAll(page);
       await page.locator("#st_name").fill(n);
       await page.locator("#st_hourly").fill("1000");
       await page.locator("#st_ok").click();
@@ -4532,6 +4593,715 @@ test.describe("飲み屋 入金管理", () => {
     await inv(page, "paid");
     await expect(page.locator("#paidList .li")).toHaveCount(1);
     await expect(page.locator("#paidList .li")).toContainText("半分");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* ⑯ 司さんの指摘 8件（実際に指で押してたどる） */
+test.describe("⑯ 指摘の直し", () => {
+  async function addStaff6(page, o) {
+    await gotoSet(page, "staff");
+    await page.locator("#btnStaffAdd").click();
+    await page.locator("#st_name").fill(o.name);
+    for (const k of o.use || []) await page.locator(`#st_use [data-use='${k}']`).click();
+    for (const k of Object.keys(o.back || {}))
+      await page.locator(`#st_b_${k}`).fill(String(o.back[k]));
+    if (o.hourly) await page.locator("#st_hourly").fill(String(o.hourly));
+    await page.locator("#st_ok").click();
+  }
+  async function openWork(page, ymd) {
+    await goto(page, "pay");
+    for (let i = 0; i < 400; i++) {
+      const now = await page.evaluate(() => window.__NOMIYA.payYmd);
+      if (now === ymd) break;
+      await page.locator(`#periodPay [data-pmv="${now > ymd ? -1 : 1}"]`).click();
+    }
+    await page.locator("#btnWorkAdd").click();
+  }
+
+  test("① 集計の割合は「組」に対しての割合（お金の割合は出さない）", async ({ page }) => {
+    const errors = await open(page);
+    // 現金5,000が2組、請求書送り10万が1組。金額では請求書が多いが、組では現金が多い。
+    await addSale(page, { date: "2026-07-01", name: "A", people: 1, amount: 5000, pay: "cash" });
+    await addSale(page, { date: "2026-07-01", name: "B", people: 1, amount: 5000, pay: "cash" });
+    await addSale(page, {
+      date: "2026-07-01",
+      name: "山本商事",
+      people: 4,
+      amount: 100000,
+      pay: "invoice",
+      receipt: true,
+    });
+    await goto(page, "sum");
+    await page.locator("#periodSum .period-lb").click();
+    await page.locator("#mdFrom").fill("2026-07-01");
+    await page.locator("#mdTo").fill("2026-07-31");
+    await page.locator("#mdOk").click();
+
+    // 現金は 2組/3組＝67%。金額の割合（10,000/110,000＝9%）は出さない。
+    const cash = await page
+      .locator("#sumPay tr", { hasText: "現金" })
+      .first()
+      .evaluate((tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.textContent.trim()));
+    expect(cash.slice(0, 4)).toEqual(["現金", "2", "10,000", "67%"]);
+    const inv = await page
+      .locator("#sumPay tr", { hasText: "請求書送り" })
+      .first()
+      .evaluate((tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.textContent.trim()));
+    expect(inv.slice(0, 4)).toEqual(["請求書送り", "1", "100,000", "33%"]);
+    // 合計の行に組の数も出る
+    await expect(page.locator("#sumPay tfoot tr")).toContainText("3");
+    // 領収書別も同じ見方（組の割合）
+    const rec = await page
+      .locator("#sumRec tr", { hasText: "領収書あり" })
+      .first()
+      .evaluate((tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.textContent.trim()));
+    expect(rec.slice(0, 4)).toEqual(["領収書あり", "1", "100,000", "33%"]);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("② 足したばかりの人は「なし」から選ぶ。選んだ分だけ下に欄が出る", async ({ page }) => {
+    const errors = await open(page);
+    await gotoSet(page, "staff");
+    await page.locator("#btnStaffAdd").click();
+    // 何も選ばれていない
+    await expect(page.locator("#st_use .chip.on")).toHaveCount(0);
+    // 選んでいないので、決める欄も出ていない
+    await expect(page.locator("#st_row_shimei")).toBeHidden();
+    await expect(page.locator("#st_row_rate")).toBeHidden();
+    await expect(page.locator("#st_row_backs")).toBeHidden();
+
+    // 本指名を選ぶと、その欄だけ出る
+    await page.locator("#st_use [data-use='shimei']").click();
+    await expect(page.locator("#st_row_shimei")).toBeVisible();
+    await expect(page.locator("#st_row_backs")).toBeVisible();
+    await expect(page.locator("#st_row_jonai")).toBeHidden();
+    await expect(page.locator("#st_row_rate")).toBeHidden();
+
+    await page.locator("#st_name").fill("あかり");
+    await page.locator("#st_b_shimei").fill("2000");
+    await page.locator("#st_ok").click();
+
+    // 開き直しても、選んだ物だけ選ばれている
+    await page.locator("#staffList .li-main").first().click();
+    await expect(page.locator("#st_use .chip.on")).toHaveCount(1);
+    await expect(page.locator("#st_use [data-use='shimei']")).toHaveClass(/on/);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("③ 同伴は本数ではなく「あり／なし」で入れる", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff6(page, {
+      name: "あかり",
+      use: ["shimei", "douhan"],
+      back: { shimei: 2000, douhan: 3000 },
+    });
+    await openWork(page, "2026-08-01");
+    // 本指名は本数、同伴はあり／なし
+    await expect(page.locator("#wk_row_c_shimei")).toBeVisible();
+    await expect(page.locator("#wk_row_c_douhan")).toBeHidden();
+    await expect(page.locator("#wk_row_o_douhan")).toBeVisible();
+
+    await page.locator("#wk_c_shimei").fill("2");
+    await page.locator("#wk_once_douhan [data-once='1']").click();
+    await expect(page.locator("#wk_once_douhan [data-once='1']")).toHaveClass(/on/);
+    await page.locator("#wk_ok").click();
+
+    // 本指名2×2,000 ＋ 同伴1回×3,000 ＝ 7,000
+    const w = await page.evaluate(() => window.__NOMIYA.works[0]);
+    expect(w.count.douhan).toBe(1);
+    await expect(page.locator("#payDayList")).toContainText("¥7,000");
+
+    // 「なし」に戻せる（本指名2×2,000だけ＝4,000）
+    await page.locator("#payDayList [data-work]").first().click();
+    await page.locator("#wk_once_douhan [data-once='0']").click();
+    await page.locator("#wk_ok").click();
+    await expect(page.locator("#payDayList")).toContainText("¥4,000");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("④ 請求書はドロップダウンで会社を切り替える（金額も出る）", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, {
+      date: "2026-07-10",
+      name: "山本商事",
+      people: 4,
+      amount: 32000,
+      pay: "invoice",
+      receipt: true,
+    });
+    await addSale(page, {
+      date: "2026-07-12",
+      name: "田中",
+      people: 2,
+      amount: 8000,
+      pay: "tsuke",
+    });
+    await setInvMonth(page, "2026-07");
+    await expect(await companyNames(page)).toHaveLength(2);
+    // 押す前に、その会社にいくら請求するか分かる
+    await expect(page.locator("#invName option[value='山本商事']")).toContainText("¥32,000");
+    await expect(page.locator("#invName option[value='田中']")).toContainText("¥8,000");
+    // 押すと紙が入れ替わる
+    await pickCompany(page, "田中");
+    await expect(page.locator("#invSheets")).toContainText("田中");
+    await expect(page.locator("#invSheets .iv-grand")).toContainText("¥8,000");
+    await pickCompany(page, "山本商事");
+    await expect(page.locator("#invSheets .iv-grand")).toContainText("¥32,000");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("⑤ 会社も従業員も、一覧からそのまま消せる", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, {
+      date: "2026-07-10",
+      name: "山本商事",
+      people: 4,
+      amount: 32000,
+      pay: "invoice",
+      receipt: true,
+    });
+    await addStaff6(page, { name: "あかり", hourly: 1000 });
+
+    // 会社
+    await gotoSet(page, "partner");
+    await expect(page.locator("#partnerList .li")).toHaveCount(1);
+    await page.locator("#partnerList [data-ptdel]").click();
+    await page.locator("#mdPtDelYes").click();
+    await expect(page.locator("#partnerList")).toContainText("まだありません");
+    // 売上は消さない（過去の請求書が空にならない）
+    expect(await page.evaluate(() => window.__NOMIYA.sales.length)).toBe(1);
+
+    // 従業員
+    await gotoSet(page, "staff");
+    await expect(page.locator("#staffList .li")).toHaveCount(1);
+    await page.locator("#staffList [data-stdel]").click();
+    await page.locator("#mdStDelYes").click();
+    await expect(page.locator("#staffList")).toContainText("まだいません");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("⑥ 出勤・退勤はテンキーで打てる（2000 → 20:00）", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff6(page, { name: "あかり", hourly: 1200 });
+    await openWork(page, "2026-08-01");
+    // 時計の輪っかではなく、打てる欄
+    expect(await page.locator("#wk_in").getAttribute("type")).toBe("text");
+    await page.locator("#wk_in").fill("2000");
+    await page.locator("#wk_out").fill("130");
+    // 打ち終わった瞬間に形が整う
+    await page.locator("#wk_out").blur();
+    await expect(page.locator("#wk_in")).toHaveValue("20:00");
+    await expect(page.locator("#wk_out")).toHaveValue("01:30");
+    await page.locator("#wk_ok").click();
+    // 20:00〜翌1:30＝5.5時間×1,200＝6,600
+    await expect(page.locator("#payDayList")).toContainText("¥6,600");
+    await expect(page.locator("#payDayList")).toContainText("20:00〜01:30");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("⑦ 場内指名を打ったら、明細にも一覧にも出る", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff6(page, {
+      name: "あかり",
+      use: ["shimei", "jonai", "douhan"],
+      back: { shimei: 2000, jonai: 1500, douhan: 3000 },
+    });
+    await openWork(page, "2026-08-01");
+    await page.locator("#wk_c_shimei").fill("2");
+    await page.locator("#wk_c_jonai").fill("1");
+    await page.locator("#wk_ok").click();
+
+    // 一覧（A4）に場内指名の列がある
+    await expect(page.locator("#paySheets thead")).toContainText("場内指名");
+    const head = await page
+      .locator("#paySheets thead th")
+      .evaluateAll((t) => t.map((x) => x.textContent.trim()));
+    expect(head.slice(0, 6)).toEqual(["名前", "日数", "時間", "本指名", "場内指名", "同伴"]);
+    // 選んでいないドリンク・ボトルの列は出さない（紙を汚さない）
+    expect(head).not.toContain("ドリンク");
+
+    // 明細にもバックの内訳が出る（合計だけだと場内指名がどこにも出ない）
+    await page.locator("#payDue [data-slip]").first().click();
+    const slip = page.locator("#castSheets");
+    await expect(slip).toContainText("バックの内訳");
+    await expect(slip.locator(".fb-row", { hasText: "場内指名" })).toContainText("1,500");
+    await expect(slip.locator(".fb-row", { hasText: "本指名" }).first()).toContainText("4,000");
+    // 打っていない同伴も、選んでいるので0で並ぶ＝紙の形が毎月変わらない
+    await expect(slip.locator(".fb-row", { hasText: "同伴" }).first()).toContainText("0");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("⑧ 判子の大きさは3つから選べる（既定は中＝今までと同じ）", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, {
+      date: "2026-07-10",
+      name: "山本商事",
+      people: 4,
+      amount: 32000,
+      pay: "invoice",
+      receipt: true,
+    });
+    // 判子を入れていない店には、大きさだけ聞かない
+    await gotoSet(page, "self");
+    await expect(page.locator("#rowHankoSize")).toBeHidden();
+    await page.evaluate(() => {
+      const N = window.__NOMIYA;
+      N.settings.hanko =
+        "data:image/svg+xml;base64," +
+        btoa('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>');
+      N.renderAll();
+    });
+    await expect(page.locator("#rowHankoSize")).toBeVisible();
+    await expect(page.locator("#setHankoSize [data-hs='m']")).toHaveClass(/on/);
+
+    await setInvMonth(page, "2026-07");
+    const size = () =>
+      page
+        .locator("#invSheets .iv-hanko")
+        .evaluate((el) => Math.round(el.getBoundingClientRect().width * 100) / 100);
+    const mid = await size();
+    await gotoSet(page, "self");
+    await page.locator("#setHankoSize [data-hs='l']").click();
+    await setInvMonth(page, "2026-07");
+    expect(await size()).toBeGreaterThan(mid);
+    await gotoSet(page, "self");
+    await page.locator("#setHankoSize [data-hs='s']").click();
+    await setInvMonth(page, "2026-07");
+    expect(await size()).toBeLessThan(mid);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* ⑰ 人数と日数が増えても、紙の数字が切れない
+   （8人×25日で試したら、金額が「462,25」のように途中で切れていた） */
+test.describe("⑰ 紙は数字を切らない", () => {
+  // 8人・1人25日・バックの決め方はバラバラ。アプリと同じ core に通してから端末の控えに置く。
+  async function seedShop(page, opt) {
+    await page.evaluate(
+      (extra) => {
+        const C = window.NomiyaCore;
+        const NOW = "2026-08-03T00:00:00.000Z";
+        const CAST = [
+          {
+            name: "あかり",
+            hourly: 1500,
+            back: { shimei: 2000, jonai: 1000, douhan: 3000, drink: 500 },
+            pct: { bottle: 15 },
+            rate: 5,
+            kousei: 1000,
+          },
+          {
+            name: "ゆい",
+            hourly: 1300,
+            back: { shimei: 1500, jonai: 800, douhan: 2500, drink: 400 },
+            pct: { bottle: 10 },
+            kousei: 1000,
+          },
+          { name: "みく", daily: 12000, back: { shimei: 2500, douhan: 3000 }, kousei: 1000 },
+          {
+            name: "さら",
+            hourly: 1200,
+            back: { shimei: 1000, jonai: 500, drink: 300 },
+            guarantee: 10000,
+          },
+          {
+            name: "れい",
+            hourly: 1800,
+            back: { shimei: 3000, jonai: 1500, douhan: 4000 },
+            pct: { bottle: 20 },
+            rate: 10,
+          },
+          { name: "ことね", hourly: 1100, back: { drink: 300 } },
+          {
+            name: "まお",
+            hourly: 1400,
+            back: { shimei: 2000, jonai: 1000, douhan: 3000 },
+            pct: { bottle: 12 },
+            kousei: 1500,
+          },
+          {
+            name: "ひな",
+            daily: 15000,
+            back: { shimei: 2000, jonai: 1200, douhan: 3500, drink: 500 },
+            pct: { bottle: 18 },
+            rate: 8,
+          },
+        ];
+        // 店が種類を足していれば、その種類にも「1本いくら」と本数を入れる
+        const KINDS = C.backKinds(JSON.parse(localStorage.getItem("nomiya_settings_v1") || "{}"));
+        CAST.forEach((c) => {
+          (extra || []).forEach((nm, j) => {
+            const k = KINDS.filter((x) => x.label === nm)[0];
+            if (k) c.back[k.key] = 1000 + j * 500;
+          });
+        });
+        const staff = CAST.map((c, i) =>
+          C.normalizeStaff(
+            {
+              id: "s" + i,
+              name: c.name,
+              role: "キャスト",
+              hourly: c.hourly || 0,
+              daily: c.daily || 0,
+              back: c.back || {},
+              backPct: c.pct || {},
+              rate: c.rate || 0,
+              guarantee: c.guarantee || 0,
+              kousei: c.kousei || 0,
+              cycle: "monthly",
+              payAfter: 0,
+              payFrom: "register",
+              ord: i + 1,
+            },
+            NOW
+          )
+        );
+        const works = [];
+        staff.forEach((st, si) => {
+          for (let d = 1; d <= 25; d++) {
+            works.push(
+              C.normalizeWork(
+                {
+                  id: "w" + si + "_" + d,
+                  ymd: "2026-08-" + String(d).padStart(2, "0"),
+                  staffId: st.id,
+                  inAt: si % 3 === 0 ? "19:30" : "20:00",
+                  outAt: d % 4 === 0 ? "02:00" : "01:00",
+                  count: (function () {
+                    const cnt = {
+                      shimei: (si * 7 + d * 3) % 5,
+                      jonai: (si + d) % 4,
+                      douhan: d % 3 === 0 ? 1 : 0,
+                      drink: (si + d * 2) % 6,
+                    };
+                    (extra || []).forEach((nm) => {
+                      const k = KINDS.filter((x) => x.label === nm)[0];
+                      if (k) cnt[k.key] = (si + d) % 3;
+                    });
+                    return cnt;
+                  })(),
+                  amount: { bottle: d % 5 === 0 ? 60000 + si * 10000 : 0 },
+                  sales: d % 6 === 0 ? 80000 : 0,
+                  fine: d === 12 && si % 4 === 0 ? 3000 : 0,
+                  lend: d === 5 && si % 3 === 0 ? 30000 : 0,
+                  repay: d === 20 && si % 3 === 0 ? 10000 : 0,
+                },
+                NOW
+              )
+            );
+          }
+        });
+        localStorage.setItem("nomiya_staff_v1", JSON.stringify(staff));
+        localStorage.setItem("nomiya_work_v1", JSON.stringify(works));
+      },
+      (opt && opt.extra) || []
+    );
+    await page.reload({ waitUntil: "load" });
+    await goto(page, "pay");
+    for (let i = 0; i < 400; i++) {
+      const now = await page.evaluate(() => window.__NOMIYA.payYmd);
+      if (now === "2026-08-31") break;
+      await page.locator(`#periodPay [data-pmv="${now > "2026-08-31" ? -1 : 1}"]`).click();
+    }
+  }
+  // 「文字が枠に入りきっているか」。切れた数字は嘘になるので、1つでもあれば赤。
+  async function clipped(page, sel) {
+    return await page.locator(sel + " td, " + sel + " th").evaluateAll((els) =>
+      els
+        .filter((e) => e.scrollWidth > e.clientWidth + 1)
+        .map((e) => e.textContent.trim())
+        .filter(Boolean)
+    );
+  }
+
+  test("給与一覧: 8人・25日・種類だらけでも、金額が切れずにA4へ収まる", async ({ page }) => {
+    const errors = await open(page);
+    await seedShop(page);
+
+    const sheet = page.locator("#paySheets .sheet").first();
+    const box = await sheet.evaluate((el) => ({ w: el.offsetWidth, h: el.scrollHeight }));
+    expect(box.w).toBe(794);
+    expect(box.h, "給与一覧がA4からはみ出している").toBeLessThanOrEqual(1123);
+    // ★切れていた実例: 462,250 が「462,25」になっていた
+    expect(await clipped(page, "#paySheets"), "紙の中で数字が切れている").toEqual([]);
+    // 合計は7桁になる（ここが一番切れやすい）
+    await expect(page.locator("#paySheets tfoot")).toContainText("3,333,750");
+    // 8人ぜんぶ出る
+    await expect(page.locator("#paySheets tbody tr")).toHaveCount(8);
+
+    // ★選んだ項目は全部列に出す（種類も、歩合・保証・厚生費・罰金・返済・前借りも）
+    const head = await page
+      .locator("#paySheets thead th")
+      .evaluateAll((t) => t.map((x) => x.textContent.trim()));
+    expect(head).toEqual([
+      "名前",
+      "日数",
+      "時間",
+      "本指名",
+      "場内指名",
+      "同伴",
+      "ドリンク",
+      "ボトル",
+      "基本",
+      "バック",
+      "歩合",
+      "保証",
+      "支給",
+      "厚生費",
+      "罰金",
+      "返済",
+      "控除",
+      "差引",
+      "前借り",
+      "渡し済み",
+      "これから渡す",
+    ]);
+    // ％で決めている人のボトルは、本数ではなく売った額（0本と嘘をつかない）
+    const akariBottle = await page
+      .locator("#paySheets tbody tr", { hasText: "あかり" })
+      .first()
+      .evaluate((tr) => tr.querySelectorAll("td")[7].textContent.trim());
+    expect(akariBottle).toBe("¥300,000");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("給与一覧: 店がバックの種類を増やしても、切れずに紙の幅へ収める", async ({ page }) => {
+    const errors = await open(page);
+    // 種類を9つにする（シャンパン・フード・カラオケ・アフター を足した店）
+    await gotoSet(page, "item");
+    for (const nm of ["シャンパン", "フード", "カラオケ", "アフター"]) {
+      await page.locator("#btnKindAdd").click();
+      await page.locator("#kd_label").fill(nm);
+      await page.locator("#kd_ok").click();
+    }
+    await seedShop(page, { extra: ["シャンパン", "フード", "カラオケ", "アフター"] });
+
+    const box = await page
+      .locator("#paySheets .sheet")
+      .first()
+      .evaluate((el) => ({ w: el.offsetWidth, h: el.scrollHeight }));
+    expect(box.w).toBe(794);
+    expect(box.h, "給与一覧がA4からはみ出している").toBeLessThanOrEqual(1123);
+    // 列が増えても1文字も切らない（切れた数字は嘘になる）
+    expect(await clipped(page, "#paySheets"), "紙の中で数字が切れている").toEqual([]);
+    // 表そのものは紙の幅に収まっている
+    const fit = await page
+      .locator("#paySheets .wide")
+      .first()
+      .evaluate((box2) => {
+        const t = box2.firstElementChild;
+        const r = t.getBoundingClientRect();
+        return { need: t.scrollWidth, avail: box2.clientWidth, shown: Math.round(r.width) };
+      });
+    expect(fit.need, "この試験は縮めないと入らない量でないと意味がない").toBeGreaterThan(fit.avail);
+    expect(fit.shown, "表が紙からはみ出している").toBeLessThanOrEqual(fit.avail + 1);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("明細: 25日ぶんが1枚に収まり、％の種類は「売った額」で出る", async ({ page }) => {
+    const errors = await open(page);
+    await seedShop(page);
+    await page.locator("#payDue [data-slip]").first().click();
+
+    const sheet = page.locator("#castSheets .sheet").first();
+    const box = await sheet.evaluate((el) => ({ w: el.offsetWidth, h: el.scrollHeight }));
+    expect(box.w).toBe(794);
+    expect(box.h, "明細がA4からはみ出している").toBeLessThanOrEqual(1123);
+    expect(await clipped(page, "#castSheets"), "紙の中で数字が切れている").toEqual([]);
+    // 日ごとの表は25日ぶん（下のバックの内訳は別の表）
+    await expect(page.locator("#castSheets .pay-tbl tbody tr")).toHaveCount(25);
+
+    const slip = page.locator("#castSheets");
+    // 本数で決めた種類は「◯本」、同伴は「◯回」、％の種類は「◯円ぶん」（0本と嘘をつかない）
+    await expect(slip.locator(".fb-row", { hasText: "本指名" }).first()).toContainText("本");
+    await expect(slip.locator(".fb-row", { hasText: "同伴" }).first()).toContainText("回");
+    const bottle = slip.locator(".fb-row", { hasText: "ボトル" });
+    await expect(bottle).toContainText("円ぶん");
+    await expect(bottle).not.toContainText("0 本");
+    // 選んだ項目は0でも必ず行が出る（紙の形が毎月変わらない）
+    for (const label of ["歩合", "支給の内訳", "控除の内訳", "厚生費", "罰金", "返済"]) {
+      await expect(slip).toContainText(label);
+    }
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* ⑱ 選んでいない項目は、紙に出さない
+   （出すのは「選んだ項目」だけ。一覧は表なので、誰か1人が選べばその列は出る。） */
+test.describe("⑱ 選んでいない項目は紙に出さない", () => {
+  async function addStaff8(page, o) {
+    await gotoSet(page, "staff");
+    await page.locator("#btnStaffAdd").click();
+    await page.locator("#st_name").fill(o.name);
+    for (const k of o.use || []) await page.locator(`#st_use [data-use='${k}']`).click();
+    if (o.hourly) await page.locator("#st_hourly").fill(String(o.hourly));
+    for (const k of Object.keys(o.back || {}))
+      await page.locator(`#st_b_${k}`).fill(String(o.back[k]));
+    if (o.kousei) await page.locator("#st_kousei").fill(String(o.kousei));
+    if (o.rate) await page.locator("#st_rate").fill(String(o.rate));
+    await page.locator("#st_ok").click();
+  }
+  async function work(page, ymd, o) {
+    await goto(page, "pay");
+    for (let i = 0; i < 400; i++) {
+      const now = await page.evaluate(() => window.__NOMIYA.payYmd);
+      if (now === ymd) break;
+      await page.locator(`#periodPay [data-pmv="${now > ymd ? -1 : 1}"]`).click();
+    }
+    await page.locator("#btnWorkAdd").click();
+    if (o.who) await page.locator("#wk_staff").selectOption({ label: o.who });
+    await page.locator("#wk_in").fill("20:00");
+    await page.locator("#wk_out").fill("01:00");
+    for (const k of Object.keys(o.count || {}))
+      await page.locator(`#wk_c_${k}`).fill(String(o.count[k]));
+    await page.locator("#wk_ok").click();
+  }
+  const heads = (page, sel) =>
+    page.locator(sel + " thead th").evaluateAll((t) => t.map((x) => x.textContent.trim()));
+
+  test("明細: ドリンクだけの人の紙には、深夜も歩合も控除も出ない", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff8(page, { name: "ことね", hourly: 1100, use: ["drink"], back: { drink: 300 } });
+    await work(page, "2026-08-01", { count: { drink: 4 } });
+
+    await page.locator("#payDue [data-slip]").first().click();
+    const slip = page.locator("#castSheets");
+    // 日ごとの表の列は、選んだ物だけ
+    expect(await heads(page, "#castSheets")).toEqual([
+      "日付",
+      "時間",
+      "基本",
+      "バック",
+      "支給",
+      "差引",
+    ]);
+    // バックの内訳はドリンクだけ。選んでいない種類は1つも出さない。
+    const kinds = await slip
+      .locator(".fb", { hasText: "バックの内訳" })
+      .locator(".fb-row")
+      .evaluateAll((els) => els.map((e) => e.textContent.trim()));
+    expect(kinds.length).toBe(2); // ドリンクの行＋合計
+    expect(kinds[0]).toContain("ドリンク");
+    for (const ng of ["本指名", "場内指名", "同伴", "ボトル"]) {
+      await expect(slip).not.toContainText(ng);
+    }
+    // 引く物を1つも選んでいないので、控除の枠ごと出さない
+    await expect(slip).not.toContainText("控除の内訳");
+    await expect(slip).not.toContainText("歩合");
+    await expect(slip).not.toContainText("最低保証");
+    await expect(slip).not.toContainText("前借り");
+    // 中身は合っている（1,100×5h＋300×4本）
+    await expect(slip).toContainText("6,700");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("明細: 日付と時間で幅を食いつぶさない（金額の列に幅を回す）", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff8(page, { name: "ことね", hourly: 1100, use: ["drink"], back: { drink: 300 } });
+    await work(page, "2026-08-01", { count: { drink: 4 } });
+    await page.locator("#payDue [data-slip]").first().click();
+
+    // 画面では紙ごと縮小して見せているので、縮尺の掛からない offsetWidth で測る
+    const w = await page
+      .locator("#castSheets .pay-tbl thead th")
+      .evaluateAll((th) => th.map((x) => x.offsetWidth));
+    const total = w.reduce((a, b2) => a + b2, 0);
+    // 紙の幅（A4の中身＝726px）はちゃんと使い切る（表が真ん中に縮こまらない）
+    expect(total).toBeGreaterThan(700);
+    // ★日付と時間で半分も使わない（前は2列で55%取っていた）
+    expect((w[0] + w[1]) / total, "日付と時間が幅を食いすぎ").toBeLessThan(0.3);
+    expect(w[0] / total, "日付が広すぎ").toBeLessThan(0.2);
+    // 金額の列は、日付より狭くならない
+    for (let i = 2; i < w.length; i++) expect(w[i]).toBeGreaterThanOrEqual(w[0]);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("明細: 選んだ物が増えれば、その分だけ列と内訳が増える", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff8(page, {
+      name: "あかり",
+      hourly: 1500,
+      use: ["shimei", "drink", "rate", "kousei"],
+      back: { shimei: 2000, drink: 500 },
+      rate: 10,
+      kousei: 1000,
+    });
+    await work(page, "2026-08-01", { count: { shimei: 2, drink: 1 } });
+    await page.locator("#payDue [data-slip]").first().click();
+    const slip = page.locator("#castSheets");
+    // 歩合と控除は選んだので出る。深夜は店が付けていないので出ない。
+    expect(await heads(page, "#castSheets")).toEqual([
+      "日付",
+      "時間",
+      "基本",
+      "バック",
+      "歩合",
+      "支給",
+      "控除",
+      "差引",
+    ]);
+    await expect(slip).toContainText("控除の内訳");
+    await expect(slip).toContainText("厚生費");
+    // 選んでいない罰金・返済・保証は出さない
+    await expect(slip).not.toContainText("罰金");
+    await expect(slip).not.toContainText("返済");
+    await expect(slip).not.toContainText("最低保証");
+    // 選んでいない種類も出さない
+    for (const ng of ["場内指名", "同伴", "ボトル"]) {
+      await expect(slip).not.toContainText(ng);
+    }
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("一覧: 誰も選んでいない項目は列に出さない（1人でも選べば出る）", async ({ page }) => {
+    const errors = await open(page);
+    await addStaff8(page, { name: "ことね", hourly: 1100, use: ["drink"], back: { drink: 300 } });
+    await work(page, "2026-08-01", { count: { drink: 4 } });
+    // 1人だけの店＝ドリンクしか出ない
+    expect(await heads(page, "#paySheets")).toEqual([
+      "名前",
+      "日数",
+      "時間",
+      "ドリンク",
+      "基本",
+      "バック",
+      "支給",
+      "控除",
+      "差引",
+      "渡し済み",
+      "これから渡す",
+    ]);
+
+    // もう1人が本指名と厚生費を選ぶと、その2列だけ増える
+    await addStaff8(page, {
+      name: "あかり",
+      hourly: 1500,
+      use: ["shimei", "kousei"],
+      back: { shimei: 2000 },
+      kousei: 1000,
+    });
+    await work(page, "2026-08-01", { who: "あかり", count: { shimei: 2 } });
+    expect(await heads(page, "#paySheets")).toEqual([
+      "名前",
+      "日数",
+      "時間",
+      "本指名",
+      "ドリンク",
+      "基本",
+      "バック",
+      "支給",
+      "厚生費",
+      "控除",
+      "差引",
+      "渡し済み",
+      "これから渡す",
+    ]);
+    // 誰も選んでいない 場内指名・同伴・ボトル・歩合・保証・罰金・返済・前借り は出さない
+    const head = await heads(page, "#paySheets");
+    for (const ng of ["場内指名", "同伴", "ボトル", "歩合", "保証", "罰金", "返済", "前借り"]) {
+      expect(head).not.toContain(ng);
+    }
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });

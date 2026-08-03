@@ -1446,6 +1446,20 @@
             <input type="file" id="fileHanko" accept="image/*" style="display: none" />
           </div>
 
+          <!-- 判子は写真の大きさがバラバラなので、いつも同じ大きさに収める。
+               実物の角印は15〜24mmと幅があるので、3つから選べるようにする。 -->
+          <div class="frow" id="rowHankoSize">
+            <span class="flabel">判子の大きさ</span>
+            <div class="chips" id="setHankoSize">
+              <button class="chip chip-sm" type="button" data-hs="s">小</button>
+              <button class="chip chip-sm" type="button" data-hs="m">中</button>
+              <button class="chip chip-sm" type="button" data-hs="l">大</button>
+            </div>
+            <span class="hint"
+              >請求書の社名に重ねる角印です。写真の大きさは関係なく、ここで決めた大きさに収まります。</span
+            >
+          </div>
+
           <div class="frow">
             <span class="flabel">消費税率</span>
             <div class="chips" id="setRate">
@@ -1831,6 +1845,7 @@
           rate: 0.1,
           tpl: "card",
           hanko: "",
+          hankoSize: "m", // 請求書に載る判子の大きさ s=小 / m=中(角印16mm相当) / l=大
           logo: "",
           logoPos: "top",
           accent: "",
@@ -3395,12 +3410,13 @@
       }
 
       function brkTable(rows, total) {
-        var max = 0;
+        // 棒も「組」の多さで伸ばす（割合の列と同じ見方にする）
+        var maxCount = 0;
         rows.forEach(function (r) {
-          if (r.amount > max) max = r.amount;
+          if (r.count > maxCount) maxCount = r.count;
         });
         return (
-          '<table class="brk"><thead><tr><th>区分</th><th>件数</th><th>金額</th><th>割合</th><th class="barcell"></th></tr></thead><tbody>' +
+          '<table class="brk"><thead><tr><th>区分</th><th>組</th><th>金額</th><th>割合</th><th class="barcell"></th></tr></thead><tbody>' +
           rows
             .map(function (r) {
               var z = r.count === 0 ? " zero" : "";
@@ -3418,14 +3434,19 @@
                 '</td><td class="' +
                 z.trim() +
                 '">' +
-                Math.round(r.ratio * 100) +
+                // 割合は「組」に対して。金額の割合は出さない（見るのは組の数）
+                Math.round(r.countRatio * 100) +
                 '%</td><td class="barcell"><div class="bar"><i style="width:' +
-                (max ? Math.round((r.amount / max) * 100) : 0) +
+                (maxCount ? Math.round((r.count / maxCount) * 100) : 0) +
                 '%"></i></div></td></tr>'
               );
             })
             .join("") +
-          "</tbody><tfoot><tr><td>合計</td><td></td><td>" +
+          "</tbody><tfoot><tr><td>合計</td><td>" +
+          rows.reduce(function (a, r) {
+            return a + r.count;
+          }, 0) +
+          "</td><td>" +
           C.comma(total) +
           "</td><td></td><td></td></tr></tfoot></table>"
         );
@@ -4251,6 +4272,58 @@
         }
       }
 
+      /* 宛先を消す。売上は消さない（過去の請求書が空にならないように）。
+         中身は宛先を直す画面の「この宛先を消す」と同じ物を、一覧からも押せるようにした物。 */
+      function askDeletePartner(name) {
+        var pt = PARTNERS[name];
+        if (!pt) return;
+        openModal(
+          "宛先を消す",
+          '<div class="hint">' +
+            esc(pt.to || pt.name) +
+            " を一覧から消します。<br>この会社の売上と、出した請求書はそのまま残ります。</div>" +
+            '<div class="btn-right" style="margin-top:14px">' +
+            '<button class="btn btn-ghost btn-danger btn-sm" id="mdPtDelYes">消す</button></div>'
+        );
+        $("mdPtDelYes").onclick = function () {
+          var nowIso3 = new Date().toISOString();
+          PARTNERS[name] = Object.assign({}, PARTNERS[name], {
+            deletedAt: nowIso3,
+            updatedAt: nowIso3,
+          });
+          savePartners();
+          closeModal();
+          renderAll();
+          toast("🗑 宛先を消しました");
+        };
+      }
+
+      /* スタッフを外す。出勤・給料の実績は残す（過去の給料が変わらないように）。 */
+      function askRemoveStaff(id) {
+        var st = staffById(id);
+        if (!st) return;
+        openModal(
+          "スタッフを外す",
+          '<div class="hint">' +
+            esc(st.name) +
+            " を一覧から外します。<br>今までの出勤と渡した記録はそのまま残ります。</div>" +
+            '<div class="btn-right" style="margin-top:14px">' +
+            '<button class="btn btn-ghost btn-danger btn-sm" id="mdStDelYes">外す</button></div>'
+        );
+        $("mdStDelYes").onclick = function () {
+          var nowIso3 = new Date().toISOString();
+          STAFF = STAFF.map(function (x) {
+            return x.id === id
+              ? Object.assign({}, x, { deletedAt: nowIso3, updatedAt: nowIso3 })
+              : x;
+          });
+          saveStaff();
+          closeModal();
+          renderAll();
+          toast("🗑 外しました（今までの実績は残ります）");
+        };
+      }
+
       // 「請求書送り」を選んだときだけ、名前は登録した宛先から選ぶ（最近選んだ順）。
       // 打ち間違いで請求書が2つに割れないようにするため。
       function syncNameField() {
@@ -4300,10 +4373,20 @@
         var names = C.billableNames(SALES, r.from, r.to);
         var sel = $("invName");
         var cur = UI.invName;
+        // 会社ごとに切り替える。いくら請求するかも並びに出す（開く前に分かる）
         sel.innerHTML = names.length
           ? names
               .map(function (n) {
-                return '<option value="' + esc(n) + '">' + esc(n) + "</option>";
+                var iv = C.buildInvoice(SALES, {
+                  name: n,
+                  from: r.from,
+                  to: r.to,
+                  unpaidOnly: false,
+                  rate: SETTINGS.rate,
+                });
+                return (
+                  '<option value="' + esc(n) + '">' + esc(n) + "　" + C.yen(iv.total) + "</option>"
+                );
               })
               .join("")
           : '<option value="">（この月は請求書送り・ツケがありません）</option>';
@@ -4506,7 +4589,11 @@
               : "") +
             '<div class="iv-sign">' +
             (SETTINGS.hanko
-              ? '<img class="iv-hanko" src="' + esc(SETTINGS.hanko) + '" alt="" />'
+              ? '<img class="iv-hanko hk-' +
+                esc(SETTINGS.hankoSize || "m") +
+                '" src="' +
+                esc(SETTINGS.hanko) +
+                '" alt="" />'
               : "") +
             '<span class="iv-store">' +
             esc(SETTINGS.store || "") +
@@ -4622,6 +4709,53 @@
         inner.style.transform = "scale(" + k + ")";
         wrap.style.height = inner.scrollHeight * k + "px";
       }
+      /* 表の幅の配り方。頭の何列か（日付・名前など）は決め打ちで、
+         残りの列は均等に分ける。こうしないと、日付と時間だけが間延びして
+         肝心の金額が右へ押し込まれる。 */
+      function colGroup(head, cols) {
+        var rest = (100 - head.reduce((a, x) => a + x, 0)) / cols;
+        return (
+          "<colgroup>" +
+          head.map((w) => '<col style="width:' + w + '%">').join("") +
+          Array(cols)
+            .fill('<col style="width:' + rest.toFixed(3) + '%">')
+            .join("") +
+          "</colgroup>"
+        );
+      }
+
+      /* 紙の中の横に長い表を、紙の幅ぴったりまで縮める。
+         列が増えても数字が切れないようにするため（切れた数字は嘘になる）。
+         表そのものは自然な幅で組み、はみ出したぶんだけ縮める。 */
+      function fitWide(rootId) {
+        var root = $(rootId);
+        if (!root) return;
+        root.querySelectorAll(".wide").forEach(function (box) {
+          var t = box.firstElementChild;
+          if (!t) return;
+          t.style.transform = "";
+          box.style.height = "";
+          // まず自然な幅で組んで、本当に必要な幅を測る
+          t.style.tableLayout = "auto";
+          t.style.width = "auto";
+          var avail = box.clientWidth;
+          var need = t.scrollWidth;
+          if (!avail || !need) return;
+          if (need <= avail) {
+            // 入るなら、決めた割り当て（colgroup）で紙いっぱいに配り直す
+            t.style.tableLayout = "fixed";
+            t.style.width = "100%";
+            return;
+          }
+          // 入らないぶんだけ縮める（1文字も切らない）
+          t.style.width = need + "px";
+          var k = avail / need;
+          t.style.transformOrigin = "top left";
+          t.style.transform = "scale(" + k + ")";
+          box.style.height = t.offsetHeight * k + "px";
+        });
+      }
+
       function fitAll() {
         fitSheets("listScale", "listSheets");
         fitSheets("taxScale", "taxSheets");
@@ -4669,6 +4803,10 @@
         ".sh-tbl .c-a{width:88px;text-align:right;font-family:'DM Mono',monospace;}",
         ".sh-tbl .c-m{width:70px;text-align:center;}",
         // 給与一覧（列が多いので細めに）
+        // 横に長い表は、はみ出したぶんだけ縮める（fitWide）。列が増えても数字が切れない。
+        ".wide{overflow:hidden;}",
+        ".wide>table{table-layout:auto;width:auto;min-width:100%;}",
+        ".wide>table td,.wide>table th{white-space:nowrap;overflow:visible;}",
         ".pay-tbl th{font-size:10px;}",
         ".pay-tbl td{font-size:11px;height:24px;}",
         ".pay-tbl .c-n{width:90px;text-align:left;}",
@@ -4777,8 +4915,11 @@
         ".iv-store{font-family:'Noto Serif JP',serif;font-size:10.5px;font-weight:700;",
         "letter-spacing:1px;margin-right:-1px;line-height:1.9;}",
         // 判子＝社名の行に軽く重ねる（角印）。住所や登録番号には掛からない大きさにする。
-        ".iv-hanko{position:absolute;right:-18px;top:-9px;width:36px;height:36px;",
-        "object-fit:contain;opacity:0.95;}",
+        ".iv-hanko{position:absolute;object-fit:contain;opacity:0.95;}",
+        // 大きさは3つから選ぶ。中＝角印16mm相当（今までと同じ）。
+        ".iv-hanko.hk-s{right:-14px;top:-6px;width:28px;height:28px;}",
+        ".iv-hanko.hk-m{right:-18px;top:-9px;width:36px;height:36px;}",
+        ".iv-hanko.hk-l{right:-23px;top:-13px;width:46px;height:46px;}",
         ".iv-shopsub{font-size:10px;line-height:1.9;color:#6a655e;margin-top:2px;}",
         ".iv-bank{font-size:10.5px;line-height:1.8;word-break:keep-all;}",
         ".iv-fh{font-family:'Noto Serif JP',serif;font-size:10.5px;letter-spacing:2px;",
@@ -5002,6 +5143,13 @@
         $("logoPrev").innerHTML = SETTINGS.logo
           ? '<img src="' + esc(SETTINGS.logo) + '" alt="ロゴ">'
           : "なし";
+        $("setHankoSize")
+          .querySelectorAll("[data-hs]")
+          .forEach(function (b) {
+            b.classList.toggle("on", b.getAttribute("data-hs") === (SETTINGS.hankoSize || "m"));
+          });
+        // 判子を入れていない店に、大きさだけ聞いても仕方がない
+        $("rowHankoSize").style.display = SETTINGS.hanko ? "" : "none";
         $("hankoPrev").innerHTML = SETTINGS.hanko
           ? '<img src="' + esc(SETTINGS.hanko) + '" alt="判子">'
           : "なし";
@@ -5895,6 +6043,7 @@
         if (log.length) fitSheets("logScale", "logSheets");
 
         $("paySheets").innerHTML = paySheetHtml(ym, sums);
+        fitWide("paySheets");
         fitSheets("payScale", "paySheets");
       }
 
@@ -5947,6 +6096,24 @@
          「何日出て、何が付いて、何を引いて、いくら渡すか」を紙にする。 */
       function castSheetHtml(st, p) {
         var t = C.paySummary(st, WORKS, SALES, p.from, p.to, { settings: SETTINGS });
+        // ★この人が選んでいない項目は、列ごと出さない。
+        //   （深夜を付けていない店に「深夜」の列、歩合の無い人に「歩合」の列を出さない）
+        var hasNight = !!SETTINGS.nightPay;
+        var hasComm = C.staffUses(st, "rate");
+        var hasCut =
+          C.staffUses(st, "kousei") ||
+          C.staffUses(st, "fine") ||
+          C.staffUses(st, "repay") ||
+          !!SETTINGS.gensen;
+        var dayCols = [
+          { h: "基本", v: (d) => C.comma(d.base) },
+          hasNight ? { h: "深夜", v: (d) => (d.nightAdd ? C.comma(d.nightAdd) : "—") } : null,
+          { h: "バック", v: (d) => C.comma(d.backTotal) },
+          hasComm ? { h: "歩合", v: (d) => (d.commission ? C.comma(d.commission) : "—") } : null,
+          { h: "支給", v: (d) => C.comma(d.gross) },
+          hasCut ? { h: "控除", v: (d) => (d.deduct ? C.comma(d.deduct) : "—") } : null,
+          { h: "差引", b: 1, v: (d) => C.comma(d.net) },
+        ].filter(Boolean);
         var rows = t.rows
           .map(function (w) {
             var d = payDayOf(w);
@@ -5958,29 +6125,66 @@
               esc(C.weekday(w.ymd)) +
               "）</td><td>" +
               (d.minutes ? (d.minutes / 60).toFixed(1) + "h" : "—") +
-              '</td><td class="c-a">' +
-              C.comma(d.base) +
-              '</td><td class="c-a">' +
-              (d.nightAdd ? C.comma(d.nightAdd) : "—") +
-              '</td><td class="c-a">' +
-              C.comma(d.backTotal) +
-              '</td><td class="c-a">' +
-              (d.commission ? C.comma(d.commission) : "—") +
-              '</td><td class="c-a">' +
-              C.comma(d.gross) +
-              '</td><td class="c-a">' +
-              (d.deduct ? C.comma(d.deduct) : "—") +
-              '</td><td class="c-a"><b>' +
-              C.comma(d.net) +
-              "</b></td></tr>"
+              "</td>" +
+              dayCols
+                .map(function (c) {
+                  var v = c.v(d);
+                  return '<td class="c-a">' + (c.b ? "<b>" + v + "</b>" : v) + "</td>";
+                })
+                .join("") +
+              "</tr>"
             );
           })
           .join("");
-        var uchiwake = [];
-        if (t.fine) uchiwake.push("罰金 " + C.yen(t.fine));
-        if (t.kousei) uchiwake.push("厚生費 " + C.yen(t.kousei));
-        if (t.repay) uchiwake.push("前借りの返済 " + C.yen(t.repay));
-        if (t.gensen) uchiwake.push("源泉 " + C.yen(t.gensen));
+        // バックの内訳。合計だけだと「場内指名を打ったのに、どこにも出ない」になる。
+        // 選んだ項目は0でも出す＝紙の形が毎月変わらない。
+        var backRows = Object.keys(t.backAmts).map(function (key) {
+          var k = C.backKinds(SETTINGS).filter(function (x) {
+            return x.key === key;
+          })[0];
+          // 数の出し方は決め方で変わる。
+          //   ％で決めている種類＝本数は打たないので、売った額を出す（0本と嘘をつかない）
+          //   1日1回の種類（同伴）＝「◯回」
+          //   それ以外＝「◯本」
+          var isPct = C.num((st.backPct || {})[key]) > 0;
+          var n = isPct
+            ? C.comma(t.amounts[key] || 0) + " 円ぶん"
+            : (t.counts[key] || 0) + (k && k.once ? " 回" : " 本");
+          return (
+            '<div class="fb-row">' +
+            esc((k && k.label) || key) +
+            '<span class="fb-c">' +
+            esc(n) +
+            '</span><span class="fb-v">' +
+            C.comma(t.backAmts[key]) +
+            "</span></div>"
+          );
+        });
+        // 支給と控除の内訳。この人が選んでいる項目は 0 でも必ず行を出す
+        //（去年の紙と形が変わらない＝どこを見ればいいか毎回同じ）。
+        var moneyRow = function (label, v, sub) {
+          return (
+            '<div class="fb-row">' +
+            esc(label) +
+            (sub ? '<span class="fb-c">' + esc(sub) + "</span>" : "") +
+            '<span class="fb-v">' +
+            C.comma(v) +
+            "</span></div>"
+          );
+        };
+        var payRows = [moneyRow("基本", t.base)];
+        if (SETTINGS.nightPay) payRows.push(moneyRow("深夜割増", t.nightAdd));
+        payRows.push(moneyRow("バック", t.backTotal));
+        if (C.staffUses(st, "rate")) payRows.push(moneyRow("歩合", t.commission));
+        if (C.staffUses(st, "guarantee"))
+          payRows.push(moneyRow("最低保証で足した分", t.guaranteeAdd));
+        payRows.push(moneyRow("合計", t.gross));
+        var cutRows = [];
+        if (C.staffUses(st, "kousei")) cutRows.push(moneyRow("厚生費", t.kousei));
+        if (C.staffUses(st, "fine")) cutRows.push(moneyRow("罰金", t.fine));
+        if (C.staffUses(st, "repay")) cutRows.push(moneyRow("前借りの返済", t.repay));
+        if (SETTINGS.gensen) cutRows.push(moneyRow("源泉", t.gensen));
+        cutRows.push(moneyRow("合計", t.deduct));
         var bal = C.lendBalance(st, WORKS, p.to);
         return (
           '<div class="sheet">' +
@@ -5996,35 +6200,52 @@
           " 締め</span><span>お渡し " +
           esc(C.jpDate(p.payYmd)) +
           "</span></div></div>" +
-          '<table class="sh-tbl pay-tbl"><thead><tr>' +
-          "<th>日付</th><th>時間</th><th>基本</th><th>深夜</th><th>バック</th><th>歩合</th>" +
-          "<th>支給</th><th>控除</th><th>差引</th></tr></thead><tbody>" +
-          (rows || '<tr><td colspan="9">この期間の出勤はありません</td></tr>') +
+          '<div class="wide"><table class="sh-tbl pay-tbl">' +
+          colGroup([13, 9], dayCols.length) +
+          "<thead><tr><th>日付</th><th>時間</th>" +
+          dayCols
+            .map(function (c) {
+              return "<th>" + esc(c.h) + "</th>";
+            })
+            .join("") +
+          "</tr></thead><tbody>" +
+          (rows ||
+            '<tr><td colspan="' + (2 + dayCols.length) + '">この期間の出勤はありません</td></tr>') +
           "</tbody><tfoot><tr><td>合計</td><td>" +
           (t.minutes / 60).toFixed(1) +
-          'h</td><td class="c-a">' +
-          C.comma(t.base) +
-          '</td><td class="c-a">' +
-          (t.nightAdd ? C.comma(t.nightAdd) : "—") +
-          '</td><td class="c-a">' +
-          C.comma(t.backTotal) +
-          '</td><td class="c-a">' +
-          (t.commission ? C.comma(t.commission) : "—") +
-          '</td><td class="c-a"><b>' +
-          C.comma(t.gross) +
-          '</b></td><td class="c-a"><b>' +
-          C.comma(t.deduct) +
-          '</b></td><td class="c-a"><b>' +
-          C.comma(t.net) +
-          "</b></td></tr></tfoot></table>" +
+          "h</td>" +
+          dayCols
+            .map(function (c) {
+              return '<td class="c-a"><b>' + c.v(t) + "</b></td>";
+            })
+            .join("") +
+          "</tr></tfoot></table></div>" +
           '<div class="pay-sub">お渡しする額　' +
           C.yen(t.unpaidNet) +
           (t.paidNet ? "　（渡し済み " + C.yen(t.paidNet) + "）" : "") +
           "</div>" +
-          (uchiwake.length
-            ? '<div class="sm-note">控除の内訳　' + esc(uchiwake.join("　／　")) + "</div>"
+          // 内訳は横に3つ並べる（縦に積むとA4に入らない）
+          '<div class="sh-boxes">' +
+          '<div class="fb"><div class="fb-h">バックの内訳</div>' +
+          (backRows.join("") || '<div class="fb-row">—</div>') +
+          '<div class="fb-row"><b>合計</b><span class="fb-v"><b>' +
+          C.comma(t.backTotal) +
+          "</b></span></div></div>" +
+          '<div class="fb"><div class="fb-h">支給の内訳</div>' +
+          payRows.join("") +
+          "</div>" +
+          // 何も引かない人には「控除の内訳」の枠ごと出さない
+          (hasCut
+            ? '<div class="fb"><div class="fb-h">控除の内訳</div>' + cutRows.join("") + "</div>"
             : "") +
-          (bal ? '<div class="sm-note">前借りの残り　' + C.yen(bal) + "</div>" : "") +
+          "</div>" +
+          (C.staffUses(st, "lend")
+            ? '<div class="sm-note">この期間の前借り　' +
+              C.yen(t.lend) +
+              "　／　前借りの残り　" +
+              C.yen(bal) +
+              "（控除ではありません）</div>"
+            : "") +
           "</div>"
         );
       }
@@ -6034,6 +6255,8 @@
         $("castLabel").textContent = st.name + " に渡す明細";
         $("castSheets").innerHTML = castSheetHtml(st, { from: from, to: to, payYmd: payYmd });
         $("castBox").style.display = "";
+        // 幅は「画面に出してから」測る。隠れている間は幅が0で、配り直しができない。
+        fitWide("castSheets");
         fitSheets("castScale", "castSheets");
         $("castBox").scrollIntoView({ block: "start" });
       }
@@ -6063,7 +6286,10 @@
                   esc(st.id) +
                   '"' +
                   (i === alive.length - 1 ? " disabled" : "") +
-                  ">↓</button></div></div>"
+                  ">↓</button></div>" +
+                  '<button class="btn btn-ghost btn-danger btn-sm" type="button" data-stdel="' +
+                  esc(st.id) +
+                  '" style="flex:0 0 auto">外す</button></div>'
                 );
               })
               .join("")
@@ -6073,6 +6299,14 @@
           .forEach(function (el) {
             el.onclick = function () {
               openStaff(el.getAttribute("data-staff"));
+            };
+          });
+        $("staffList")
+          .querySelectorAll("[data-stdel]")
+          .forEach(function (b) {
+            b.onclick = function (ev) {
+              ev.stopPropagation();
+              askRemoveStaff(b.getAttribute("data-stdel"));
             };
           });
         $("staffList")
@@ -6151,7 +6385,9 @@
                   esc(x.honor) +
                   "</div>" +
                   (x.person ? '<div class="li-sub">' + esc(x.person) + "</div>" : "") +
-                  "</div></div>"
+                  '</div><button class="btn btn-ghost btn-danger btn-sm" type="button" data-ptdel="' +
+                  esc(x.name) +
+                  '" style="flex:0 0 auto">消す</button></div>'
                 );
               })
               .join("")
@@ -6161,6 +6397,14 @@
           .forEach(function (el) {
             el.onclick = function () {
               openPartner(el.getAttribute("data-pt"));
+            };
+          });
+        $("partnerList")
+          .querySelectorAll("[data-ptdel]")
+          .forEach(function (b) {
+            b.onclick = function (ev) {
+              ev.stopPropagation();
+              askDeletePartner(b.getAttribute("data-ptdel"));
             };
           });
       }
@@ -6435,8 +6679,11 @@
 
       /* スタッフの登録・修正 */
       function openStaff(id) {
-        var cur = staffById(id) || C.normalizeStaff({ name: "" });
         var isNew = !staffById(id);
+        // 足したばかりの人は「なし」から選ぶ（店ごとに使う物が違うので、全部出しても迷うだけ）。
+        // 前からいる人の use は空＝全部オンのまま。既にいる人の数字は変えない。
+        var cur =
+          staffById(id) || C.normalizeStaff({ name: "", use: C.emptyUse(C.backKinds(SETTINGS)) });
         var numRow = function (label, key, val, ph) {
           return (
             '<div class="frow" id="st_row_' +
@@ -6476,7 +6723,7 @@
               })
               .join("") +
             "</div>" +
-            '<span class="hint">この人に使う物だけ選びます。外した項目は、出勤を入れるときも出ません（打ってある実績は消えません）。</span></div>' +
+            '<span class="hint">この人に使う物だけ選びます。選ぶと、下に決める欄が出ます。外した項目は、出勤を入れるときも出ません（打ってある実績は消えません）。</span></div>' +
             numRow("時給", "hourly", cur.hourly, "例）1200") +
             numRow("日給（時給の代わり）", "daily", cur.daily, "例）10000") +
             '<div class="frow" id="st_row_backs"><span class="flabel">バックの決め方</span>' +
@@ -6775,13 +7022,14 @@
               })
               .join("") +
             "</select></div>" +
+            // 時計の輪っかを回さずに、テンキーで 2000 と打てば 20:00 になる
             '<div class="frow"><span class="flabel">出勤 〜 退勤</span><div class="f2">' +
-            '<input class="finput" type="time" id="wk_in" value="' +
+            '<input class="finput" type="text" inputmode="numeric" id="wk_in" placeholder="20:00" value="' +
             esc(cur ? cur.inAt : "") +
             '">' +
-            '<input class="finput" type="time" id="wk_out" value="' +
+            '<input class="finput" type="text" inputmode="numeric" id="wk_out" placeholder="1:00" value="' +
             esc(cur ? cur.outAt : "") +
-            '"></div></div>' +
+            '"></div><span class="hint">2000 と打てば 20:00 になります。</span></div>' +
             BACK_KINDS()
               .map(function (k) {
                 return (
@@ -6798,6 +7046,17 @@
                   k.key +
                   '" class="picked"></div></div></div>' +
                   numRow(k.label + "（本数）", "c_" + k.key, cur ? cur.count[k.key] : 0) +
+                  // 1日に1回しかない物（同伴）は、本数を聞かずに あり／なし で入れる
+                  '<div class="frow" id="wk_row_o_' +
+                  k.key +
+                  '"><span class="flabel">' +
+                  esc(k.label) +
+                  '</span><div class="chips" id="wk_once_' +
+                  k.key +
+                  '">' +
+                  '<button class="chip chip-sm" type="button" data-once="1">あり</button>' +
+                  '<button class="chip chip-sm" type="button" data-once="0">なし</button>' +
+                  "</div></div>" +
                   '<div id="wk_row_a_' +
                   k.key +
                   '">' +
@@ -6835,6 +7094,13 @@
                 '<button class="btn btn-ghost btn-danger btn-sm" id="wk_del">この出勤を消す</button></div>'
               : "")
         );
+        // 打ち終わった瞬間に 20:00 の形へ直す（保存するまで気付かない、を無くす）
+        ["wk_in", "wk_out"].forEach(function (id) {
+          $(id).onblur = function () {
+            var t = C.normalizeTime($(id).value);
+            if (t) $(id).value = t;
+          };
+        });
         // 押した銘柄 { 商品id: 本数 }。ボタンを押すたびに増える。
         var picks = Object.assign({}, (cur && cur.picks) || {});
         // 選んだ人の「使う項目」だけを出す。銘柄は押すだけ、手打ちは補助。
@@ -6853,7 +7119,23 @@
             $("wk_row_p_" + k.key).style.display = on && list.length ? "" : "none";
             // 本数は「円で決めていて、押すボタンが無い種類」だけ手で打つ
             // （ボタンがあるのに本数の欄も出すと、どっちで入れるのか分からなくなる）
-            $("wk_row_c_" + k.key).style.display = on && !isPct && !list.length ? "" : "none";
+            var typeCount = on && !isPct && !list.length;
+            // 同伴のような「1日1回」の物は、本数の代わりに あり／なし を出す。
+            // 数字は今までどおり wk_c_ に入れる＝保存も計算も1本のまま。
+            $("wk_row_c_" + k.key).style.display = typeCount && !k.once ? "" : "none";
+            $("wk_row_o_" + k.key).style.display = typeCount && k.once ? "" : "none";
+            if (typeCount && k.once) {
+              var cn = C.num($("wk_c_" + k.key).value) > 0 ? "1" : "0";
+              $("wk_once_" + k.key)
+                .querySelectorAll("[data-once]")
+                .forEach(function (b) {
+                  b.classList.toggle("on", b.getAttribute("data-once") === cn);
+                  b.onclick = function () {
+                    $("wk_c_" + k.key).value = b.getAttribute("data-once");
+                    syncKinds();
+                  };
+                });
+            }
             // 登録していない物の金額は、％の種類だけ
             $("wk_row_a_" + k.key).style.display = on && isPct ? "" : "none";
             if (!on || !list.length) return;
@@ -6938,8 +7220,8 @@
             id: cur ? cur.id : "",
             ymd: UI.payYmd,
             staffId: $("wk_staff").value,
-            inAt: $("wk_in").value,
-            outAt: $("wk_out").value,
+            inAt: C.normalizeTime($("wk_in").value),
+            outAt: C.normalizeTime($("wk_out").value),
             count: back,
             amount: amt,
             picks: picks,
@@ -7089,45 +7371,144 @@
       }
 
       /* 給料のA4（月のまとめ） */
+      /* 給与一覧（A4・その月の全員）
+         ★列は「店で選んでいる項目」を全部出す。誰も選んでいない項目だけ出さない。
+           場内指名を打ったのに列が無い、といった取りこぼしを作らないため。
+         ★横に長くなっても fitWide が紙の幅まで縮めるので、数字は切れない。 */
       function paySheetHtml(ym, sums) {
+        var kinds = C.usedKinds(STAFF, SETTINGS);
+        // その項目を1人でも使っているか（誰も使わない列は紙を汚すだけなので出さない）
+        var anyUse = function (key) {
+          return C.aliveStaff(STAFF).some(function (st) {
+            return C.staffUses(st, key);
+          });
+        };
+        var yen = function (v) {
+          return C.comma(v);
+        };
+        // 列の決まり。{ h:見出し, cls:並べ方, v:1人ぶん, t:合計, b:太字 }
+        var cols = [
+          { h: "日数", cls: "c-p", v: (t) => t.days, t: (o) => o.days },
+          {
+            h: "時間",
+            cls: "c-p",
+            v: (t) => (t.minutes / 60).toFixed(1),
+            t: (o) => (o.minutes / 60).toFixed(1),
+          },
+        ];
+        kinds.forEach(function (k) {
+          cols.push({
+            h: k.label,
+            cls: "c-p",
+            kind: k.key,
+            // ％で決めている人は本数を打たない。その人のマスは「売った額」を出す。
+            //（0本と出すと、売っていないように見えて嘘になる）
+            v: function (t, st) {
+              return C.num((st.backPct || {})[k.key]) > 0
+                ? "¥" + C.comma(t.amounts[k.key] || 0)
+                : t.counts[k.key] || 0;
+            },
+            t: function (o) {
+              return o.counts[k.key] || 0;
+            },
+          });
+        });
+        cols.push({ h: "基本", cls: "c-a", v: (t) => yen(t.base), t: (o) => yen(o.base) });
+        if (SETTINGS.nightPay)
+          cols.push({
+            h: "深夜",
+            cls: "c-a",
+            v: (t) => yen(t.nightAdd),
+            t: (o) => yen(o.nightAdd),
+          });
+        cols.push({
+          h: "バック",
+          cls: "c-a",
+          v: (t) => yen(t.backTotal),
+          t: (o) => yen(o.backTotal),
+        });
+        if (anyUse("rate"))
+          cols.push({
+            h: "歩合",
+            cls: "c-a",
+            v: (t) => yen(t.commission),
+            t: (o) => yen(o.commission),
+          });
+        if (anyUse("guarantee"))
+          cols.push({
+            h: "保証",
+            cls: "c-a",
+            v: (t) => yen(t.guaranteeAdd),
+            t: (o) => yen(o.guaranteeAdd),
+          });
+        cols.push({ h: "支給", cls: "c-a", b: 1, v: (t) => yen(t.gross), t: (o) => yen(o.gross) });
+        if (anyUse("kousei"))
+          cols.push({ h: "厚生費", cls: "c-a", v: (t) => yen(t.kousei), t: (o) => yen(o.kousei) });
+        if (anyUse("fine"))
+          cols.push({ h: "罰金", cls: "c-a", v: (t) => yen(t.fine), t: (o) => yen(o.fine) });
+        if (anyUse("repay"))
+          cols.push({ h: "返済", cls: "c-a", v: (t) => yen(t.repay), t: (o) => yen(o.repay) });
+        if (SETTINGS.gensen)
+          cols.push({ h: "源泉", cls: "c-a", v: (t) => yen(t.gensen), t: (o) => yen(o.gensen) });
+        cols.push({
+          h: "控除",
+          cls: "c-a",
+          b: 1,
+          v: (t) => yen(t.deduct),
+          t: (o) => yen(o.deduct),
+        });
+        cols.push({ h: "差引", cls: "c-a", b: 1, v: (t) => yen(t.net), t: (o) => yen(o.net) });
+        if (anyUse("lend"))
+          cols.push({ h: "前借り", cls: "c-a", v: (t) => yen(t.lend), t: (o) => yen(o.lend) });
+        cols.push({
+          h: "渡し済み",
+          cls: "c-a",
+          v: (t) => (t.paidNet ? "−" + yen(t.paidNet) : "0"),
+          t: (o) => (o.paidNet ? "−" + yen(o.paidNet) : "0"),
+        });
+        cols.push({
+          h: "これから渡す",
+          cls: "c-a",
+          b: 1,
+          v: (t) => yen(t.unpaidNet),
+          t: (o) => yen(o.unpaidNet),
+        });
+
+        // 合計は、1人ぶんと同じ形の入れ物にためる（列を足しても合計を書き足さなくていい）
         var tot = {
           days: 0,
           minutes: 0,
-          shimei: 0,
-          douhan: 0,
+          counts: {},
+          amounts: {},
           base: 0,
+          nightAdd: 0,
           backTotal: 0,
           commission: 0,
+          guaranteeAdd: 0,
           gross: 0,
-          fine: 0,
           kousei: 0,
+          fine: 0,
           repay: 0,
           gensen: 0,
-          nightAdd: 0,
           deduct: 0,
           net: 0,
+          lend: 0,
           paidNet: 0,
           unpaidNet: 0,
         };
         sums.forEach(function (x) {
-          tot.paidNet += x.t.paidNet;
-          tot.unpaidNet += x.t.unpaidNet;
-          tot.days += x.t.days;
-          tot.minutes += x.t.minutes;
-          tot.shimei += x.t.counts.shimei || 0;
-          tot.douhan += x.t.counts.douhan || 0;
-          tot.base += x.t.base;
-          tot.backTotal += x.t.backTotal;
-          tot.commission += x.t.commission;
-          tot.gross += x.t.gross;
-          tot.fine += x.t.fine;
-          tot.kousei += x.t.kousei;
-          tot.repay += x.t.repay;
-          tot.gensen += x.t.gensen;
-          tot.nightAdd += x.t.nightAdd;
-          tot.deduct += x.t.deduct;
-          tot.net += x.t.net;
+          Object.keys(tot).forEach(function (k) {
+            if (k === "counts" || k === "amounts") return;
+            tot[k] += x.t[k] || 0;
+          });
+          kinds.forEach(function (k) {
+            tot.counts[k.key] = (tot.counts[k.key] || 0) + (x.t.counts[k.key] || 0);
+            tot.amounts[k.key] = (tot.amounts[k.key] || 0) + (x.t.amounts[k.key] || 0);
+          });
         });
+        var cell = function (c, val) {
+          return '<td class="' + c.cls + '">' + (c.b ? "<b>" + val + "</b>" : val) + "</td>";
+        };
         return (
           '<div class="sheet">' +
           '<div class="sh-head"><div class="sh-store">' +
@@ -7136,81 +7517,42 @@
           '<div class="sh-meta"><span>' +
           esc(C.jpMonth(ym)) +
           "分</span></div></div>" +
-          '<table class="sh-tbl pay-tbl"><thead><tr>' +
-          "<th>名前</th><th>日数</th><th>時間</th><th>本指名</th><th>同伴</th>" +
-          "<th>基本</th><th>バック</th><th>歩合</th><th>支給</th><th>控除</th><th>差引</th>" +
-          "<th>渡し済み</th><th>これから渡す</th>" +
+          '<div class="wide"><table class="sh-tbl pay-tbl">' +
+          colGroup([11, 5.5, 6.5], cols.length - 2) +
+          "<thead><tr><th>名前</th>" +
+          cols
+            .map(function (c) {
+              return "<th>" + esc(c.h) + "</th>";
+            })
+            .join("") +
           "</tr></thead><tbody>" +
           (sums.length
             ? sums
                 .map(function (x) {
-                  var t = x.t;
                   return (
                     '<tr><td class="c-n">' +
                     esc(x.st.name) +
-                    '</td><td class="c-p">' +
-                    t.days +
-                    '</td><td class="c-p">' +
-                    (t.minutes / 60).toFixed(1) +
-                    '</td><td class="c-p">' +
-                    (t.counts.shimei || 0) +
-                    '</td><td class="c-p">' +
-                    (t.counts.douhan || 0) +
-                    '</td><td class="c-a">' +
-                    C.comma(t.base) +
-                    '</td><td class="c-a">' +
-                    C.comma(t.backTotal) +
-                    '</td><td class="c-a">' +
-                    C.comma(t.commission) +
-                    '</td><td class="c-a">' +
-                    C.comma(t.gross) +
-                    '</td><td class="c-a">' +
-                    C.comma(t.deduct) +
-                    '</td><td class="c-a"><b>' +
-                    C.comma(t.net) +
-                    '</b></td><td class="c-a">' +
-                    (t.paidNet ? "−" + C.comma(t.paidNet) : "0") +
-                    '</td><td class="c-a"><b>' +
-                    C.comma(t.unpaidNet) +
-                    "</b></td></tr>"
+                    "</td>" +
+                    cols
+                      .map(function (c) {
+                        return cell(c, c.v(x.t, x.st));
+                      })
+                      .join("") +
+                    "</tr>"
                   );
                 })
                 .join("")
-            : '<tr><td colspan="13" style="text-align:center;color:#888">この月は出勤がありません</td></tr>') +
-          "</tbody><tfoot><tr>" +
-          '<td class="c-n"><b>合計</b></td><td class="c-p">' +
-          tot.days +
-          '</td><td class="c-p">' +
-          (tot.minutes / 60).toFixed(1) +
-          '</td><td class="c-p">' +
-          tot.shimei +
-          '</td><td class="c-p">' +
-          tot.douhan +
-          '</td><td class="c-a">' +
-          C.comma(tot.base) +
-          '</td><td class="c-a">' +
-          C.comma(tot.backTotal) +
-          '</td><td class="c-a">' +
-          C.comma(tot.commission) +
-          '</td><td class="c-a"><b>' +
-          C.comma(tot.gross) +
-          '</b></td><td class="c-a"><b>' +
-          C.comma(tot.deduct) +
-          '</b></td><td class="c-a"><b>' +
-          C.comma(tot.net) +
-          '</b></td><td class="c-a"><b>' +
-          (tot.paidNet ? "−" + C.comma(tot.paidNet) : "0") +
-          '</b></td><td class="c-a"><b>' +
-          C.comma(tot.unpaidNet) +
-          "</b></td></tr></tfoot></table>" +
-          '<div class="pay-sub">控除の内訳　罰金 ' +
-          C.yen(tot.fine) +
-          "　／　厚生費 " +
-          C.yen(tot.kousei) +
-          "　／　前借りの返済 " +
-          C.yen(tot.repay) +
-          (tot.gensen ? "　／　源泉 " + C.yen(tot.gensen) : "") +
-          "</div>" +
+            : '<tr><td colspan="' +
+              (1 + cols.length) +
+              '" style="text-align:center;color:#888">この月は出勤がありません</td></tr>') +
+          '</tbody><tfoot><tr><td class="c-n"><b>合計</b></td>' +
+          cols
+            .map(function (c) {
+              return '<td class="' + c.cls + '"><b>' + c.t(tot) + "</b></td>";
+            })
+            .join("") +
+          "</tr></tfoot></table></div>" +
+          // 内訳は列で全部出しているので、下は読み方の一言だけ
           '<div class="sm-note">支給＝基本' +
           (tot.nightAdd ? "＋深夜割増" : "") +
           "＋バック＋歩合（最低保証がある人は高い方）。控除＝罰金＋厚生費＋前借りの返済" +
@@ -7550,10 +7892,6 @@
           }
           UI.inName = v;
         };
-        $("invName").onchange = function () {
-          UI.invName = $("invName").value;
-          renderInv();
-        };
         $("invTpl")
           .querySelectorAll("[data-tpl]")
           .forEach(function (b) {
@@ -7561,6 +7899,21 @@
               SETTINGS.tpl = b.getAttribute("data-tpl");
               saveSettings();
               renderInv();
+              fitSheets("invScale", "invSheets");
+            };
+          });
+        $("invName").onchange = function () {
+          UI.invName = $("invName").value;
+          renderInv();
+          fitSheets("invScale", "invSheets");
+        };
+        $("setHankoSize")
+          .querySelectorAll("[data-hs]")
+          .forEach(function (b) {
+            b.onclick = function () {
+              SETTINGS.hankoSize = b.getAttribute("data-hs");
+              saveSettings();
+              renderAll();
               fitSheets("invScale", "invSheets");
             };
           });
