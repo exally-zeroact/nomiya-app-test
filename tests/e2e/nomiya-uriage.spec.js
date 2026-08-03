@@ -5305,3 +5305,152 @@ test.describe("⑱ 選んでいない項目は紙に出さない", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
+
+/* ⑲ Castally の名前・アイコン・ホーム画面（PWA） */
+test.describe("⑲ Castally", () => {
+  test("頭の帯は Castally。押す物は枠で押せると分かる", async ({ page }) => {
+    const errors = await open(page);
+    await expect(page.locator(".app-logo")).toHaveText("Castally");
+    await expect(page.locator(".app-title")).toHaveText("売上管理");
+    expect(await page.title()).toBe("Castally — 売上管理");
+    // 帯は濃紺、ロゴは金
+    const hd = await page.locator(".app-header").evaluate((el) => {
+      const s = getComputedStyle(el);
+      const l = getComputedStyle(el.querySelector(".app-logo"));
+      return { bg: s.backgroundColor, logo: l.color, font: l.fontFamily };
+    });
+    expect(hd.bg).toBe("rgb(7, 15, 34)");
+    expect(hd.logo).toBe("rgb(233, 201, 127)");
+    expect(hd.font.toLowerCase()).toContain("georgia");
+
+    // ボタンとチップに枠がある（面がうすいので、枠が唯一の手がかり）
+    const btn = await page.locator("#btnSave").evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { w: s.borderTopWidth, c: s.borderTopColor, bg: s.backgroundColor };
+    });
+    expect(parseFloat(btn.w)).toBeGreaterThanOrEqual(1.5);
+    expect(btn.bg).toBe("rgb(231, 236, 245)");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("選んだチップは、面ではなく枠で分かる", async ({ page }) => {
+    const errors = await open(page);
+    await page.locator("#payChips button[data-pay='tsuke']").click();
+    // 押した見た目は 0.12 秒かけて変わる。途中の値を読むと途中の色が返る。
+    await page.waitForTimeout(300);
+    const on = await page.locator("#payChips button[data-pay='tsuke']").evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { w: parseFloat(s.borderTopWidth), c: s.borderTopColor, bg: s.backgroundColor };
+    });
+    const off = await page.locator("#payChips button[data-pay='cash']").evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { w: parseFloat(s.borderTopWidth), c: s.borderTopColor, bg: s.backgroundColor };
+    });
+    // 選んだ方が太いか、枠の色が違う（面だけの違いにしない）
+    expect(on.w > off.w || on.c !== off.c, "選択中と未選択が枠で見分けられない").toBe(true);
+    expect(on.w).toBeGreaterThanOrEqual(2);
+    expect(on.c).toBe("rgb(15, 23, 40)");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("ホーム画面に追加できる（manifest とアイコン）", async ({ page, request }) => {
+    const errors = await open(page);
+    await expect(page.locator('link[rel="manifest"]')).toHaveAttribute("href", "/manifest.json");
+    await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#070F22");
+    await expect(page.locator('meta[name="apple-mobile-web-app-title"]')).toHaveAttribute(
+      "content",
+      "Castally"
+    );
+    await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute(
+      "href",
+      "/icons/apple-touch-icon.png"
+    );
+
+    const m = await (await request.get("/manifest.json")).json();
+    expect(m.name).toBe("Castally");
+    expect(m.short_name).toBe("Castally");
+    expect(m.display).toBe("standalone");
+    expect(m.theme_color).toBe("#070F22");
+    expect(m.background_color).toBe("#F6F7FA");
+    expect(m.icons.map((i) => i.sizes).sort()).toEqual(["192x192", "512x512", "512x512"]);
+    expect(
+      m.icons.some((i) => i.purpose === "maskable"),
+      "maskable が無い"
+    ).toBe(true);
+
+    // 絵が本当に置いてあって、言った大きさで入っている
+    for (const [src, size] of [
+      ["/icons/icon-192.png", 192],
+      ["/icons/icon-512.png", 512],
+      ["/icons/icon-maskable-512.png", 512],
+      ["/icons/apple-touch-icon.png", 180],
+    ]) {
+      const res = await request.get(src);
+      expect(res.status(), src + " が無い").toBe(200);
+      const dim = await page.evaluate(
+        (u) =>
+          new Promise((r) => {
+            const i = new Image();
+            i.onload = () => r([i.width, i.height]);
+            i.onerror = () => r([0, 0]);
+            i.src = u;
+          }),
+        src
+      );
+      expect(dim, src + " の大きさが違う").toEqual([size, size]);
+    }
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★端末に住み着く物（Service Worker）は入れない", async ({ page }) => {
+    const errors = await open(page);
+    const n = await page.evaluate(async () => {
+      if (!navigator.serviceWorker) return 0;
+      const rs = await navigator.serviceWorker.getRegistrations();
+      return rs.length;
+    });
+    expect(n, "Service Worker が登録されている（pushで直せなくなる）").toBe(0);
+    const html = await page.content();
+    expect(/serviceWorker\s*\.\s*register/.test(html), "SWを登録する書き方が残っている").toBe(
+      false
+    );
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★A4の紙5種は、今までどおり白地に黒（見出しの帯だけ濃紺）", async ({ page }) => {
+    const errors = await open(page);
+    await seed(page);
+    // 売上帳
+    await goto(page, "list");
+    const paper = async (sel) =>
+      await page
+        .locator(sel + " .sheet")
+        .first()
+        .evaluate((el) => {
+          const s = getComputedStyle(el);
+          const head = el.querySelector(".sh-head") || el.querySelector(".iv-title");
+          return {
+            bg: s.backgroundColor,
+            color: s.color,
+            band: head ? getComputedStyle(head).borderBottomColor : "",
+          };
+        });
+    const list = await paper("#listSheets");
+    expect(list.bg, "紙が白でない").toBe("rgb(255, 255, 255)");
+    expect(list.color, "紙の字が黒でない").toBe("rgb(0, 0, 0)");
+    expect(list.band, "見出しの帯が濃紺でない").toBe("rgb(10, 17, 40)");
+    // 税理士の紙
+    await goto(page, "tax");
+    expect((await paper("#taxSheets")).bg).toBe("rgb(255, 255, 255)");
+    // 請求書
+    await setInvMonth(page, "2026-07");
+    expect((await paper("#invSheets")).bg).toBe("rgb(255, 255, 255)");
+    // 日報（締め）
+    await goto(page, "close");
+    expect((await paper("#closeSheets")).bg).toBe("rgb(255, 255, 255)");
+    // 給与一覧
+    await goto(page, "pay");
+    expect((await paper("#paySheets")).bg).toBe("rgb(255, 255, 255)");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
