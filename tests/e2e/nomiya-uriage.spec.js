@@ -5474,3 +5474,186 @@ test.describe("⑲ Castally", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
+
+/* ⑳ 回収予定日（いつまでにもらう約束か） */
+test.describe("⑳ 回収予定日", () => {
+  async function inv(page, seg) {
+    await goto(page, "inv");
+    await page.locator(`#invSeg [data-iseg='${seg}']`).click();
+    await expect(page.locator(`#pane-${seg}`)).toBeVisible();
+  }
+  test("決めていない店は今までどおり（期限は出ない・止めない）", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, {
+      date: "2026-07-01",
+      name: "田中",
+      people: 2,
+      amount: 10000,
+      pay: "tsuke",
+    });
+    await inv(page, "due");
+    await expect(page.locator("[data-due-name='田中']")).toContainText("¥10,000");
+    await expect(page.locator("#dueList")).not.toContainText("まで");
+    await expect(page.locator("#dueStrip")).toContainText("一番古い");
+    // 並べ替えのチップは在るが、押しても壊れない
+    await page.locator("#dueOrder [data-do='due']").click();
+    await expect(page.locator("[data-due-name='田中']")).toBeVisible();
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("会社ごとに「いつまでにもらう」を決めると、未回収に期限が出る", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, {
+      date: "2026-07-10",
+      name: "山本商事",
+      people: 4,
+      amount: 32000,
+      pay: "invoice",
+      receipt: true,
+    });
+    // 宛先に「翌月末」を決める
+    await gotoSet(page, "partner");
+    await page.locator("#partnerList [data-pt]").first().click();
+    await page.locator("#ptTerm [data-tk='nextEom']").click();
+    // 日数の欄は「翌月末」では出さない
+    await expect(page.locator("#ptTermN")).toBeHidden();
+    await page.locator("#ptOk").click();
+
+    await inv(page, "due");
+    // 7/10 の売上 → 翌月末＝8/31
+    await expect(page.locator("[data-due-name='山本商事']")).toContainText("8/31まで");
+    // 開き直しても消えない
+    await page.reload({ waitUntil: "load" });
+    await inv(page, "due");
+    await expect(page.locator("[data-due-name='山本商事']")).toContainText("8/31まで");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("ツケは店ぜんぶ共通で決める（歯車 → お店の決め方）", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, {
+      date: "2026-07-01",
+      name: "田中",
+      people: 2,
+      amount: 10000,
+      pay: "tsuke",
+    });
+    await gotoSet(page, "staff");
+    await page.locator("#ruleTsukeTerm [data-tt='days']").click();
+    await expect(page.locator("#ruleTsukeTermRow")).toBeVisible();
+    await page.locator("#ruleTsukeDays").fill("30");
+    await inv(page, "due");
+    // 7/1 の30日後＝7/31
+    await expect(page.locator("[data-due-name='田中']")).toContainText("7/31まで");
+    // 決め方をやめれば、また期限なしに戻せる（止めない）
+    await gotoSet(page, "staff");
+    await page.locator("#ruleTsukeTerm [data-tt='none']").click();
+    await inv(page, "due");
+    await expect(page.locator("#dueList")).not.toContainText("まで");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("期限が過ぎた分は、赤いタグと「期限が過ぎた」の合計で分かる", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, {
+      date: "2026-01-05",
+      name: "田中",
+      people: 2,
+      amount: 10000,
+      pay: "tsuke",
+    });
+    await gotoSet(page, "staff");
+    await page.locator("#ruleTsukeTerm [data-tt='eom']").click(); // その月の末日＝1/31
+    await inv(page, "due");
+    const tag = page.locator("[data-due-name='田中'] .li-tag");
+    await expect(tag).toContainText("期限");
+    await expect(tag).toContainText("日すぎ");
+    await expect(page.locator("#dueStrip")).toContainText("期限が過ぎた");
+    await expect(page.locator("#dueStrip")).toContainText("¥10,000");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("期限が近い順に並べ替えられる", async ({ page }) => {
+    const errors = await open(page);
+    // 田中＝古いが期限は遠い ／ 山本商事＝新しいが期限は近い
+    await addSale(page, {
+      date: "2026-06-01",
+      name: "田中",
+      people: 2,
+      amount: 10000,
+      pay: "tsuke",
+    });
+    await addSale(page, {
+      date: "2026-08-01",
+      name: "山本商事",
+      people: 4,
+      amount: 32000,
+      pay: "invoice",
+      receipt: true,
+    });
+    await gotoSet(page, "staff");
+    await page.locator("#ruleTsukeTerm [data-tt='days']").click();
+    await page.locator("#ruleTsukeDays").fill("120"); // 田中＝6/1の120日後＝9/29
+    await gotoSet(page, "partner");
+    await page.locator("#partnerList [data-pt]").first().click();
+    await page.locator("#ptTerm [data-tk='days']").click();
+    await page.locator("#ptTermDays").fill("5"); // 山本商事＝8/6
+    await page.locator("#ptOk").click();
+
+    const names = () =>
+      page
+        .locator("#dueList [data-due-name]")
+        .evaluateAll((els) => els.map((e) => e.dataset.dueName));
+    await inv(page, "due");
+    expect(await names(), "古い順").toEqual(["田中", "山本商事"]);
+    await page.locator("#dueOrder [data-do='due']").click();
+    expect(await names(), "期限が近い順").toEqual(["山本商事", "田中"]);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("入金で埋まれば、期限からも消える", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, {
+      date: "2026-01-05",
+      name: "田中",
+      people: 2,
+      amount: 10000,
+      pay: "tsuke",
+    });
+    await gotoSet(page, "staff");
+    await page.locator("#ruleTsukeTerm [data-tt='eom']").click();
+    await inv(page, "due");
+    await expect(page.locator("#dueStrip")).toContainText("期限が過ぎた");
+    await page.locator("[data-due-name='田中']").click();
+    await page.locator("#pyDate").fill("2026-02-10");
+    await page.locator("#pyOk").click();
+    await expect(page.locator("#dueList")).toContainText("まだもらってない分はありません");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("約束はクラウドにも残る（打ち直しても消えない）", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, {
+      date: "2026-07-10",
+      name: "山本商事",
+      people: 4,
+      amount: 32000,
+      pay: "invoice",
+      receipt: true,
+    });
+    await gotoSet(page, "partner");
+    await page.locator("#partnerList [data-pt]").first().click();
+    await page.locator("#ptTerm [data-tk='nextDay']").click();
+    await page.locator("#ptTermDays").fill("25");
+    await page.locator("#ptOk").click();
+    await expect
+      .poll(async () => (await cloudRows(page, "nomiya_partners"))[0]?.pay_term?.kind)
+      .toBe("nextDay");
+    await page.evaluate(() => localStorage.removeItem("nomiya_partners_v1"));
+    await page.reload({ waitUntil: "load" });
+    await inv(page, "due");
+    // 7/10 → 翌月25日＝8/25
+    await expect(page.locator("[data-due-name='山本商事']")).toContainText("8/25まで");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});

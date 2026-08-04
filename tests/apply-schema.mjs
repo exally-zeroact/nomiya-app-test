@@ -158,7 +158,7 @@ try {
   const c = await run(
     "select table_name, column_name from information_schema.columns " +
       "where table_schema='public' and table_name like 'nomiya_%' " +
-      "and column_name in ('crew','use_items','picks','back_pct','amount','paid_cash','close_wday','pay_after','birth','adj','paid_amount','pay_from','ord','how','paid_by') order by 1,2"
+      "and column_name in ('crew','use_items','picks','back_pct','amount','paid_cash','close_wday','pay_after','birth','adj','paid_amount','pay_from','ord','how','paid_by','pay_term') order by 1,2"
   );
   console.log("\n  あとから足した列");
   c.forEach((r) => console.log("    " + String(r.table_name).padEnd(18) + r.column_name));
@@ -176,6 +176,7 @@ try {
     ["nomiya_staff", "ord"],
     ["nomiya_payments", "how"],
     ["nomiya_sales", "paid_by"],
+    ["nomiya_partners", "pay_term"],
   ];
   const miss = want.filter(
     ([tb, col]) => !c.some((r) => r.table_name === tb && r.column_name === col)

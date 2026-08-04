@@ -74,12 +74,15 @@ create table if not exists nomiya_partners (
   name         text not null,
   honor        text not null default '御中',
   person       text not null default '',
+  pay_term     jsonb not null default '{"kind":"none","n":0}'::jsonb,  -- いつまでにもらう約束か
   last_used_at timestamptz,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
   deleted_at   timestamptz,
   unique (account_id, name)
 );
+-- 既に作ってある店にも足す
+alter table nomiya_partners add column if not exists pay_term jsonb not null default '{"kind":"none","n":0}'::jsonb;
 create index if not exists idx_nomiya_partners_acct on nomiya_partners(account_id, name);
 
 -- ── 請求書番号の台帳（相手＋期間ごとに1つ） ───────────────────────────

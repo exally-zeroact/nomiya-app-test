@@ -1422,8 +1422,12 @@
         <div class="strip" id="dueStrip"></div>
         <div class="card">
           <div class="card-label">まだもらっていない分</div>
+          <div class="chips" id="dueOrder" style="margin-bottom: 8px">
+            <button class="chip chip-sm on" type="button" data-do="old">古い順</button>
+            <button class="chip chip-sm" type="button" data-do="due">期限が近い順</button>
+          </div>
           <div class="hint" style="margin-bottom: 8px">
-            古い順に並びます。名前を押すと入金を記録できます。
+            名前を押すと入金を記録できます。「いつまでにもらうか」は、会社は宛先の設定、ツケは右上の歯車で決められます。
           </div>
           <div id="dueList"></div>
         </div>
@@ -1622,6 +1626,25 @@
               <button class="chip chip-sm" type="button" data-tk="now">すぐ出す</button>
               <button class="chip chip-sm" type="button" data-tk="collected">回収できてから</button>
             </div>
+          </div>
+
+          <!-- ツケ（会社でない客）の「いつまでにもらう」約束。会社は宛先ごとに決める。 -->
+          <div class="frow">
+            <span class="flabel">ツケはいつまでにもらう（任意）</span>
+            <div class="chips" id="ruleTsukeTerm"></div>
+            <div class="f2" id="ruleTsukeTermRow" style="margin-top: 8px">
+              <input
+                class="finput"
+                type="number"
+                inputmode="numeric"
+                id="ruleTsukeDays"
+                placeholder="30"
+              />
+              <span class="hint" id="ruleTsukeUnit"></span>
+            </div>
+            <span class="hint"
+              >決めておくと、未回収の画面に「いつまでに入るか」と「もう過ぎている分」が出ます。決めなくても今までどおり使えます。</span
+            >
           </div>
 
           <div class="frow">
@@ -1937,6 +1960,8 @@
           backBase: "komi", // ％バックの元 komi=会計そのまま / nuki=税抜 / service=サービス料も抜く
           serviceRate: 0, // サービス料(%)。backBase=service のときだけ使う
           tsukeComm: "now", // ツケの歩合 now=すぐ出す / collected=回収できてから
+          // ツケ（会社でない客）の「いつまでにもらう」約束。店ぜんぶ共通。
+          tsukeTerm: { kind: "none", n: 0 },
           nightPay: false, // 深夜割増を付けるか（既定は付けない＝今までどおり）
           nightRate: 25, // 深夜割増(%)
           gensen: false, // 源泉を引くか（既定は引かない）
@@ -1987,6 +2012,7 @@
         payYmd: "", // 給料はその日の出勤を見る
         listSeg: "list", // 一覧の中の切替 list/sum/tax
         invSeg: "inv", // 請求書の中の切替 inv/due/paid
+        dueOrder: "old", // 未回収の並び old=古い順 / due=期限が近い順
         setSeg: "self", // 設定の中の切替 self/partner/staff/item
         backTo: "input", // 歯車を閉じたときに戻る画面
       };
@@ -3475,7 +3501,7 @@
             "</tbody></table>"
           : '<div class="empty">この期間の売上はまだありません</div>';
 
-        updateBadge(C.receivables(SALES, PAYMENTS, { hideDone: true }).length);
+        updateBadge(C.receivables(SALES, PAYMENTS, dueOpt({ hideDone: true })).length);
       }
 
       function statCard(k, v) {
@@ -3547,8 +3573,22 @@
            充てた結果は持たない＝毎回 C.receivables() が計算する。
            だから入金を消せば、未回収もそのまま元に戻る。
          =================================================================== */
+      /* 未回収に渡す「いつまでにもらう約束」。会社は宛先ごと、ツケは店ぜんぶ共通。
+         ここが唯一の正。画面もバッジも同じ物を使う。 */
+      function dueOpt(extra) {
+        var terms = {};
+        Object.keys(PARTNERS || {}).forEach(function (k) {
+          var p = PARTNERS[k];
+          if (p && !p.deletedAt && p.term) terms[p.name || k] = p.term;
+        });
+        return Object.assign(
+          { today: todayIso(), terms: terms, tsukeTerm: SETTINGS.tsukeTerm },
+          extra || {}
+        );
+      }
+
       function renderDue() {
-        var list = C.receivables(SALES, PAYMENTS, { today: todayIso() });
+        var list = C.receivables(SALES, PAYMENTS, dueOpt({ order: UI.dueOrder }));
         var open = list.filter(function (x) {
           return !x.done;
         });
@@ -3556,10 +3596,27 @@
           return a + x.left;
         }, 0);
         var oldest = open.length ? open[0] : null;
+        var late = open.reduce(function (a, x) {
+          return a + x.overdue;
+        }, 0);
         $("dueStrip").innerHTML =
           stripItem("まだもらってない", C.yen(total)) +
           stripItem("相手", open.length + " 人") +
-          stripItem("一番古い", oldest && oldest.days != null ? oldest.days + " 日前" : "—");
+          // 期限を決めている店だけ「過ぎている分」を出す。決めていない店には出さない。
+          (open.some(function (x) {
+            return x.due;
+          })
+            ? stripItem("期限が過ぎた", C.yen(late))
+            : stripItem("一番古い", oldest && oldest.days != null ? oldest.days + " 日前" : "—"));
+        $("dueOrder")
+          .querySelectorAll("[data-do]")
+          .forEach(function (b) {
+            b.classList.toggle("on", b.getAttribute("data-do") === UI.dueOrder);
+            b.onclick = function () {
+              UI.dueOrder = b.getAttribute("data-do");
+              renderDue();
+            };
+          });
         $("dueList").innerHTML = open.length
           ? open
               .map(function (x) {
@@ -3568,18 +3625,31 @@
                   esc(x.name) +
                   '"><div class="li-main"><div class="li-nm">' +
                   esc(x.name) +
-                  (x.days != null && x.days >= 30
-                    ? '<span class="li-tag" style="background:#fdeee0;color:#92500a">' +
-                      x.days +
-                      "日</span>"
-                    : "") +
+                  // 期限を決めている相手は「期限が過ぎた」を先に出す（30日タグより強い）
+                  (x.overdue > 0
+                    ? '<span class="li-tag" style="background:var(--c-danger-bg);color:var(--c-danger)">期限 ' +
+                      -x.dueIn +
+                      "日すぎ</span>"
+                    : x.days != null && x.days >= 30 && !x.due
+                      ? '<span class="li-tag" style="background:var(--c-warn-bg);color:var(--c-warn)">' +
+                        x.days +
+                        "日</span>"
+                      : "") +
                   '</div><div class="li-sub">' +
                   esc(C.mdShort(x.oldest)) +
                   "から　" +
                   x.count +
                   "件" +
                   (x.paid ? "　入金 " + C.yen(x.paid) : "") +
-                  (x.days != null && x.days < 30 ? "　" + x.days + "日" : "") +
+                  // 期限を決めていれば「◯/◯まで（あと◯日）」。決めていなければ今までどおり日数。
+                  (x.due
+                    ? "　" +
+                      esc(C.mdShort(x.due)) +
+                      "まで" +
+                      (x.dueIn != null && x.dueIn >= 0 ? "（あと" + x.dueIn + "日）" : "")
+                    : x.days != null && x.days < 30
+                      ? "　" + x.days + "日"
+                      : "") +
                   '</div></div><div class="li-amt">' +
                   C.yen(x.left) +
                   "</div></div>"
@@ -4272,6 +4342,23 @@
             '<input class="finput" id="ptPerson" value="' +
             esc(cur.person || "") +
             '" placeholder="例）総務部 山本様"></div>' +
+            // いつまでにもらう約束か。決めなくても今までどおり使える。
+            '<div class="frow"><span class="flabel">いつまでにもらう（任意）</span>' +
+            '<div class="chips" id="ptTerm">' +
+            C.PAY_TERMS.map(function (t) {
+              return (
+                '<button class="chip chip-sm" type="button" data-tk="' +
+                t.key +
+                '">' +
+                esc(t.label) +
+                "</button>"
+              );
+            }).join("") +
+            '</div><div class="f2" id="ptTermN" style="margin-top:8px">' +
+            '<input class="finput" type="number" inputmode="numeric" id="ptTermDays" value="' +
+            esc(cur.term && cur.term.n ? cur.term.n : "") +
+            '" placeholder="30"><span class="hint" id="ptTermUnit"></span></div>' +
+            '<span class="hint">決めておくと、未回収の画面に「いつまでに入るか」と「もう過ぎている分」が出ます。決めなくても使えます。</span></div>' +
             '<div class="err" id="ptErr"></div>' +
             '<div style="margin-top:12px"><button class="btn btn-primary" id="ptOk">保存する</button></div>' +
             (name
@@ -4292,11 +4379,30 @@
             });
         };
         syncHonor();
+        var term = C.normalizeTerm(cur.term);
+        var syncTerm = function () {
+          $("ptTerm")
+            .querySelectorAll("[data-tk]")
+            .forEach(function (b) {
+              b.classList.toggle("on", b.getAttribute("data-tk") === term.kind);
+              b.onclick = function () {
+                term.kind = b.getAttribute("data-tk");
+                syncTerm();
+              };
+            });
+          // 日数を聞くのは「◯日後」と「翌月◯日」のときだけ
+          var need = term.kind === "days" || term.kind === "nextDay";
+          $("ptTermN").style.display = need ? "" : "none";
+          $("ptTermUnit").textContent =
+            term.kind === "days" ? "日後にもらう" : term.kind === "nextDay" ? "日にもらう" : "";
+        };
+        syncTerm();
         $("ptOk").onclick = function () {
           var raw = {
             name: $("ptName").value,
             honor: honor,
             person: $("ptPerson").value,
+            term: { kind: term.kind, n: $("ptTermDays").value },
             lastUsedAt: cur.lastUsedAt || "",
           };
           var v = C.validatePartner(raw);
@@ -5259,6 +5365,35 @@
         var base = SETTINGS.backBase || "komi";
         on("ruleBackBase", "data-bb", base);
         on("ruleTsuke", "data-tk", SETTINGS.tsukeComm || "now");
+        var tt = C.normalizeTerm(SETTINGS.tsukeTerm);
+        $("ruleTsukeTerm").innerHTML = C.PAY_TERMS.map(function (t) {
+          return (
+            '<button class="chip chip-sm' +
+            (t.key === tt.kind ? " on" : "") +
+            '" type="button" data-tt="' +
+            t.key +
+            '">' +
+            esc(t.label) +
+            "</button>"
+          );
+        }).join("");
+        $("ruleTsukeTerm")
+          .querySelectorAll("[data-tt]")
+          .forEach(function (b) {
+            b.onclick = function () {
+              SETTINGS.tsukeTerm = C.normalizeTerm({
+                kind: b.getAttribute("data-tt"),
+                n: $("ruleTsukeDays").value,
+              });
+              saveSettings();
+              renderAll();
+            };
+          });
+        var needN = tt.kind === "days" || tt.kind === "nextDay";
+        $("ruleTsukeTermRow").style.display = needN ? "" : "none";
+        $("ruleTsukeUnit").textContent =
+          tt.kind === "days" ? "日後にもらう" : tt.kind === "nextDay" ? "日にもらう" : "";
+        if (document.activeElement !== $("ruleTsukeDays")) $("ruleTsukeDays").value = tt.n || "";
         on("ruleNight", "data-np", SETTINGS.nightPay ? "1" : "0");
         on("ruleGensen", "data-gs", SETTINGS.gensen ? "1" : "0");
         $("ruleServiceRow").style.display = base === "service" ? "" : "none";
@@ -8153,6 +8288,14 @@
           });
         $("btnPartnerNew").onclick = function () {
           openPartner("");
+        };
+        $("ruleTsukeDays").oninput = function () {
+          SETTINGS.tsukeTerm = C.normalizeTerm({
+            kind: C.normalizeTerm(SETTINGS.tsukeTerm).kind,
+            n: $("ruleTsukeDays").value,
+          });
+          saveSettings();
+          renderAll();
         };
         // お店の給料の決め方。押した瞬間に決まる（保存ボタンを探させない）
         [

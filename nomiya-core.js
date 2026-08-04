@@ -610,6 +610,61 @@
    *  opt.today   … 入れると、一番古い日から何日経ったかを数える
    *  opt.hideDone… 残り0の人を出さない
    */
+  /* ===================================================================
+     支払いの約束（いつまでにもらうか）
+     ─ 店ごと・相手ごとに決める。決めていない店は今までどおり期限なしで動く。
+       「決めていないと使えません」にはしない（止めない）。
+     =================================================================== */
+  var PAY_TERMS = [
+    { key: "none", label: "決めていない" },
+    { key: "days", label: "◯日後" },
+    { key: "eom", label: "その月の末日" },
+    { key: "nextEom", label: "翌月末" },
+    { key: "nextDay", label: "翌月◯日" },
+  ];
+  function normalizeTerm(raw) {
+    var r = raw || {};
+    var kind = String(r.kind || "none");
+    var ok = PAY_TERMS.some(function (x) {
+      return x.key === kind;
+    });
+    if (!ok) kind = "none"; // 知らない決め方は「決めていない」に寄せる
+    return { kind: kind, n: kind === "days" || kind === "nextDay" ? _int(r.n) : 0 };
+  }
+  // その月の末日（2月・うるう年・年またぎで狂わないように、翌月の0日を使う）
+  function _eom(y, m) {
+    return new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  }
+  function _ymd(y, m, d) {
+    return y + "-" + String(m + 1).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+  }
+  /**
+   * dueDate(ymd, term)
+   *  その売上の日から数えて「いつまでにもらう約束か」を出す。
+   *  決めていない・日付が読めないときは空（勝手な期限を作らない）。
+   */
+  function dueDate(ymd, term) {
+    var t = normalizeTerm(term);
+    if (t.kind === "none" || !isIsoDate(ymd)) return "";
+    // ★_dateOf は「その土地の時刻」で作る。ここで getUTC* を使うと時差の分だけ
+    //   月がずれる（日本だと1日前＝前の月になることがある）。必ず地元の年月を読む。
+    var d = _dateOf(ymd);
+    var y = d.getFullYear();
+    var m = d.getMonth();
+    if (t.kind === "days") return addDays(ymd, t.n);
+    if (t.kind === "eom") return _ymd(y, m, _eom(y, m));
+    if (t.kind === "nextEom") {
+      var ny = m === 11 ? y + 1 : y;
+      var nm = m === 11 ? 0 : m + 1;
+      return _ymd(ny, nm, _eom(ny, nm));
+    }
+    // 翌月◯日。その月に無い日（2月31日など）は、その月の末日にする
+    var y2 = m === 11 ? y + 1 : y;
+    var m2 = m === 11 ? 0 : m + 1;
+    var last = _eom(y2, m2);
+    return _ymd(y2, m2, Math.min(Math.max(1, t.n), last));
+  }
+
   function receivables(sales, payments, opt) {
     var o = opt || {};
     var byName = {};
@@ -625,12 +680,15 @@
         byName[n] = { rows: [], paid: 0 };
         order.push(n);
       }
+      // いつまでにもらう約束か。相手ごとの決め方が無ければ、ツケ共通の決め方を使う。
+      var term = (o.terms || {})[n] || (s.pay === "tsuke" ? o.tsukeTerm : null);
       byName[n].rows.push({
         id: s.id,
         date: s.date,
         amount: _int(s.amount),
         applied: 0,
         left: _int(s.amount),
+        due: dueDate(s.date, term),
       });
     });
     (payments || []).forEach(function (p) {
@@ -673,10 +731,37 @@
           (_dateOf(o.today).getTime() - _dateOf(row.oldest).getTime()) / 86400000
         );
       }
+      // まだ残っている売上の中で、一番早い期限。過ぎている分は額と件数で出す。
+      row.due = "";
+      row.dueIn = null;
+      row.overdue = 0;
+      row.overdueCount = 0;
+      g.rows.forEach(function (r) {
+        if (r.left <= 0 || !r.due) return;
+        if (!row.due || r.due < row.due) row.due = r.due;
+        if (isIsoDate(o.today) && r.due < o.today) {
+          row.overdue += r.left;
+          row.overdueCount += 1;
+        }
+      });
+      if (row.due && isIsoDate(o.today)) {
+        row.dueIn = Math.round(
+          (_dateOf(row.due).getTime() - _dateOf(o.today).getTime()) / 86400000
+        );
+      }
       if (o.hideDone && row.done) return;
       out.push(row);
     });
-    // 古い順（一番待たされている相手が上）
+    // 既定は古い順（一番待たされている相手が上）。
+    // order:"due" なら期限が近い順（決めていない相手は後ろ）。
+    if (o.order === "due") {
+      return out.sort(function (a, b) {
+        if (!!a.due !== !!b.due) return a.due ? -1 : 1;
+        if (a.due !== b.due) return a.due < b.due ? -1 : 1;
+        if (a.oldest !== b.oldest) return a.oldest < b.oldest ? -1 : 1;
+        return a.name < b.name ? -1 : 1;
+      });
+    }
     return out.sort(function (a, b) {
       if (a.oldest !== b.oldest) return a.oldest < b.oldest ? -1 : 1;
       return a.name < b.name ? -1 : 1;
@@ -818,6 +903,7 @@
       honor: r.honor === "様" ? "様" : "御中", // 敬称
       person: String(r.person == null ? "" : r.person).trim(), // 担当者
       lastUsedAt: String(r.lastUsedAt == null ? "" : r.lastUsedAt), // 最後に選んだとき
+      term: normalizeTerm(r.term), // いつまでにもらう約束か
       updatedAt: now || new Date().toISOString(),
     };
   }
@@ -2536,6 +2622,7 @@
       name: _s(p.name),
       honor: p.honor === "様" ? "様" : "御中",
       person: _s(p.person),
+      pay_term: normalizeTerm(p.term),
       last_used_at: _ts(p.lastUsedAt),
       updated_at: _ts(p.updatedAt) || nowIso(),
       deleted_at: _ts(p.deletedAt),
@@ -2545,6 +2632,7 @@
     var name = _s(r.name);
     return {
       name: name,
+      term: normalizeTerm(r.pay_term),
       to: name, // 宛名は会社名そのまま（昔のデータだけ to を別に持つ）
       honor: r.honor === "様" ? "様" : "御中",
       person: _s(r.person),
@@ -2840,6 +2928,9 @@
     syncPlanPayments: syncPlanPayments,
     cashPaidOn: cashPaidOn,
     receivables: receivables,
+    PAY_TERMS: PAY_TERMS,
+    normalizeTerm: normalizeTerm,
+    dueDate: dueDate,
     unpaidSales: unpaidSales,
     unpaidByName: unpaidByName,
     unpaidGroups: unpaidGroups,
