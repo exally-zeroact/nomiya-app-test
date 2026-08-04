@@ -8,6 +8,7 @@
    公開API（window.HankoTool）:
      .hasAlpha(dataURL) -> Promise<boolean>          … 既に透過を持っているか
      .whiteToTransparent(dataURL, threshold) -> Promise<dataURL(PNG)>  … 白〜薄い背景を透過
+     .trim(dataURL) -> Promise<dataURL(PNG)>        … まわりの透明な余白を切る
      .process(dataURL, {mode, threshold}) -> Promise<{dataURL, transparent, kept}>
          mode: "auto"(既定/透過済みはそのまま・無ければ白抜き) | "on"(必ず白抜き) | "off"(何もしない)
    ========================================================================== */
@@ -72,26 +73,73 @@
     });
   }
 
+  /* まわりの透明な余白を切る。
+     判子の写真は、白を抜いたあとも「まわりが全部透明」の帯が残る。
+     そのまま紙に載せると、決めた大きさの箱の中で判子が小さく浮いて、
+     社名に重ならない（司さんの実機で発覚）。実際の朱肉のところだけに切りそろえる。 */
+  function trim(dataURL) {
+    return loadImage(dataURL).then(function (img) {
+      var o = toCanvas(img);
+      var w = o.c.width;
+      var h = o.c.height;
+      if (!w || !h) return dataURL;
+      var d = o.ctx.getImageData(0, 0, w, h).data;
+      var x1 = w;
+      var y1 = h;
+      var x2 = -1;
+      var y2 = -1;
+      for (var y = 0; y < h; y++) {
+        for (var x = 0; x < w; x++) {
+          // うっすら残った点は余白とみなす（alpha 24 以下は切る）
+          if (d[(y * w + x) * 4 + 3] > 24) {
+            if (x < x1) x1 = x;
+            if (x > x2) x2 = x;
+            if (y < y1) y1 = y;
+            if (y > y2) y2 = y;
+          }
+        }
+      }
+      if (x2 < 0) return dataURL; // 全部透明＝切りようがない
+      var cw = x2 - x1 + 1;
+      var ch = y2 - y1 + 1;
+      if (cw >= w - 2 && ch >= h - 2) return dataURL; // 余白がほぼ無い＝作り直さない
+      var out = document.createElement("canvas");
+      out.width = cw;
+      out.height = ch;
+      out.getContext("2d").drawImage(o.c, x1, y1, cw, ch, 0, 0, cw, ch);
+      return out.toDataURL("image/png");
+    });
+  }
+
   function process(dataURL, opts) {
     opts = opts || {};
     var mode = opts.mode || "auto";
     if (mode === "off") return Promise.resolve({ dataURL: dataURL, transparent: false });
+    // ★白を抜いたあとは必ず余白を切る（切らないと紙の上で小さく浮く）
     if (mode === "on")
-      return whiteToTransparent(dataURL, opts.threshold).then(function (u) {
-        return { dataURL: u, transparent: true };
-      });
-    // auto: 既に透過があればそのまま、無ければ白抜き
+      return whiteToTransparent(dataURL, opts.threshold)
+        .then(trim)
+        .then(function (u) {
+          return { dataURL: u, transparent: true };
+        });
+    // auto: 既に透過があればそのまま（余白だけ切る）、無ければ白抜き
     return hasAlpha(dataURL).then(function (has) {
-      if (has) return { dataURL: dataURL, transparent: true, kept: true };
-      return whiteToTransparent(dataURL, opts.threshold).then(function (u) {
-        return { dataURL: u, transparent: true };
-      });
+      if (has)
+        return trim(dataURL).then(function (u) {
+          return { dataURL: u, transparent: true, kept: true };
+        });
+      return whiteToTransparent(dataURL, opts.threshold)
+        .then(trim)
+        .then(function (u) {
+          return { dataURL: u, transparent: true };
+        });
     });
   }
 
   root.HankoTool = {
     hasAlpha: hasAlpha,
     whiteToTransparent: whiteToTransparent,
+    trim: trim,
     process: process,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = root.HankoTool;

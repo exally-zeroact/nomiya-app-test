@@ -15,7 +15,8 @@ async function install(page, opts) {
   // 本物の supabase-js は読ませない（テストは通信しない）
   await page.route(/cdn\.jsdelivr\.net/, (r) => r.abort());
   // 印刷ダイアログは自動テストで開けないので、呼ばれた回数だけ数える
-  await page.addInitScript(() => {
+  // 印刷の合図は新しい窓でも数える（context に仕掛ける）
+  await page.context().addInitScript(() => {
     window.__printed = 0;
     window.print = function () {
       window.__printed++;
@@ -5769,6 +5770,157 @@ test.describe("㉑ ログイン画面", () => {
     await page.locator("#btnSignup").click();
     await expect(page.locator("#loginOv")).not.toHaveClass(/open/);
     await expect(page.locator("#scr-input")).toBeVisible();
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* ㉒ 司さんの実機で出た2件（判子が社名に重ならない・印刷の窓から戻れない） */
+test.describe("㉒ 判子と印刷の窓", () => {
+  async function withHanko(page) {
+    await addSale(page, {
+      date: "2026-08-03",
+      name: "飛勝工業株式会社",
+      people: 3,
+      amount: 15000,
+      pay: "invoice",
+      receipt: true,
+    });
+    // ★まわりに大きな余白がある判子（司さんの実物と同じ形）
+    return await page.evaluate(async () => {
+      const c = document.createElement("canvas");
+      c.width = c.height = 400;
+      const g = c.getContext("2d");
+      g.strokeStyle = "#c8102e";
+      g.lineWidth = 9;
+      g.beginPath();
+      g.arc(200, 200, 92, 0, Math.PI * 2);
+      g.stroke();
+      const raw = c.toDataURL("image/png");
+      const size = (u) =>
+        new Promise((r) => {
+          const i = new Image();
+          i.onload = () => r([i.width, i.height]);
+          i.src = u;
+        });
+      const before = await size(raw);
+      const trimmed = await window.HankoTool.trim(raw);
+      const after = await size(trimmed);
+      const N = window.__NOMIYA;
+      N.settings.hanko = trimmed;
+      N.settings.store = "合同会社ZEROact";
+      N.settings.addr = "今治市本町7-3-40";
+      N.settings.tel = "090-0000-0000";
+      N.renderAll();
+      return { before, after };
+    });
+  }
+
+  test("★判子は余白を切ってから載せる（切らないと社名に重ならない）", async ({ page }) => {
+    const errors = await open(page);
+    const sz = await withHanko(page);
+    // まわりの透明な帯が切られている
+    expect(sz.before).toEqual([400, 400]);
+    expect(sz.after[0], "余白が切れていない").toBeLessThan(220);
+    expect(sz.after[0], "切りすぎ").toBeGreaterThan(150);
+
+    await setInvMonth(page, "2026-08");
+    const m = await page.evaluate(() => {
+      const h = document.querySelector("#invSheets .iv-hanko");
+      const nm = document.querySelector("#invSheets .iv-store");
+      const a = h.getBoundingClientRect();
+      const n = nm.getBoundingClientRect();
+      const s = h.closest(".sheet").getBoundingClientRect();
+      return {
+        // 社名に重なっているか（角印は社名にかけて押すのが作法）
+        hit: !(a.right < n.left || a.left > n.right || a.bottom < n.top || a.top > n.bottom),
+        outRight: a.right - s.right,
+        outBottom: a.bottom - s.bottom,
+      };
+    });
+    expect(m.hit, "判子が社名に重なっていない").toBe(true);
+    expect(m.outRight, "判子が紙の右からはみ出している").toBeLessThanOrEqual(0);
+    expect(m.outBottom, "判子が紙の下からはみ出している").toBeLessThanOrEqual(0);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★前に入れた判子も、開いたときに余白を切る", async ({ page }) => {
+    const errors = await open(page);
+    // 余白だらけの判子を、前の版で入れてあった形で置いておく
+    await page.evaluate(() => {
+      const c = document.createElement("canvas");
+      c.width = c.height = 400;
+      const g = c.getContext("2d");
+      g.strokeStyle = "#c8102e";
+      g.lineWidth = 9;
+      g.beginPath();
+      g.arc(200, 200, 92, 0, Math.PI * 2);
+      g.stroke();
+      const st = JSON.parse(localStorage.getItem("nomiya_settings_v1") || "{}");
+      st.hanko = c.toDataURL("image/png");
+      localStorage.setItem("nomiya_settings_v1", JSON.stringify(st));
+    });
+    await page.reload({ waitUntil: "load" });
+    // 開いたときに切り直されている
+    await expect
+      .poll(
+        async () =>
+          await page.evaluate(
+            () =>
+              new Promise((r) => {
+                const i = new Image();
+                i.onload = () => r(i.width);
+                i.onerror = () => r(-1);
+                i.src = window.__NOMIYA.settings.hanko;
+              })
+          ),
+        { timeout: 8000 }
+      )
+      .toBeLessThan(220);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★印刷の窓から戻れる（戻る・もう一度印刷。刷るときは消える）", async ({ page, context }) => {
+    const errors = await open(page);
+    await seed(page);
+    const win = await printOpens(page, context, "#btnPrintList", { title: "売上帳" });
+    const bar = await win.evaluate(() => {
+      const b = document.querySelector(".pbar");
+      const back = document.getElementById("pbClose");
+      const pr = document.getElementById("pbPrint");
+      return {
+        ある: !!b,
+        戻る: back ? back.textContent.trim() : "",
+        印刷: pr ? pr.textContent.trim() : "",
+        画面では見える: b ? getComputedStyle(b).display !== "none" : false,
+      };
+    });
+    expect(bar.ある, "印刷の窓に帯が無い＝戻れない").toBe(true);
+    expect(bar.戻る).toContain("戻る");
+    expect(bar.印刷).toContain("印刷");
+    expect(bar.画面では見える).toBe(true);
+    // ★開いただけで自動的に刷りに行く（押し直させない）
+    await win.waitForTimeout(1200);
+    expect(await win.evaluate(() => window.__printed), "自動で刷りに行っていない").toBe(1);
+    expect(await page.evaluate(() => window.__printed), "元の画面で刷ろうとしている").toBe(0);
+    // 「もう一度印刷」でもう一度出せる
+    await win.locator("#pbPrint").click();
+    await win.waitForTimeout(300);
+    expect(await win.evaluate(() => window.__printed)).toBe(2);
+    // 刷るときは帯を出さない（紙にボタンが写らない）
+    await win.emulateMedia({ media: "print" });
+    const onPaper = await win.evaluate(
+      () => getComputedStyle(document.querySelector(".pbar")).display
+    );
+    await win.emulateMedia({ media: "screen" });
+    expect(onPaper, "刷った紙にボタンが写る").toBe("none");
+    // 戻るを押すと窓が閉じる
+    const closed = win.waitForEvent("close", { timeout: 5000 }).then(
+      () => true,
+      () => false
+    );
+    await win.locator("#pbClose").click();
+    expect(await closed, "戻るを押しても閉じない").toBe(true);
+    expect(context.pages().length, "窓が残っている").toBe(1);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });

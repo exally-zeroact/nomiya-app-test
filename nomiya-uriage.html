@@ -2867,6 +2867,25 @@
         $("modalOv").classList.remove("open");
       }
 
+      /* 判子の余白を切る。
+         白を抜いただけだと、まわりに透明な帯が残って、紙に載せたとき
+         「決めた大きさの箱」の中で判子が小さく浮く（社名に重ならない）。
+         前に入れた判子にも効くよう、開いたときに一度だけ切って入れ直す。 */
+      function trimHankoOnce() {
+        if (!SETTINGS.hanko || !window.HankoTool || !HankoTool.trim) return;
+        var before = SETTINGS.hanko;
+        HankoTool.trim(before)
+          .then(function (after) {
+            if (!after || after === before) return; // 余白が無かった＝何もしない
+            SETTINGS.hanko = after;
+            saveSettings();
+            renderAll();
+          })
+          .catch(function () {
+            /* 切れなくても、判子はそのまま載る */
+          });
+      }
+
       /* ===================================================================
          入力画面
          =================================================================== */
@@ -5329,11 +5348,7 @@
         pw.document.open();
         pw.document.write(html);
         pw.document.close();
-        try {
-          pw.focus();
-        } catch (e) {
-          /* 開いた窓に移れなくても、印刷そのものは出る */
-        }
+        wirePrintWindow(pw);
       }
 
       /* 印刷用の1枚もの。紙のCSS（SHEET_CSS）と紙のHTMLだけを入れる。
@@ -5361,22 +5376,74 @@
           "page-break-after:always;break-after:page;}" +
           ".sheet:last-child{page-break-after:auto;break-after:auto;}" +
           ".no-print{display:none!important;}" +
+          // 画面に出す帯（刷るときは消える）。開いた窓から戻れないと困る。
+          ".pbar{position:sticky;top:0;z-index:9;display:flex;gap:10px;justify-content:center;" +
+          "padding:10px;background:#070f22;}" +
+          ".pbar button{font-family:inherit;font-size:14px;font-weight:700;padding:10px 18px;" +
+          "border-radius:12px;cursor:pointer;background:#e7ecf5;color:#1b2740;" +
+          "border:1.5px solid #7a88a5;}" +
+          "@media print{.pbar{display:none!important;}}" +
           "</style></head><body>" +
+          '<div class="pbar">' +
+          '<button type="button" id="pbClose">← 戻る</button>' +
+          '<button type="button" id="pbPrint">🖨 もう一度印刷</button>' +
+          "</div>" +
           sheets +
-          "<script>" +
-          // 字と絵がそろってから印刷する（そろう前に刷ると空白や字化けになる）
-          "(function(){var go=function(){try{window.focus();}catch(e){}window.print();};" +
-          "var imgs=Array.prototype.slice.call(document.images);" +
-          "var wait=imgs.filter(function(i){return !i.complete;}).length;" +
-          "var done=function(){if(--wait<=0)ready();};" +
-          "imgs.forEach(function(i){if(!i.complete){i.addEventListener('load',done);" +
-          "i.addEventListener('error',done);}});" +
-          "var fired=false;var ready=function(){if(fired)return;fired=true;" +
-          "if(document.fonts&&document.fonts.ready){document.fonts.ready.then(function(){" +
-          "setTimeout(go,120);}).catch(function(){setTimeout(go,300);});}else{setTimeout(go,300);}};" +
-          "if(wait<=0)ready();setTimeout(function(){ready();},2500);" +
-          "\u003c/script></body></html>"
+          "</body></html>"
         );
+      }
+
+      /* 開いた窓のボタンと、印刷の合図。
+         ★窓の中に <script> を埋め込む形にはしない（document.write で書いた script は
+           動かないことがあり、実際それで「戻る」も自動印刷も効いていなかった）。
+           開いたこちら側から直に触る（同じ場所のページなので触れる）。 */
+      function wirePrintWindow(pw) {
+        var doPrint = function () {
+          try {
+            pw.focus();
+          } catch (e) {
+            /* 窓に移れなくても印刷は出る */
+          }
+          try {
+            pw.print();
+          } catch (e) {
+            /* 印刷できない端末は、その窓から手で刷ってもらう */
+          }
+        };
+        var d = pw.document;
+        var close = d.getElementById("pbClose");
+        var again = d.getElementById("pbPrint");
+        if (close)
+          close.onclick = function () {
+            pw.close();
+          };
+        if (again) again.onclick = doPrint;
+
+        // 字と絵がそろってから刷る（そろう前に刷ると空白や字化けになる）
+        var fired = false;
+        var ready = function () {
+          if (fired) return;
+          fired = true;
+          setTimeout(doPrint, 150);
+        };
+        var imgs = Array.prototype.slice.call(d.images || []);
+        var left = imgs.filter(function (im) {
+          return !im.complete;
+        }).length;
+        var done = function () {
+          if (--left <= 0) whenFonts();
+        };
+        var whenFonts = function () {
+          if (d.fonts && d.fonts.ready) d.fonts.ready.then(ready).catch(ready);
+          else ready();
+        };
+        imgs.forEach(function (im) {
+          if (im.complete) return;
+          im.addEventListener("load", done);
+          im.addEventListener("error", done);
+        });
+        if (left <= 0) whenFonts();
+        setTimeout(ready, 2500); // 何かが返ってこなくても、必ず刷る
       }
       // 印刷が終わったら元に戻す（画面はそのまま・戻る操作が要らない）
       window.addEventListener("afterprint", function () {
@@ -8045,6 +8112,8 @@
       function init() {
         $("sheetCss").textContent = SHEET_CSS;
         load();
+        // 前に入れた判子の余白も切る（一度だけ。切る所が無ければ何もしない）
+        trimHankoOnce();
         var t = todayIso();
         UI.period.ym = C.ymOf(t);
         UI.invYm = C.ymOf(t);
