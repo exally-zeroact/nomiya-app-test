@@ -1,7 +1,9 @@
 import { test, expect } from "@playwright/test";
 
 // ログイン画面は全アプリ共通の部品（exally-login.js）。
-// 「どのアプリで開いても同じ見た目・同じ言い方」であることを実ブラウザで固定する。
+// ★製品名と色は、置いたページが決める（飲み屋＝Castally）。
+//   決めていないページでは今までどおり Exally・緑のまま＝他のアプリは変わらない。
+// 「言い方・並び・幅」は全アプリで同じ。それをここで固定する。
 // 本物のクラウドには繋がない（偽のクラウド tests/e2e/fake-supabase.js を差し込む）。
 // ★このrepoは飲み屋だけなので、ここで見るのは飲み屋の画面だけ。
 //   他アプリ側の同じ確認は、それぞれのrepoが自分で持つ。
@@ -26,8 +28,9 @@ test.describe("ログイン画面（全アプリ共通）", () => {
     test(`${app.name}: 同じ見た目・同じ言い方で出る`, async ({ page }) => {
       const errors = await openLogin(page, app.url);
 
-      // 出るものと並び順が全アプリで同じ
-      await expect(page.locator("#loginOv .login-logo")).toContainText("Exally");
+      // 出るものと並び順が全アプリで同じ（製品名の出し方だけアプリごと）
+      // 飲み屋は文字入りのロゴ画像。字のときは .login-logo に製品名が出る。
+      await expect(page.locator("#loginOv .login-mark")).toHaveAttribute("alt", "Castally");
       await expect(page.locator("#loginOv .login-title")).toHaveText(app.name); // ここだけアプリ名
       await expect(page.locator("#loginOv .login-sub")).toHaveText("メールでログイン");
       await expect(page.locator("#loginEmail")).toHaveAttribute("placeholder", "メールアドレス");

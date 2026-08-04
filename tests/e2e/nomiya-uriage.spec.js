@@ -5657,3 +5657,77 @@ test.describe("⑳ 回収予定日", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
+
+/* ㉑ ログイン画面も Castally */
+test.describe("㉑ ログイン画面", () => {
+  test("Castally のロゴが出る（Exally は出ない）", async ({ page }) => {
+    const errors = await install(page, { noSession: true });
+    await page.goto(PAGE, { waitUntil: "load" });
+    await expect(page.locator("#loginOv")).toHaveClass(/open/);
+
+    // 文字入りのロゴ（写真）が出ている
+    const mark = page.locator("#loginOv .login-mark");
+    await expect(mark).toHaveAttribute("src", "/icons/logo-castally.png");
+    // 絵が読めないときに出る字も製品名にする（＝部品に製品名がちゃんと渡っている）
+    await expect(mark).toHaveAttribute("alt", "Castally");
+    expect(await mark.evaluate((el) => el.naturalWidth > 0), "ロゴが読めていない").toBe(true);
+    // 絵を渡さないときは、製品名の「字」が出る（部品が Exally 決め打ちに戻っていないこと）
+    const asText = await page.evaluate(() => {
+      window.ExallyLogin.mount({ app: "売上管理", brand: "Castally", brandSub: "", sb: null });
+      const el = document.querySelector("#loginOv .login-logo");
+      return el ? el.textContent.trim() : "（字が出ていない）";
+    });
+    expect(asText, "絵を外したときに製品名の字が出ない").toBe("Castally");
+    // ★前の名前が1文字も残っていない
+    const txt = await page.locator("#loginOv").innerText();
+    expect(txt).not.toContain("Exally");
+    expect(txt).not.toContain("エクサリー");
+    expect(txt).toContain("売上管理");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("色も Castally（アプリの中と同じ決まりを使う）", async ({ page }) => {
+    const errors = await install(page, { noSession: true });
+    await page.goto(PAGE, { waitUntil: "load" });
+    const c = await page.evaluate(() => {
+      const ov = document.getElementById("loginOv");
+      const g = (el) => getComputedStyle(el);
+      return {
+        bg: g(ov).backgroundColor,
+        card: g(ov.querySelector(".login-card")).backgroundColor,
+        btn: g(document.getElementById("btnLogin")).backgroundColor,
+        btnT: g(document.getElementById("btnLogin")).color,
+        btnW: parseFloat(g(document.getElementById("btnLogin")).borderTopWidth),
+        subC: g(document.getElementById("btnSignup")).borderTopColor,
+        subStyle: g(document.getElementById("btnSignup")).borderTopStyle,
+      };
+    });
+    expect(c.bg, "地が Castally の色でない").toBe("rgb(246, 247, 250)");
+    expect(c.card).toBe("rgb(255, 255, 255)");
+    expect(c.btn, "ボタンの面が Castally でない").toBe("rgb(231, 236, 245)");
+    expect(c.btnT, "ボタンの字が Castally でない").toBe("rgb(27, 39, 64)");
+    // 面がうすいので、枠が押せる手がかり（1.5px は端末によって1pxに丸められるので、色で見る）
+    expect(c.btnW).toBeGreaterThanOrEqual(2);
+    expect(c.subStyle, "新規登録に枠が無い").toBe("solid");
+    expect(c.subC, "新規登録の枠が Castally の色でない").toBe("rgb(122, 136, 165)");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("ログインの中身は今までどおり動く（入れる・エラーが出る）", async ({ page }) => {
+    const errors = await install(page, { noSession: true });
+    await page.goto(PAGE, { waitUntil: "load" });
+    // 空のまま押すと理由が出る
+    await page.locator("#btnLogin").click();
+    await expect(page.locator("#loginErr")).toContainText("メールとパスワード");
+    // 登録していないメールでは入れない
+    await page.locator("#loginEmail").fill("mama@snack.example");
+    await page.locator("#loginPass").fill("himitsu123");
+    await page.locator("#btnLogin").click();
+    await expect(page.locator("#loginErr")).toContainText("メールかパスワードが違います");
+    // 登録するとそのまま入れる
+    await page.locator("#btnSignup").click();
+    await expect(page.locator("#loginOv")).not.toHaveClass(/open/);
+    await expect(page.locator("#scr-input")).toBeVisible();
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});

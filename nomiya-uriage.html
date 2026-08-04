@@ -2730,6 +2730,10 @@
         if (!LOGIN) {
           LOGIN = ExallyLogin.mount({
             app: "売上管理",
+            // 製品名は Castally。文字入りのロゴをそのまま出す。
+            brand: "Castally",
+            brandSub: "",
+            logo: "/icons/logo-castally.png",
             sb: SB,
             note: "売上はこのお店のものだけが見えます。一度ログインすれば、次からは自動で入れます。",
             onLogin: function (user) {

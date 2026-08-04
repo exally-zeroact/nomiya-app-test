@@ -7,9 +7,15 @@
  *   <script src="exally-login.js"></script>
  *   var LOGIN = ExallyLogin.mount({
  *     app: "売上管理",          // カードに出すアプリ名
+ *     brand: "Castally",        // 製品名（省くと Exally）
+ *     brandSub: "",             // 製品名の右の小さい字（省くと エクサリー）
+ *     logo: "/icons/logo.png",  // 文字入りのロゴ画像（あれば文字の代わりに出す）
  *     sb: SB,                   // supabase クライアント
  *     onLogin: function (user) {…}, // ログインできたら呼ばれる
  *   });
+ *
+ * ★色は、置いたページが :root に --c-* を決めていれば、それに合わせる。
+ *   決めていないページでは今までの緑のまま（＝他のアプリの見た目は変わらない）。
  *   LOGIN.show();  // ログイン画面を出す
  *   LOGIN.hide();  // 閉じる
  *
@@ -21,35 +27,38 @@
 
   var CSS_ID = "exally-login-css";
   var CSS = [
-    ".login-ov{position:fixed;inset:0;background:#eef7f1;z-index:400;display:none;",
+    ".login-ov{position:fixed;inset:0;background:var(--c-bg,#eef7f1);z-index:400;display:none;",
     "align-items:center;justify-content:center;overflow:auto;",
     "padding:24px 18px calc(24px + env(safe-area-inset-bottom));}",
     ".login-ov.open{display:flex;}",
-    ".login-card{width:100%;max-width:380px;background:#ffffff;border:1px solid #d4eae0;",
+    ".login-card{width:100%;max-width:380px;background:var(--c-card,#ffffff);border:1px solid var(--c-line,#d4eae0);",
     "border-radius:20px;box-shadow:0 6px 22px rgba(30,80,46,.10);padding:26px 20px 22px;",
     "text-align:center;box-sizing:border-box;}",
     ".login-logo{font-family:'DM Mono',ui-monospace,monospace;font-size:27px;letter-spacing:2px;",
-    "color:#52b788;}",
+    "color:var(--c-hd-logo,#52b788);}",
     ".login-logo span{font-family:'Noto Sans JP',sans-serif;font-size:11px;letter-spacing:1px;",
-    "color:#7aa08c;margin-left:6px;}",
-    ".login-title{font-size:15px;font-weight:700;color:#2f5d45;margin:10px 0 2px;}",
-    ".login-sub{font-size:12px;color:#7aa08c;margin-bottom:16px;}",
+    "color:var(--c-label,#7aa08c);margin-left:6px;}",
+    ".login-title{font-size:15px;font-weight:700;color:var(--c-text,#2f5d45);margin:10px 0 2px;}",
+    ".login-sub{font-size:12px;color:var(--c-label,#7aa08c);margin-bottom:16px;}",
     ".login-inp{width:100%;box-sizing:border-box;font-size:16px;padding:13px 14px;",
-    "border:1px solid #d4eae0;border-radius:12px;background:#ffffff;color:#24422f;",
+    "border:1.5px solid var(--c-line,#d4eae0);border-radius:12px;background:var(--c-card,#ffffff);color:var(--c-text,#24422f);",
     "margin-bottom:10px;font-family:inherit;outline:none;-webkit-appearance:none;}",
-    ".login-inp:focus{border-color:#52b788;}",
-    ".login-err{min-height:18px;font-size:12px;color:#c0392b;margin-bottom:6px;white-space:pre-wrap;}",
+    ".login-inp:focus{border-color:var(--c-accent,#52b788);}",
+    ".login-err{min-height:18px;font-size:12px;color:var(--c-danger,#c0392b);margin-bottom:6px;white-space:pre-wrap;}",
     /* ログインと新規登録の間の案内。近い方（新規登録）に付いて見えるよう上を空けて下は詰める */
-    ".login-mid{font-size:11.5px;color:#7aa08c;line-height:1.9;margin:16px 0 7px;word-break:keep-all;}",
-    ".login-note{font-size:11px;color:#7aa08c;line-height:1.7;margin-top:14px;}",
-    ".login-forgot{display:inline-block;margin-top:12px;font-size:11.5px;color:#3d6b53;",
+    ".login-mid{font-size:11.5px;color:var(--c-label,#7aa08c);line-height:1.9;margin:16px 0 7px;word-break:keep-all;}",
+    ".login-note{font-size:11px;color:var(--c-label,#7aa08c);line-height:1.7;margin-top:14px;}",
+    ".login-forgot{display:inline-block;margin-top:12px;font-size:11.5px;color:var(--c-flabel,#3d6b53);",
     "background:none;border:none;padding:4px 6px;text-decoration:underline;cursor:pointer;",
     "font-family:inherit;}",
     ".login-btn{width:100%;box-sizing:border-box;font-family:inherit;font-size:14px;",
     "font-weight:700;padding:14px 16px;border-radius:14px;cursor:pointer;border:1px solid transparent;}",
-    ".login-btn-main{background:#2f8f5b;color:#ffffff;}",
-    ".login-btn-sub{background:#eef7f1;color:#2f8f5b;border-color:#d4eae0;}",
+    ".login-btn-main{background:var(--c-btn,#2f8f5b);color:var(--c-btn-t,#ffffff);border:2px solid var(--c-btn-line,#2f8f5b);}",
+    ".login-btn-sub{background:var(--c-btn2,#eef7f1);color:var(--c-btn2-t,#2f8f5b);border:1.5px solid var(--c-btn2-line,#d4eae0);}",
     ".login-btn:disabled{opacity:.55;}",
+    // 文字入りのロゴ画像（渡されたときだけ出す）。潰れないよう高さで決める。
+    ".login-mark{display:block;margin:0 auto 2px;height:82px;width:auto;",
+    "border-radius:18px;}",
   ].join("");
 
   function injectCss() {
@@ -96,7 +105,17 @@
     }
     ov.innerHTML =
       '<div class="login-card">' +
-      '<div class="login-logo">Exally <span>エクサリー</span></div>' +
+      // 製品名。渡されなければ今までどおり Exally（他のアプリは1文字も変わらない）
+      (o.logo
+        ? '<img class="login-mark" src="' +
+          esc(o.logo) +
+          '" alt="' +
+          esc(o.brand || "Exally") +
+          '">'
+        : '<div class="login-logo">' +
+          esc(o.brand || "Exally") +
+          (o.brandSub === "" ? "" : " <span>" + esc(o.brandSub || "エクサリー") + "</span>") +
+          "</div>") +
       '<div class="login-title">' +
       esc(o.app || "") +
       "</div>" +
