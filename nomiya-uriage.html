@@ -5297,19 +5297,86 @@
          （新しいタブだと iPhone で戻れなくなり、タスクを切る羽目になるため）
          紙の中身だけを #printArea に移し、印刷のときはそこだけを出す。 */
       var _printTitle = "";
+      /* ★紙を刷る＝新しい窓に「紙だけ」を書いて、そこで印刷する。
+           ・同じ画面のまま window.print() すると、iPhoneでは真っ白で出る（司さん実機で確認）。
+             画面用のCSS（隠す・縮める・位置を固定する）が印刷にまで効いてしまうため。
+           ・新しい窓には A4 の紙のCSSと紙のHTMLしか無いので、何にも邪魔されない。
+             代行請求書アプリと同じやり方。
+           ・ポップアップを塞がれている端末だけ、今までどおり同じ画面で印刷する。 */
       function printSheets(innerId, title) {
         var inner = $(innerId);
         if (!inner || !inner.innerHTML.trim()) {
           toast("⚠️ 印刷するものがありません");
           return;
         }
-        // iPhoneは印刷画面から「PDFとして保存」も選べる（同じ画面なのでボタンは1つ）
-        toast("🖨 PDFにするときは、この画面で「PDFとして保存」を選んでください");
-        $("printArea").innerHTML = inner.innerHTML;
-        // 印刷の見出しに出る名前（iPhoneはページ名が上に出る）
-        _printTitle = document.title;
-        document.title = title;
-        window.print();
+        var html = printableHtml(inner.innerHTML, title);
+        var pw = null;
+        try {
+          pw = window.open("", "_blank");
+        } catch (e) {
+          pw = null;
+        }
+        if (!pw || !pw.document) {
+          // ポップアップが開けない端末＝今までどおり同じ画面で印刷する
+          toast("🖨 PDFにするときは、この画面で「PDFとして保存」を選んでください");
+          $("printArea").innerHTML = inner.innerHTML;
+          _printTitle = document.title;
+          document.title = title;
+          window.print();
+          return;
+        }
+        toast("🖨 新しい画面が開きます。PDFにするときは「PDFとして保存」を選んでください");
+        pw.document.open();
+        pw.document.write(html);
+        pw.document.close();
+        try {
+          pw.focus();
+        } catch (e) {
+          /* 開いた窓に移れなくても、印刷そのものは出る */
+        }
+      }
+
+      /* 印刷用の1枚もの。紙のCSS（SHEET_CSS）と紙のHTMLだけを入れる。
+         画面用のCSSは1行も入れない＝画面の都合で真っ白になることがない。 */
+      function printableHtml(sheets, title) {
+        return (
+          '<!doctype html><html lang="ja"><head><meta charset="UTF-8">' +
+          // 紙は794px＝A4の幅。スマホでも縮めずにこの幅で組ませる。
+          '<meta name="viewport" content="width=794">' +
+          "<title>" +
+          esc(title || "印刷") +
+          "</title>" +
+          '<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700' +
+          '&family=Noto+Serif+JP:wght@400;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">' +
+          "<style>" +
+          "*{box-sizing:border-box;margin:0;padding:0;}" +
+          "@page{size:A4 portrait;margin:0;}" +
+          'html,body{background:#ffffff;font-family:"Noto Sans JP",sans-serif;}' +
+          SHEET_CSS +
+          // ★店が選んだ請求書の色・書体（#invSkin）も一緒に持っていく。
+          //   これが抜けると、画面では色が付いているのに刷ると素の色で出る。
+          ($("invSkin") ? $("invSkin").textContent : "") +
+          // 画面で見せるための飾り（枠・影・余白）は紙では消す
+          ".sheet{border:none!important;box-shadow:none!important;margin:0 auto!important;" +
+          "page-break-after:always;break-after:page;}" +
+          ".sheet:last-child{page-break-after:auto;break-after:auto;}" +
+          ".no-print{display:none!important;}" +
+          "</style></head><body>" +
+          sheets +
+          "<script>" +
+          // 字と絵がそろってから印刷する（そろう前に刷ると空白や字化けになる）
+          "(function(){var go=function(){try{window.focus();}catch(e){}window.print();};" +
+          "var imgs=Array.prototype.slice.call(document.images);" +
+          "var wait=imgs.filter(function(i){return !i.complete;}).length;" +
+          "var done=function(){if(--wait<=0)ready();};" +
+          "imgs.forEach(function(i){if(!i.complete){i.addEventListener('load',done);" +
+          "i.addEventListener('error',done);}});" +
+          "var fired=false;var ready=function(){if(fired)return;fired=true;" +
+          "if(document.fonts&&document.fonts.ready){document.fonts.ready.then(function(){" +
+          "setTimeout(go,120);}).catch(function(){setTimeout(go,300);});}else{setTimeout(go,300);}};" +
+          "if(wait<=0)ready();setTimeout(function(){ready();},2500);" +
+          "\u003c/script></body></html>"
+        );
       }
       // 印刷が終わったら元に戻す（画面はそのまま・戻る操作が要らない）
       window.addEventListener("afterprint", function () {
