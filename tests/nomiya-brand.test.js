@@ -201,6 +201,32 @@ describe("chip-selected: 面の色だけで区別しない", () => {
   });
 });
 
+describe("紙（A4）は白地に黒。緑を残さない", () => {
+  /* 紙のCSS（SHEET_CSS）は画面の変数に寄せていない（紙は色を変えない決まり）。
+     ただし Castally にしたので、緑がかった罫や見出しが残っていると
+     見出しの帯（濃紺）とちぐはぐになる。緑が1つでも残っていたら赤にする。 */
+  const PAPER = (() => {
+    const i = HTML.indexOf("var SHEET_CSS = [");
+    const j = HTML.indexOf("].join(", i);
+    if (i < 0 || j < 0) throw new Error("紙のCSSが見つからない");
+    return HTML.slice(i, j);
+  })();
+  // 緑がかった色（緑が一番強い色）を1つでも見つけたら赤。
+  const greens = (PAPER.match(/#[0-9a-fA-F]{6}/g) || []).filter(function (h) {
+    const r = parseInt(h.slice(1, 3), 16);
+    const g = parseInt(h.slice(3, 5), 16);
+    const b = parseInt(h.slice(5, 7), 16);
+    return g > r && g > b;
+  });
+  it("紙のCSSに緑がかった色が無い", () => {
+    expect(greens, "紙に緑が残っている: " + greens.join(" ")).toEqual([]);
+  });
+  it("見出しの帯は濃紺（#0A1128）", () => {
+    expect(PAPER.indexOf("#0A1128") >= 0, "紙の帯が濃紺でない").toBe(true);
+    expect(PAPER.indexOf("#2E7D54") < 0, "紙に前の緑の帯が残っている").toBe(true);
+  });
+});
+
 describe("identity: 名前を変えるのは表に出る所だけ", () => {
   const read = (f) => fs.readFileSync(path.join(ROOT, f), "utf8");
   it("repo名（package.json）は変えない", () => {
