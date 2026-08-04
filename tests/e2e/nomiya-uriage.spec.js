@@ -4832,7 +4832,7 @@ test.describe("⑯ 指摘の直し", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
-  test("⑧ 判子の大きさは3つから選べる（既定は中＝今までと同じ）", async ({ page }) => {
+  test("⑧ 判子は実物の角印の寸法（18/21/24mm・既定21mm）", async ({ page }) => {
     const errors = await open(page);
     await addSale(page, {
       date: "2026-07-10",
@@ -4856,19 +4856,39 @@ test.describe("⑯ 指摘の直し", () => {
     await expect(page.locator("#setHankoSize [data-hs='m']")).toHaveClass(/on/);
 
     await setInvMonth(page, "2026-07");
-    const size = () =>
-      page
+    // ★紙の上で「実物の角印」の寸法になっていること。
+    //   A4の紙は 794px＝210mm なので 1mm ≒ 3.781px。18mm=68 / 21mm=79 / 24mm=91px。
+    //   ここが小さいと、刷ったときに実物より小さい判子が出る（前は 9.5mm しかなかった）。
+    const mm = async () =>
+      await page
         .locator("#invSheets .iv-hanko")
-        .evaluate((el) => Math.round(el.getBoundingClientRect().width * 100) / 100);
-    const mid = await size();
+        .evaluate((el) => Math.round((el.offsetWidth / (794 / 210)) * 10) / 10);
+    // 紙からはみ出していないこと（右も下も紙の中）
+    const inside = async () =>
+      await page.locator("#invSheets .iv-hanko").evaluate((el) => {
+        const a = el.getBoundingClientRect();
+        const b = el.closest(".sheet").getBoundingClientRect();
+        return a.right <= b.right && a.bottom <= b.bottom && a.left >= b.left;
+      });
+    expect(await mm(), "既定は21mm（角印で一番多い大きさ）").toBe(20.9);
+    expect(await inside(), "判子が紙からはみ出している").toBe(true);
+    for (const [key, want] of [
+      ["s", 18],
+      ["l", 24.1],
+    ]) {
+      await gotoSet(page, "self");
+      await page.locator(`#setHankoSize [data-hs='${key}']`).click();
+      await setInvMonth(page, "2026-07");
+      expect(await mm(), key + " の寸法が違う").toBe(want);
+      expect(await inside(), key + " で紙からはみ出している").toBe(true);
+    }
+    // 選ぶ所には実寸が書いてある（「小・中・大」だと何ミリか分からない）
     await gotoSet(page, "self");
-    await page.locator("#setHankoSize [data-hs='l']").click();
-    await setInvMonth(page, "2026-07");
-    expect(await size()).toBeGreaterThan(mid);
-    await gotoSet(page, "self");
-    await page.locator("#setHankoSize [data-hs='s']").click();
-    await setInvMonth(page, "2026-07");
-    expect(await size()).toBeLessThan(mid);
+    expect(
+      await page
+        .locator("#setHankoSize .chip")
+        .evaluateAll((els) => els.map((e) => e.textContent.trim()))
+    ).toEqual(["18mm", "21mm", "24mm"]);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });

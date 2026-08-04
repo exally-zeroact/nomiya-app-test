@@ -1529,12 +1529,13 @@
           <div class="frow" id="rowHankoSize">
             <span class="flabel">判子の大きさ</span>
             <div class="chips" id="setHankoSize">
-              <button class="chip chip-sm" type="button" data-hs="s">小</button>
-              <button class="chip chip-sm" type="button" data-hs="m">中</button>
-              <button class="chip chip-sm" type="button" data-hs="l">大</button>
+              <button class="chip chip-sm" type="button" data-hs="s">18mm</button>
+              <button class="chip chip-sm" type="button" data-hs="m">21mm</button>
+              <button class="chip chip-sm" type="button" data-hs="l">24mm</button>
             </div>
             <span class="hint"
-              >請求書の社名に重ねる角印です。写真の大きさは関係なく、ここで決めた大きさに収まります。</span
+              >請求書の社名に重ねる角印です。写真の大きさは関係なく、ここで決めた大きさで刷られます。会社の角印は
+              21mm が一番多いので、そのままで大丈夫です。</span
             >
           </div>
 
@@ -4994,10 +4995,15 @@
         "letter-spacing:1px;margin-right:-1px;line-height:1.9;}",
         // 判子＝社名の行に軽く重ねる（角印）。住所や登録番号には掛からない大きさにする。
         ".iv-hanko{position:absolute;object-fit:contain;opacity:0.95;}",
-        // 大きさは3つから選ぶ。中＝角印16mm相当（今までと同じ）。
-        ".iv-hanko.hk-s{right:-14px;top:-6px;width:28px;height:28px;}",
-        ".iv-hanko.hk-m{right:-18px;top:-9px;width:36px;height:36px;}",
-        ".iv-hanko.hk-l{right:-23px;top:-13px;width:46px;height:46px;}",
+        // ★実物の角印の寸法。はんこ屋の既製サイズは 18/21/24mm がほぼ全部で、
+        //   一番多いのが 21mm（既定）。紙は A4 幅 794px＝210mm なので 1mm ≒ 3.781px。
+        //     18mm → 68px ／ 21mm → 79px ／ 24mm → 91px
+        //   位置は大きさに合わせて動かす（社名の行に重ね、紙の右端からはみ出さない）。
+        //   高さは「判子の下端が社名の行に少しかかる」位置で揃える（下端＝社名の上から17px）。
+        //   社名にかけるのが角印の作法（改ざん防止）。ただし住所・TEL・登録番号は隠さない。
+        ".iv-hanko.hk-s{right:-20px;top:-51px;width:68px;height:68px;}",
+        ".iv-hanko.hk-m{right:-22px;top:-62px;width:79px;height:79px;}",
+        ".iv-hanko.hk-l{right:-24px;top:-74px;width:91px;height:91px;}",
         ".iv-shopsub{font-size:10px;line-height:1.9;color:#6a655e;margin-top:2px;}",
         ".iv-bank{font-size:10.5px;line-height:1.8;word-break:keep-all;}",
         ".iv-fh{font-family:'Noto Serif JP',serif;font-size:10.5px;letter-spacing:2px;",
