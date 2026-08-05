@@ -110,9 +110,11 @@
         font-size: 14px;
         -webkit-text-size-adjust: 100%;
         background: var(--c-bg);
-        /* ★上で引っ張ったときの跳ね返り（バウンス）を止める。
+        /* 上で引っ張ったときの跳ね返り（バウンス）を止める。
            跳ねているあいだ、ヘッダーの上に地の色が出て「空白ができた」ように見える。
-           ホーム画面のアプリでは、これが戻らないことがある。 */
+           ★正直に書く：iPhoneのSafari/WebKitはこの指定に対応していない（実測 CSS.supports=false）。
+             効くのは Android の Chrome。iPhone側は status-bar-style を広げない指定にしたのと、
+             戻ってきたときに位置を測り直すので直っている（司さん実機で確認済み 2026-08-05）。 */
         overscroll-behavior-y: none;
       }
       body {
@@ -933,6 +935,9 @@
         padding: 0;
         background: none;
         cursor: pointer;
+        /* ★色を選ぶ欄も「入力欄」。iPhoneは16px未満だと触った瞬間に画面を拡大する。
+           iPhoneでは色の選択が出ず、ただの文字欄になることがある（そのときこの字が出る）。 */
+        font-size: 16px;
       }
       .li-tag {
         display: inline-block;

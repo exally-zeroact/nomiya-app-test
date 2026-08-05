@@ -54,13 +54,24 @@ test.describe("ログイン画面（全アプリ共通）", () => {
       });
       expect(lines, `${app.name} の案内が2行になっていない`).toBe(2);
 
-      // 幅・余白も同じ（1つの部品が作っているので数字で固定できる）
+      // 幅・余白も同じ（1つの部品が作っているので数字で固定できる）。
+      // ★幅は「380か、画面が狭ければ画面いっぱいまで」。iPhoneの幅（390）で試したとき
+      //   380で固定していると、正しく縮んでいるのに赤くなる。
       const box = await page.locator("#loginOv .login-card").evaluate((el) => {
         const r = el.getBoundingClientRect();
         const cs = getComputedStyle(el);
-        return { w: Math.round(r.width), radius: cs.borderRadius, pad: cs.paddingTop };
+        return {
+          w: Math.round(r.width),
+          want: Math.min(380, window.innerWidth - 36),
+          radius: cs.borderRadius,
+          pad: cs.paddingTop,
+        };
       });
-      expect(box).toEqual({ w: 380, radius: "20px", pad: "26px" });
+      expect({ w: box.w, radius: box.radius, pad: box.pad }).toEqual({
+        w: box.want,
+        radius: "20px",
+        pad: "26px",
+      });
 
       expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
     });

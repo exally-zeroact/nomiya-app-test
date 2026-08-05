@@ -5990,10 +5990,14 @@ test.describe("㉔ 見本の中身・画面の頭出し・iPhoneの勝手な拡�
     for (const g of ["self", "partner", "staff", "item"]) await gotoSet(page, g);
 
     const small = await page.evaluate(() => {
-      const skip = ["checkbox", "radio", "file", "hidden", "range", "button", "submit", "color"];
+      // ★"color" を外すな：iPhoneでは <input type="color"> が ただの文字欄になることがあり、
+      //   そのとき16px未満だと触った瞬間に画面が拡大する（WebKitで実際に見つけた）。
+      //   el.type は端末が対応していないと "text" に化けるので、書いた通りの type を見る。
+      const skip = ["checkbox", "radio", "file", "hidden", "range", "button", "submit"];
       const out = [];
       document.querySelectorAll("input,select,textarea").forEach((el) => {
-        if (el.tagName === "INPUT" && skip.indexOf(el.type) >= 0) return;
+        const type = (el.getAttribute("type") || el.type || "").toLowerCase();
+        if (el.tagName === "INPUT" && skip.indexOf(type) >= 0) return;
         const px = parseFloat(getComputedStyle(el).fontSize);
         if (px < 16) out.push((el.id || el.className || el.tagName) + "=" + px + "px");
       });
@@ -6045,12 +6049,17 @@ test.describe("㉕ 画面の一番上に空白を作らない（ホーム画面�
     page,
   }) => {
     const errors = await open(page);
+    // ★iPhoneのSafari/WebKitは overscroll-behavior に対応していない（実測）。
+    //   対応しているブラウザ（Android Chrome など）では必ず止まっていること。
     const ob = await page.evaluate(() => ({
-      html: getComputedStyle(document.documentElement).overscrollBehaviorY,
-      body: getComputedStyle(document.body).overscrollBehaviorY,
+      supported: CSS.supports("overscroll-behavior-y", "none"),
+      html: getComputedStyle(document.documentElement).getPropertyValue("overscroll-behavior-y"),
+      body: getComputedStyle(document.body).getPropertyValue("overscroll-behavior-y"),
     }));
-    expect(ob.html, "htmlの跳ね返りを止めていない").toBe("none");
-    expect(ob.body, "bodyの跳ね返りを止めていない").toBe("none");
+    if (ob.supported) {
+      expect(ob.html, "htmlの跳ね返りを止めていない").toBe("none");
+      expect(ob.body, "bodyの跳ね返りを止めていない").toBe("none");
+    }
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
