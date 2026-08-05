@@ -745,10 +745,7 @@ test.describe("飲み屋 売上管理", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
-  test("自分の店らしくする: 色・書体・ロゴが請求書に反映され、印刷にも乗る", async ({
-    page,
-    context,
-  }) => {
+  test("自分の店らしくする: 色・書体・ロゴが請求書に反映され、印刷にも乗る", async ({ page }) => {
     const errors = await open(page);
     await seed(page);
     await openLook(page);
@@ -1971,10 +1968,7 @@ test.describe("飲み屋 売上管理", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
-  test("レジ締め: A4の日報が1枚に収まり、印刷は新しい窓に紙だけを出す", async ({
-    page,
-    context,
-  }) => {
+  test("レジ締め: A4の日報が1枚に収まり、印刷は新しい窓に紙だけを出す", async ({ page }) => {
     const errors = await open(page);
     await seed(page);
     await setCloseDay(page, "2026-07-01");
@@ -2577,10 +2571,7 @@ test.describe("飲み屋 売上管理", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
-  test("給料: A4の給与一覧が1枚に収まり、印刷は新しい窓に紙だけを出す", async ({
-    page,
-    context,
-  }) => {
+  test("給料: A4の給与一覧が1枚に収まり、印刷は新しい窓に紙だけを出す", async ({ page }) => {
     const errors = await open(page);
     for (let i = 1; i <= 6; i++) {
       await addStaff(page, { name: "キャスト" + i, hourly: 1200, shimei: 2000, rate: 10 });
@@ -3331,7 +3322,7 @@ test.describe("⑤ 店ごとの決め方（グレー枠）", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
-  test("キャストに渡す明細が出せる（1人・1区切りで1枚）", async ({ page, context }) => {
+  test("キャストに渡す明細が出せる（1人・1区切りで1枚）", async ({ page }) => {
     const errors = await open(page);
     await addStaff2(page, { name: "あかり", hourly: 1000 });
 
@@ -4214,7 +4205,7 @@ test.describe("⑪ スタッフがいないときの出勤", () => {
 
 /* 渡した記録を紙にできる（賃金台帳の代わりに綴じられるように） */
 test.describe("⑫ 渡した記録の紙", () => {
-  test("月ごとにA4で出せて、印刷は新しい窓に紙だけを出す", async ({ page, context }) => {
+  test("月ごとにA4で出せて、印刷は新しい窓に紙だけを出す", async ({ page }) => {
     const errors = await open(page);
     await gotoSet(page, "staff");
     await page.locator("#btnStaffAdd").click();
