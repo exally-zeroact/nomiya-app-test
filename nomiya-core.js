@@ -175,6 +175,19 @@
   function _dateOf(iso) {
     return new Date(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10));
   }
+  /* ★打ち間違いを庇う。止めない（芯：店のやり方を止めない）。
+       「2026」を「2030」と打つと、その売上は今日の一覧にも今月の集計にも出ず、
+       消えたように見える。だから保存はさせて、注意だけ出す。
+       境界は実物で決めた：明日ちょうどから／1年と1日前から言う。 */
+  function dateNote(iso, todayIso) {
+    if (!isIsoDate(iso) || !isIsoDate(todayIso)) return "";
+    var d = _dateOf(iso),
+      t = _dateOf(todayIso);
+    var day = Math.round((d - t) / 86400000);
+    if (day > 0) return jpDate(iso) + "は先の日付です。今日の一覧・今月の集計には出ません";
+    if (day < -365) return jpDate(iso) + "はずいぶん前の日付です。年を打ち間違えていませんか";
+    return "";
+  }
   function weekday(iso) {
     if (!isIsoDate(iso)) return "";
     return WD[_dateOf(iso).getDay()];
@@ -217,21 +230,27 @@
   }
 
   function validateSale(raw) {
+    // ★言葉だけでなく「どの欄が悪いか」も返す（赤い字だけでは、どこを直すか分からない）
     var errors = [];
+    var fields = [];
     var r = raw || {};
-    if (!isIsoDate(r.date)) errors.push("日付を入れてください");
+    var ng = function (f, msg) {
+      fields.push(f);
+      errors.push(msg);
+    };
+    if (!isIsoDate(r.date)) ng("date", "日付を入れてください");
     var name = String(r.name == null ? "" : r.name).trim();
-    if (!name) errors.push("名前を入れてください");
+    if (!name) ng("name", "名前を入れてください");
     var people = numOrNaN(r.people);
     if (!isFinite(people) || people < 1 || Math.floor(people) !== people) {
-      errors.push("人数は1以上の整数で入れてください");
+      ng("people", "人数は1以上の整数で入れてください");
     }
     var amount = numOrNaN(r.amount);
     if (!isFinite(amount) || amount < 0 || Math.floor(amount) !== amount) {
-      errors.push("金額は0以上の整数で入れてください");
+      ng("amount", "金額は0以上の整数で入れてください");
     }
-    if (PAY_KEYS.indexOf(r.pay) < 0) errors.push("支払い方法を選んでください");
-    return { ok: errors.length === 0, errors: errors };
+    if (PAY_KEYS.indexOf(r.pay) < 0) ng("pay", "支払い方法を選んでください");
+    return { ok: errors.length === 0, errors: errors, fields: fields };
   }
 
   function normalizeSale(raw, now) {
@@ -399,7 +418,8 @@
     var list = (sales || []).filter(isAlive);
     var all = summarize(list);
     var total = all.amount;
-    return PAY_METHODS.map(function (m) {
+    // ★知らない支払い方法を黙って落とさない。落とすと「行を足しても合計にならない」帳簿になる
+    var rows = PAY_METHODS.map(function (m) {
       var rows = list.filter(function (s) {
         return s.pay === m.key;
       });
@@ -417,6 +437,23 @@
         countRatio: ratio(sum.count, all.count),
       };
     });
+    var unknown = list.filter(function (s) {
+      return PAY_KEYS.indexOf(s.pay) < 0;
+    });
+    if (unknown.length) {
+      var u = summarize(unknown);
+      rows.push({
+        key: "_other",
+        label: "その他",
+        short: "その他",
+        count: u.count,
+        people: u.people,
+        amount: u.amount,
+        ratio: ratio(u.amount, total),
+        countRatio: ratio(u.count, all.count),
+      });
+    }
+    return rows;
   }
 
   // 領収書あり（発行済み）/ なし（未発行＝なし＋あとで）
@@ -2911,6 +2948,7 @@
     yen: yen,
     num: _num,
     validateSale: validateSale,
+    dateNote: dateNote,
     normalizeSale: normalizeSale,
     makeId: makeId,
     filterSales: filterSales,

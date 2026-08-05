@@ -93,6 +93,7 @@
         --c-warn: #8a5a0b;
         --c-warn2: #8a5a0b;
         --c-warn-bg: #fbf1e3;
+        --c-warn-line: #e2cba4;
         --c-info: #1f4e86;
         --c-info-bg: #e9f0fa;
         --c-plus: #1f4e86;
@@ -437,29 +438,46 @@
       }
 
       /* ===== 集計ストリップ ===== */
+      /* ★横に4つ詰めない。売上が10桁になると、狭くなった箱の中で
+         「組数」が「組／数」、「のべ人数」が「の／べ／人／数」と1文字ずつ縦に割れて、
+         客単価は枠からはみ出していた（司さん指摘 2026-08-05）。
+         幅が足りなければ2列に折り返す。数が奇数のときは最後を横いっぱいに使う。 */
       .strip {
-        display: flex;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
         gap: 8px;
         margin-bottom: 10px;
       }
       .strip-item {
-        flex: 1;
+        min-width: 0;
         background: var(--c-card);
         border: 1px solid var(--c-line);
         border-radius: 12px;
         padding: 9px 8px;
         text-align: center;
       }
+      .strip-item:last-child:nth-child(odd) {
+        grid-column: 1 / -1;
+      }
       .strip-k {
         font-size: 10px;
         color: var(--c-label);
         font-weight: 700;
+        white-space: nowrap; /* 見出しを1文字ずつ縦に割らない */
       }
       .strip-v {
         font-family: "DM Mono", monospace;
         font-size: 16px;
         font-weight: 500;
         color: var(--c-text);
+        white-space: nowrap;
+      }
+      /* 桁が多いときは字を小さくして、必ず1行に収める（はみ出させない） */
+      .strip-v.len-m {
+        font-size: 14px;
+      }
+      .strip-v.len-l {
+        font-size: 12px;
       }
       .stat-grid {
         display: grid;
@@ -545,9 +563,11 @@
         background: var(--c-accent);
         border-radius: 4px;
       }
+      /* ★桁が大きいときは、棒グラフの方を細くする。
+         数字が読めないより、棒が短い方がまし（監査で「金額と割合が重なる」を実測）。 */
       .barcell {
-        width: 68px;
-        min-width: 68px;
+        width: 48px;
+        min-width: 48px;
       }
       .brk th:nth-child(2),
       .brk td:nth-child(2),
@@ -555,9 +575,13 @@
       .brk td:nth-child(4) {
         width: 46px;
       }
+      /* ★金額の列は、桁が増えたら広がってよい（固定幅だと割合と重なる＝監査で実測）。
+         割合の列との間には、必ずすき間を空ける。 */
       .brk th:nth-child(3),
       .brk td:nth-child(3) {
-        width: 76px;
+        width: auto;
+        min-width: 76px;
+        padding-right: 12px;
       }
 
       /* ===== 明細リスト（入力画面のその日の分・未回収） ===== */
@@ -1102,6 +1126,23 @@
         height: 18px;
         accent-color: var(--c-btn);
       }
+      /* ★断られた欄そのものを赤くする。赤い字だけだと、どこを直すか分からない（監査で指摘） */
+      .finput.ng,
+      .fselect.ng {
+        border-color: var(--c-danger);
+        background: var(--c-danger-bg);
+      }
+      /* 止めないための注意（黄色）。エラー（赤）と違い、押せば保存できる。 */
+      .warn-note {
+        color: var(--c-warn);
+        background: var(--c-warn-bg);
+        border: 1px solid var(--c-warn-line);
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 7px 10px;
+        margin-top: 6px;
+      }
       .err {
         color: var(--c-danger);
         font-size: 12px;
@@ -1170,6 +1211,8 @@
             <input class="finput" type="date" id="inDate" />
             <button class="btn btn-ghost" id="btnToday" style="flex: 0 0 76px">今日</button>
           </div>
+          <!-- 先の日付・ずいぶん前の日付のときだけ出る黄色い注意（止めない） -->
+          <div class="warn-note" id="inDateNote" style="display: none"></div>
         </div>
 
         <div class="frow">
@@ -2068,12 +2111,17 @@
       }
 
       /* ===== 保存・読み込み ===== */
+      /* ★端末の控えが壊れていたとき、黙って立ち直らない。
+         黙って直すと、店の人は「何かあった」と気付けないまま数字が減って見える。
+         （倉庫（クラウド）には残っているので、読み直せば戻る） */
+      var BROKEN_LOCAL = false;
       function load() {
         try {
           var s = JSON.parse(localStorage.getItem(K_SALES) || "[]");
           SALES = Array.isArray(s) ? s : [];
         } catch (e) {
           SALES = [];
+          BROKEN_LOCAL = true;
         }
         try {
           var st = JSON.parse(localStorage.getItem(K_SET) || "{}");
@@ -2939,6 +2987,7 @@
       }
 
       function syncInputChips() {
+        syncDateNote();
         $("payChips")
           .querySelectorAll("[data-pay]")
           .forEach(function (b) {
@@ -3016,14 +3065,36 @@
         syncInputChips();
       }
 
+      /* ★打ち間違いを庇う。止めない。
+         「2026」を「2030」と打つと、その売上は今日の一覧にも今月の集計にも出ないので、
+         入れた瞬間に黄色で知らせる（保存はできる＝前受けを入れたい店もある）。 */
+      function syncDateNote() {
+        var el = $("inDateNote");
+        if (!el) return;
+        var msg = C.dateNote($("inDate").value, todayIso());
+        el.textContent = msg;
+        el.style.display = msg ? "" : "none";
+      }
+
+      // ★断られた欄そのものを赤くする。直したらすぐ消す。
+      var NG_FIELDS = { date: "inDate", name: "inName", people: "inPeople", amount: "inAmount" };
+      function markNg(fields) {
+        Object.keys(NG_FIELDS).forEach(function (k) {
+          var el = $(NG_FIELDS[k]);
+          if (el) el.classList.toggle("ng", (fields || []).indexOf(k) >= 0);
+        });
+      }
+
       function onSave() {
         var raw = readForm();
         var v = C.validateSale(raw);
         if (!v.ok) {
           $("inErr").textContent = v.errors.join("\n");
+          markNg(v.fields);
           return;
         }
         $("inErr").textContent = "";
+        markNg([]);
         if (UI.editId) {
           var idx = -1;
           for (var i = 0; i < SALES.length; i++) {
@@ -3168,10 +3239,15 @@
       }
 
       function stripItem(k, v) {
+        // 桁数で字の大きさを決める（実測：iPhone幅の2列で16pxは12文字まで）
+        var len = String(v).length;
+        var size = len >= 13 ? " len-l" : len >= 10 ? " len-m" : "";
         return (
           '<div class="strip-item"><div class="strip-k">' +
           esc(k) +
-          '</div><div class="strip-v">' +
+          '</div><div class="strip-v' +
+          size +
+          '">' +
           esc(v) +
           "</div></div>"
         );
@@ -8246,6 +8322,12 @@
       function init() {
         $("sheetCss").textContent = SHEET_CSS;
         load();
+        // 控えが壊れていたら、開いたときに必ず言う（黙って直さない）
+        if (BROKEN_LOCAL) {
+          setTimeout(function () {
+            toast("⚠️ 端末の控えが壊れていたので読み直しました。数字が足りなければ知らせてください");
+          }, 400);
+        }
         // 前に入れた判子の余白も切る（一度だけ。切る所が無ければ何もしない）
         trimHankoOnce();
         var t = todayIso();
@@ -8262,10 +8344,24 @@
         $("btnToday").onclick = function () {
           $("inDate").value = todayIso();
           renderDay();
+          syncDateNote();
         };
-        $("inDate").onchange = renderDay;
-        // 金額を打つと印紙の注意が変わるので、入力に合わせて注記を出し直す
-        $("inAmount").oninput = syncInputChips;
+        $("inDate").onchange = function () {
+          renderDay();
+          syncDateNote();
+        };
+        $("inDate").oninput = syncDateNote;
+        // 金額を打つと印紙の注意が変わるので、入力に合わせて注記を出し直す。
+        // ★赤くなった欄は、直した時点で赤を消す（押し直すまで赤いままにしない）
+        $("inAmount").oninput = function () {
+          syncInputChips();
+          $("inAmount").classList.remove("ng");
+        };
+        ["inDate", "inName", "inPeople"].forEach(function (id) {
+          $(id).addEventListener("input", function () {
+            $(id).classList.remove("ng");
+          });
+        });
         $("btnSave").onclick = onSave;
         $("btnDelete").onclick = onDelete;
         $("btnCancelEdit").onclick = function () {

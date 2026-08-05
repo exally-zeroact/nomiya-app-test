@@ -6079,3 +6079,181 @@ test.describe("㉕ 画面の一番上に空白を作らない（ホーム画面�
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
+
+/* ㉖ 実際に操作してみた監査（2026-08-05）で見つけた分の直し */
+test.describe("㉖ 監査で見つけた分", () => {
+  test("★先の日付を入れたら、止めずに黄色い注意を出す", async ({ page }) => {
+    const errors = await open(page);
+    await goto(page, "input");
+    await page.locator("#inDate").fill("2030-01-01");
+    await page.waitForTimeout(150);
+    const note = page.locator("#inDateNote");
+    await expect(note, "先の日付なのに何も言わない").toBeVisible();
+    await expect(note).toContainText("先の日付");
+    // ★止めない（芯）。入れたいなら入れられる
+    await page.locator("#inName").fill("前受け");
+    await page.locator("#inPeople").fill("1");
+    await page.locator("#inAmount").fill("50000");
+    await page.locator("#btnSave").click();
+    await page.waitForTimeout(250);
+    expect(await page.evaluate(() => window.__NOMIYA.sales.length), "止めてしまっている").toBe(1);
+    // 今日に戻したら消える
+    await page.locator("#btnToday").click();
+    await page.waitForTimeout(150);
+    await expect(note).not.toBeVisible();
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★断られたら、その欄が赤くなる（どこを直すか一目で分かる）", async ({ page }) => {
+    const errors = await open(page);
+    await goto(page, "input");
+    await page.locator("#inDate").fill("2026-08-01");
+    await page.locator("#inName").fill("テス子");
+    await page.locator("#inPeople").fill("1");
+    await page.locator("#inAmount").fill("");
+    await page.locator("#btnSave").click();
+    await page.waitForTimeout(200);
+    await expect(page.locator("#inAmount"), "悪い欄が赤くなっていない").toHaveClass(/ng/);
+    await expect(page.locator("#inName"), "関係ない欄まで赤い").not.toHaveClass(/ng/);
+    // 直したら赤が消える
+    await page.locator("#inAmount").fill("8000");
+    await page.waitForTimeout(150);
+    await expect(page.locator("#inAmount"), "直しても赤いまま").not.toHaveClass(/ng/);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★集計の表：金額が大きくても割合と重ならない", async ({ page }) => {
+    const errors = await open(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await addSale(page, {
+      date: "2026-08-01",
+      name: "大口",
+      people: 2,
+      amount: 999999999,
+      pay: "cash",
+      receipt: false,
+    });
+    await goto(page, "sum");
+    await page.waitForTimeout(300);
+    // 表のマスは隣どうしくっついているので、見た目のすき間＝金額の右の余白。
+    // 「溢れていない」＋「右の余白がある」の2つで、数字が割合に重ならないことを保証する。
+    const g = await page.evaluate(() => {
+      let over = 0,
+        pad = 1e9,
+        wide = false;
+      document.querySelectorAll("#sumPay .brk tbody tr").forEach((tr) => {
+        const a = tr.children[2];
+        if (!a) return;
+        if (a.textContent.replace(/[^0-9]/g, "").length >= 9) wide = true;
+        over = Math.max(over, a.scrollWidth - a.clientWidth);
+        pad = Math.min(pad, parseFloat(getComputedStyle(a).paddingRight));
+      });
+      const t = document.querySelector("#sumPay .brk");
+      return { over, pad, wide, tableOver: t.scrollWidth - t.clientWidth };
+    });
+    expect(g.wide, "10桁の金額が表に出ていない＝試験になっていない").toBe(true);
+    expect(g.over, "金額が枠から溢れている").toBe(0);
+    expect(g.tableOver, "表そのものが横にはみ出している").toBe(0);
+    expect(g.pad, "金額と割合のすき間が無い").toBeGreaterThanOrEqual(10);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★端末の控えが壊れていたら、黙って直さずに一言出す", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, {
+      date: "2026-08-01",
+      name: "田中",
+      people: 2,
+      amount: 8000,
+      pay: "cash",
+      receipt: false,
+    });
+    await page.evaluate(() => localStorage.setItem("nomiya_sales_v1", "{壊れたデータ"));
+    await page.reload({ waitUntil: "load" });
+    await page.waitForTimeout(700);
+    await expect(page.locator("#scr-input"), "真っ白になった").toBeVisible();
+    const t = await page.locator("#toast").innerText();
+    expect(t, "壊れていたのに何も言わない").toContain("控え");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* ㉗ 上の数字の並び（司さん指摘 2026-08-05「この見せ方が不細工」）
+   金額が大きいと4つ横並びが潰れ、「組数」が「組／数」、「のべ人数」が「の／べ／人／数」と
+   1文字ずつ縦に割れていた。客単価も枠からはみ出していた。 */
+test.describe("㉗ 上の数字の並びが潰れない", () => {
+  test("★金額が10桁でも、見出しが1文字ずつ縦に割れない・数字がはみ出さない", async ({ page }) => {
+    const errors = await open(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => {
+      const now = new Date().toISOString();
+      const s = window.__NOMIYA.sales;
+      [
+        ["cash", 999999999],
+        ["credit", 12345678],
+        ["paypay", 456789],
+        ["invoice", 3456789],
+        ["tsuke", 98765],
+      ].forEach(([pay, amount], i) =>
+        s.push({
+          id: "x" + i,
+          date: "2026-08-0" + (i + 1),
+          name: "客",
+          people: 2,
+          amount,
+          pay,
+          receipt: "na",
+          memo: "",
+          staff: "",
+          crew: [],
+          updatedAt: now,
+        })
+      );
+    });
+    await goto(page, "sum");
+    await page.waitForTimeout(350);
+    const r = await page.evaluate(() => {
+      const items = [...document.querySelectorAll("#sumStrip .strip-item")];
+      const bad = [];
+      items.forEach((it) => {
+        const k = it.querySelector(".strip-k"),
+          v = it.querySelector(".strip-v");
+        const kh = k.getBoundingClientRect().height;
+        const lh = parseFloat(getComputedStyle(k).lineHeight) || 14;
+        if (kh > lh * 1.6) bad.push("見出しが折れている: " + k.textContent);
+        if (v.scrollWidth - v.clientWidth > 0) bad.push("数字がはみ出す: " + v.textContent);
+      });
+      // 1行に何個並んでいるか（横4つ詰めは、大きい金額だと必ず潰れる）
+      const tops = new Set(items.map((it) => Math.round(it.getBoundingClientRect().top)));
+      return { bad, n: items.length, rows: tops.size };
+    });
+    expect(r.bad, r.bad.join(" / ")).toEqual([]);
+    expect(r.rows, "4つを横1列に詰めている（潰れる元）").toBeGreaterThanOrEqual(2);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("小さい金額のときも、見出しは折れない（普通の店の見え方を壊さない）", async ({ page }) => {
+    const errors = await open(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await addSale(page, {
+      date: "2026-08-01",
+      name: "田中",
+      people: 2,
+      amount: 12000,
+      pay: "cash",
+      receipt: false,
+    });
+    await goto(page, "sum");
+    await page.waitForTimeout(300);
+    const bad = await page.evaluate(() => {
+      const out = [];
+      document.querySelectorAll("#sumStrip .strip-k").forEach((k) => {
+        const lh = parseFloat(getComputedStyle(k).lineHeight) || 14;
+        if (k.getBoundingClientRect().height > lh * 1.6) out.push(k.textContent);
+      });
+      return out;
+    });
+    expect(bad, "見出しが折れている: " + bad.join(",")).toEqual([]);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
