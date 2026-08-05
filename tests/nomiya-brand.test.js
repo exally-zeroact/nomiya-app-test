@@ -227,6 +227,41 @@ describe("紙（A4）は白地に黒。緑を残さない", () => {
   });
 });
 
+/* ★見落とし（2026-08-05）:
+   画面のCSSに、前の緑がそのまま残っていた。
+   ・ドロップダウンの▼（背景画像のSVGなので %23 と書かれていて、#の検索に引っかからなかった）
+   ・出勤の「出たら押す」の字
+   Castally に緑は無い。使ってよい緑は「できた・OK」を表す --c-ok だけ。 */
+describe("画面にも前の緑を残さない（▼のような絵の中まで見る）", () => {
+  const OK_GREEN = ["#1f6b45", "#e9f2ed"]; // できた・OKを表す緑（意味のある1色）
+  const found = (SCREEN_CSS.match(/(?:#|%23)[0-9a-fA-F]{6}/g) || [])
+    .map((h) => "#" + h.replace(/^(#|%23)/, "").toLowerCase())
+    .filter((h) => {
+      const r = parseInt(h.slice(1, 3), 16);
+      const g = parseInt(h.slice(3, 5), 16);
+      const b = parseInt(h.slice(5, 7), 16);
+      return g > r && g > b && OK_GREEN.indexOf(h) < 0;
+    });
+  it("画面のCSSに、意味のない緑が残っていない", () => {
+    expect(found, "画面に前の緑が残っている: " + found.join(" ")).toEqual([]);
+  });
+  it("画面を作るJSの中にも、前の緑を直書きしていない", () => {
+    // 店が選ぶ紙の色（深緑・若草）は店の持ち物なので対象外。それ以外の直書きを見る。
+    const js = HTML.slice(HTML.indexOf("</style>"));
+    const skin = /\{ label: "[^"]+", hex: "#[0-9a-fA-F]{6}" \}|moss: "#[0-9a-fA-F]{6}"/g;
+    const body = js.replace(skin, "").replace(/var SHEET_CSS = \[[\s\S]*?\]\.join\(/, "");
+    const bad = (body.match(/(?:#|%23)[0-9a-fA-F]{6}/g) || [])
+      .map((h) => "#" + h.replace(/^(#|%23)/, "").toLowerCase())
+      .filter((h) => {
+        const r = parseInt(h.slice(1, 3), 16);
+        const g = parseInt(h.slice(3, 5), 16);
+        const b = parseInt(h.slice(5, 7), 16);
+        return g > r && g > b && OK_GREEN.indexOf(h) < 0;
+      });
+    expect(bad, "JSの中に前の緑が残っている: " + bad.join(" ")).toEqual([]);
+  });
+});
+
 describe("identity: 名前を変えるのは表に出る所だけ", () => {
   const read = (f) => fs.readFileSync(path.join(ROOT, f), "utf8");
   it("repo名（package.json）は変えない", () => {

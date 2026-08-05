@@ -222,13 +222,17 @@
         font-weight: 700;
         color: var(--c-flabel);
       }
+      /* ★入力できる欄は16px以上にする。
+         iPhoneは「字が16pxより小さい入力欄」を触ると勝手に画面を拡大し、
+         そのまま戻らないので上に空白が出て画面がずれる（＝スクロールがおかしい）。
+         viewport の maximum-scale で止めるのは間違い＝指2本の拡大まで殺してしまう。 */
       .finput,
       .fselect {
         width: 100%;
         padding: 11px 12px;
         border: 1.5px solid var(--c-line);
         border-radius: 10px;
-        font-size: 15px;
+        font-size: 16px;
         font-family: "Noto Sans JP", sans-serif;
         color: var(--c-text);
         outline: none;
@@ -250,7 +254,7 @@
       .fselect {
         appearance: none;
         -webkit-appearance: none;
-        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%233D9E72' stroke-width='1.6' fill='none' stroke-linecap='round'/></svg>");
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%235a6480' stroke-width='1.6' fill='none' stroke-linecap='round'/></svg>");
         background-repeat: no-repeat;
         background-position: right 12px center;
         padding-right: 30px;
@@ -4645,40 +4649,25 @@
         return no;
       }
 
-      // 相手がいないときに見せる「見本」の請求書（デザインを選ぶために中身は架空）
+      /* 相手がいないときに見せる「見本」の請求書。
+         ★中身（日付・金額・備考）は作らない。
+           店が1件も入れていないのに、売上があるように見える紙を出すのはおかしい。
+           出すのは「枠」だけ＝どの見た目にするかを選ぶためのもの。
+           金額は 0円ではなく「—」。0円と言い切るのも嘘になる。 */
       function sampleInvoice() {
-        var mk = function (d, ppl, amt, memo) {
-          return {
-            id: "sample" + d,
-            date: "2026-07-" + d,
-            name: "◯◯",
-            people: ppl,
-            amount: amt,
-            pay: "invoice",
-            receipt: "na",
-            memo: memo || "",
-            paidDate: null,
-          };
-        };
-        var rows = [
-          mk("05", 2, 12000, "ボトル入れ"),
-          mk("14", 3, 18000, ""),
-          mk("26", 2, 9000, "紹介で来店"),
-        ];
-        var total = 39000;
-        var tx = C.taxIncluded(total, SETTINGS.rate);
         return {
+          sample: true,
           name: "◯◯",
           from: "",
           to: "",
-          rows: rows,
-          count: rows.length,
-          people: 7,
-          total: tx.total,
-          tax: tx.tax,
-          net: tx.net,
-          rate: tx.rate,
-          no: "202607-001",
+          rows: [],
+          count: 0,
+          people: 0,
+          total: 0,
+          tax: 0,
+          net: 0,
+          rate: C.taxIncluded(0, SETTINGS.rate).rate,
+          no: "",
         };
       }
 
@@ -4717,6 +4706,10 @@
       }
 
       function ivParts(iv) {
+        // 見本のときは、金額も番号も出さない（架空の数字を紙に載せない）
+        var yen = function (n) {
+          return iv.sample ? "—" : "¥" + C.comma(n);
+        };
         var ROWS = invRowsFor(SETTINGS.tpl || "card", invToSubLines(iv.name));
         var shown = iv.rows.slice(0, ROWS);
         var marked = C.markFirstOfDate(shown);
@@ -4750,7 +4743,7 @@
             '<div class="iv-meta">請求日　' +
             esc(C.jpDate(invIssueDate(iv))) +
             "<br>No.　" +
-            esc(iv.no) +
+            esc(iv.sample ? "—" : iv.no) +
             "</div>",
           to: (function () {
             var a = C.invoiceTo(PARTNERS, iv.name);
@@ -4765,8 +4758,8 @@
           })(),
           lead: '<div class="iv-lead">ご来店いただきありがとうございました。<br>下記の通りご請求申し上げます。</div>',
           grand:
-            '<div class="iv-grand"><span>ご請求金額（税込）</span><b>¥' +
-            C.comma(iv.total) +
+            '<div class="iv-grand"><span>ご請求金額（税込）</span><b>' +
+            yen(iv.total) +
             "</b></div>",
           cap: '<div class="iv-cap">ご利用明細<span>' + esc(period) + "</span></div>",
           table:
@@ -4781,14 +4774,14 @@
                 " 件（合計に含まれています）</div>"
               : ""),
           sum:
-            '<table class="iv-sum"><tr><td>小計（税抜）</td><td>¥' +
-            C.comma(iv.net) +
+            '<table class="iv-sum"><tr><td>小計（税抜）</td><td>' +
+            yen(iv.net) +
             "</td></tr><tr><td>消費税（" +
             Math.round(iv.rate * 100) +
-            "%）</td><td>¥" +
-            C.comma(iv.tax) +
-            '</td></tr><tr class="t"><td>合計</td><td>¥' +
-            C.comma(iv.total) +
+            "%）</td><td>" +
+            yen(iv.tax) +
+            '</td></tr><tr class="t"><td>合計</td><td>' +
+            yen(iv.total) +
             "</td></tr></table>",
           thanks: '<div class="iv-thanks">またのご来店を<br>お待ちしております</div>',
           // 発行者（会社の情報は紙の中で1回だけ。社名の右端に判子を重ねる）
@@ -7500,7 +7493,7 @@
                   k.key +
                   '"><div class="frow"><span class="flabel">' +
                   esc(k.label) +
-                  '　<span style="color:#7aa08c;font-weight:400">出たら押す</span></span>' +
+                  '　<span style="color:#6b7690;font-weight:400">出たら押す</span></span>' +
                   '<div class="chips" id="wk_items_' +
                   k.key +
                   '"></div>' +
@@ -8029,6 +8022,11 @@
          =================================================================== */
       /* 集計・税理士の紙は「一覧」の中に入った。前の名前(sum/tax)で呼ばれても迷子にしない。
          下ナビの「一覧」を押したときは、いつでも一覧そのものに戻す（探させない）。 */
+      /* ★画面を変えたら、必ずその画面の一番上から見せる。
+         前の画面の位置のまま残ると、途中から始まって「スクロールがおかしい」ことになる。 */
+      function toTop() {
+        window.scrollTo(0, 0);
+      }
       function showScreen(name) {
         if (name === "sum" || name === "tax") {
           UI.listSeg = name;
@@ -8049,6 +8047,7 @@
         renderAll();
         fitAll();
         renderAcct();
+        toTop();
       }
       // 画面の中の切替（一覧＝一覧/集計/税理士の紙、設定＝自社情報/会社/従業員/商品）
       function syncPanes() {
@@ -8071,6 +8070,7 @@
         UI.listSeg = seg;
         syncPanes();
         fitAll();
+        toTop();
       }
       function showSettings(seg) {
         UI.setSeg = seg || UI.setSeg;
@@ -8521,6 +8521,7 @@
               UI.invSeg = b.getAttribute("data-iseg");
               syncPanes();
               fitAll();
+              toTop();
             };
           });
         $("setSeg")
@@ -8529,6 +8530,7 @@
             b.onclick = function () {
               UI.setSeg = b.getAttribute("data-sseg");
               syncPanes();
+              toTop();
             };
           });
         $("btnPartnerNew").onclick = function () {

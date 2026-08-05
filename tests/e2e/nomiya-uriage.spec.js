@@ -884,7 +884,7 @@ test.describe("飲み屋 売上管理", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
-  test("請求書タブ: 未回収がゼロでも見本の請求書が出る（デザインを比べられる）", async ({
+  test("請求書タブ: 未回収がゼロでも見本の請求書の「枠」が出る（デザインを比べられる）", async ({
     page,
   }) => {
     const errors = await open(page);
@@ -900,7 +900,8 @@ test.describe("飲み屋 売上管理", () => {
     // 紙が出る（真っ白にならない）＋「見本」と分かる
     await expect(page.locator("#invSheets .iv-title")).toContainText("請");
     await expect(page.locator("#invSample")).toBeVisible();
-    await expect(page.locator("#invSheets .iv-tbl tbody tr")).toHaveCount(3);
+    // ★中身（架空の売上）は載せない。出すのは枠だけ。
+    await expect(page.locator("#invSheets .iv-tbl tbody tr")).toHaveCount(0);
     const h = await page
       .locator("#invSheets .sheet")
       .first()
@@ -5912,6 +5913,93 @@ test.describe("㉓ ピンチズーム", () => {
     expect(v).toContain("width=device-width");
     expect(v, "maximum-scale で拡大を止めている").not.toContain("maximum-scale");
     expect(v, "user-scalable=no で拡大を止めている").not.toContain("user-scalable");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* ㉔ 司さん指摘（2026-08-05）
+   1) 何も入れていないのに、請求書の見本に架空の中身（日付・金額・備考）が載っていた
+   2) 画面を変えても前の画面の位置のままで、途中から始まる＝スクロールがおかしい
+   3) iPhone は「字が16pxより小さい入力欄」を触ると勝手に画面を拡大する。
+      拡大したまま戻らないので、上に空白が出て画面がずれる。
+      ★maximum-scale で止めるのは間違い（指2本の拡大まで殺す）＝字を16px以上にする */
+test.describe("㉔ 見本の中身・画面の頭出し・iPhoneの勝手な拡大", () => {
+  test("★見本の請求書に、勝手な中身（日付・金額・備考）を載せない", async ({ page }) => {
+    const errors = await open(page);
+    await goto(page, "inv");
+    await expect(page.locator("#invSample")).toBeVisible(); // 相手がいない＝見本
+
+    const paper = page.locator("#invSheets");
+    // 明細の行は1行も無い（架空の売上を作らない）
+    await expect(page.locator("#invSheets .iv-tbl tbody tr")).toHaveCount(0);
+    const text = await paper.innerText();
+    for (const ng of ["12,000", "18,000", "9,000", "39,000", "ボトル入れ", "紹介で来店"]) {
+      expect(text, `見本に架空の中身「${ng}」が載っている`).not.toContain(ng);
+    }
+    // 金額のところは「—」。0円と言い切るのも嘘なので出さない。
+    expect(text, "見本の金額が空欄になっていない").toContain("—");
+    expect(text, "¥0 と嘘の金額を出している").not.toContain("¥0");
+    // ★骨（見た目を選ぶための枠）は今までどおり出す
+    for (const ok of ["請 求 書", "ご請求金額", "ご利用明細", "日付", "金額", "お振込先"]) {
+      expect(text, `見本から「${ok}」まで消えている`).toContain(ok);
+    }
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★画面を変えたら、必ずその画面の一番上から始まる", async ({ page }) => {
+    const errors = await open(page);
+    await page.setViewportSize({ width: 390, height: 844 }); // iPhoneくらい
+    await seed(page);
+
+    const y = () => page.evaluate(() => Math.round(window.scrollY));
+    const scrollDown = async () => {
+      await page.evaluate(() => window.scrollTo(0, 600));
+      await page.waitForTimeout(50);
+      expect(await y(), "そもそも下まで動いていない").toBeGreaterThan(100);
+    };
+
+    // 下ナビで別の画面へ
+    await scrollDown();
+    await goto(page, "inv");
+    expect(await y(), "画面を変えたのに前の位置のまま").toBe(0);
+
+    // 請求書の中の切替（請求書／未回収／入金）
+    await scrollDown();
+    await page.locator("#invSeg [data-iseg='due']").click();
+    expect(await y(), "中の切替で前の位置のまま").toBe(0);
+
+    // 一覧の中の切替（一覧／集計／税理士の紙）
+    await goto(page, "list");
+    await scrollDown();
+    await page.locator("#listSeg [data-lseg='sum']").click();
+    expect(await y(), "一覧の中の切替で前の位置のまま").toBe(0);
+
+    // 右上の歯車
+    await scrollDown();
+    await page.locator("#btnGear").click();
+    expect(await y(), "設定を開いても前の位置のまま").toBe(0);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★入力できる欄は16px以上（iPhoneが勝手に拡大して画面がずれるのを防ぐ）", async ({
+    page,
+  }) => {
+    const errors = await open(page);
+    // 画面を一通り開いて、あとから作られる欄も出しておく
+    for (const s of ["input", "list", "inv", "close", "pay"]) await goto(page, s);
+    for (const g of ["self", "partner", "staff", "item"]) await gotoSet(page, g);
+
+    const small = await page.evaluate(() => {
+      const skip = ["checkbox", "radio", "file", "hidden", "range", "button", "submit", "color"];
+      const out = [];
+      document.querySelectorAll("input,select,textarea").forEach((el) => {
+        if (el.tagName === "INPUT" && skip.indexOf(el.type) >= 0) return;
+        const px = parseFloat(getComputedStyle(el).fontSize);
+        if (px < 16) out.push((el.id || el.className || el.tagName) + "=" + px + "px");
+      });
+      return out;
+    });
+    expect(small, "16pxより小さい入力欄がある＝iPhoneが勝手に拡大する").toEqual([]);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
