@@ -130,31 +130,37 @@ async function useAll(page) {
   for (const k of off) await page.locator(`#st_use [data-use='${k}']`).click();
 }
 
-/* ★印刷＝新しい窓に「紙だけ」を書いて、そこで刷る。
-   同じ画面のまま window.print() すると iPhone で真っ白になる（司さん実機で確認）。
-   ここでは「新しい窓が開く・紙がA4の実寸で入っている・見出しが合っている」を見る。 */
-async function printOpens(page, context, btnSel, want) {
-  const [np] = await Promise.all([context.waitForEvent("page"), page.locator(btnSel).click()]);
-  await np.waitForLoadState("load").catch(() => {});
-  const r = await np.evaluate(() => {
-    const sh = document.querySelector(".sheet");
+/* ★紙は「自前で作ったPDF」で出す。
+   ブラウザの印刷は紙の一番下に URL・日付・ページ番号を勝手に足す（CSSでは消せない）。
+   渡す相手に見せる物なので、自分でPDFを組んで、そのPDFを開く＝足跡が1つも出ない。
+   ここでは「PDFがA4で・中身が入っていて・足跡が無い」を、作ったPDFそのもので確かめる。 */
+async function paperPdf(page, innerId) {
+  return await page.evaluate(async (id) => {
+    const blob = await window.__NOMIYA.buildPdf(id);
+    const u8 = new Uint8Array(await blob.arrayBuffer());
+    let all = "";
+    for (let k = 0; k < u8.length; k++) all += String.fromCharCode(u8[k]);
+    const box = (all.match(/\/MediaBox\s*\[([^\]]+)\]/) || [])[1] || "0 0 0 0";
     return {
-      title: document.title,
-      sheets: document.querySelectorAll(".sheet").length,
-      w: sh ? sh.offsetWidth : 0,
-      h: sh ? sh.offsetHeight : 0,
-      text: (document.body.innerText || "").replace(/\s+/g, " "),
-      // 画面用のCSSを持ち込んでいないこと（持ち込むと真っ白の原因になる）
-      screenCss: /app-header|bottom-nav/.test(document.head.innerHTML),
+      head: all.slice(0, 5),
+      size: u8.length,
+      pages: (all.match(/\/Type\s*\/Page[^s]/g) || []).length,
+      w: Math.round(parseFloat(box.split(" ")[2])),
+      h: Math.round(parseFloat(box.split(" ")[3])),
+      // ★ブラウザが足す「足跡」（URL・ホスト名）が入っていないこと
+      footprint: /nomiya-app|localhost|8123|127\.0\.0\.1/.test(all),
     };
-  });
-  expect(r.sheets, btnSel + " の紙が新しい窓に無い").toBeGreaterThanOrEqual(1);
-  expect(r.w, btnSel + " の紙がA4の幅でない").toBe(794);
-  expect(r.h, btnSel + " の紙がA4の高さでない").toBe(1123);
-  expect(r.screenCss, "画面用のCSSを印刷に持ち込んでいる").toBe(false);
-  if (want && want.title) expect(r.title).toBe(want.title);
-  if (want && want.text) expect(r.text).toContain(want.text);
-  return np;
+  }, innerId);
+}
+async function expectPaper(page, innerId, name) {
+  const r = await paperPdf(page, innerId);
+  expect(r.head, name + " がPDFでない").toBe("%PDF-");
+  expect(r.pages, name + " のページが無い").toBeGreaterThanOrEqual(1);
+  expect(r.w, name + " がA4の幅でない").toBe(595);
+  expect(r.h, name + " がA4の高さでない").toBe(842);
+  expect(r.size, name + " が空っぽ").toBeGreaterThan(20000);
+  expect(r.footprint, "★" + name + " にURLの足跡が入っている").toBe(false);
+  return r;
 }
 
 // 請求書の相手は、代行請求書アプリと同じドロップダウンで選ぶ。
@@ -537,13 +543,9 @@ test.describe("飲み屋 売上管理", () => {
     await seed(page);
     await goto(page, "tax");
     const before = context.pages().length;
-    // ★新しい窓に紙だけを書いて刷る（同じ画面のままだと iPhone で真っ白になる）
-    const tax = await printOpens(page, context, "#btnPrintTax", {
-      title: "売上報告書",
-      text: "売 上 報 告 書",
-    });
-    await tax.close();
-    expect(context.pages().length, "紙の窓が残っている").toBe(before);
+    // ★紙は自前PDF。足跡（URL・日付）が入らない。
+    await expectPaper(page, "taxSheets", "税理士の紙");
+    expect(context.pages().length, "余計な窓が開いている").toBe(before);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
@@ -789,19 +791,18 @@ test.describe("飲み屋 売上管理", () => {
     await expect(page.locator("#invSheets .iv-issuer .iv-logo")).toBeVisible();
     await page.locator("#invLogoPos button[data-lpos='top']").click();
 
-    // ★刷る紙にも、店が選んだ色と書体が乗る（画面だけ変わって紙が素の色、を防ぐ）
-    const invWin = await printOpens(page, context, "#btnPrintInv", { title: "請求書" });
-    const printed = await invWin.evaluate(() => {
-      const el = document.querySelector(".iv-cap");
-      const t = document.querySelector(".iv-title");
+    // ★刷る紙（PDF）は、画面に出ている紙をそのまま写すので、店が選んだ色も必ず乗る
+    const printed = await page.evaluate(() => {
+      const el = document.querySelector("#invSheets .iv-cap");
+      const t = document.querySelector("#invSheets .iv-title");
       return {
         color: el ? getComputedStyle(el).color : "",
         font: t ? getComputedStyle(t).fontFamily : "",
       };
     });
-    expect(printed.color, "店が選んだ色が刷る紙に乗っていない").toBe("rgb(125, 58, 68)");
+    expect(printed.color, "店が選んだ色が紙に乗っていない").toBe("rgb(125, 58, 68)");
     expect(printed.font).toContain("Noto Sans JP");
-    await invWin.close();
+    await expectPaper(page, "invSheets", "請求書");
 
     // 「デザインのまま」で元に戻る
     await page.locator("#invAccent [data-accent='']").click();
@@ -992,7 +993,7 @@ test.describe("飲み屋 売上管理", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
-  test("★印刷は新しい窓に紙だけを出す（画面のCSSを持ち込まない・原寸A4）", async ({
+  test("★紙は自前のPDFで出す（URL・日付・ページ番号の足跡が入らない）", async ({
     page,
     context,
   }) => {
@@ -1000,49 +1001,33 @@ test.describe("飲み屋 売上管理", () => {
     await seed(page);
 
     // 売上帳
-    const list = await printOpens(page, context, "#btnPrintList", {
-      title: "売上帳",
-      text: "売 上 帳",
-    });
-    // ★刷った物そのものを見る（画面ではなく印刷の出力）。A4・1枚・中身が入っている。
-    const pdf = await list.pdf({ printBackground: true, preferCSSPageSize: true });
-    const raw = pdf.toString("latin1");
-    const pages = (raw.match(/\/Type\s*\/Page[^s]/g) || []).length;
-    const box = (raw.match(/\/MediaBox\s*\[([^\]]+)\]/) || [])[1] || "";
-    expect(pages, "刷ったら1枚でない").toBe(1);
-    expect(Math.round(parseFloat(box.split(" ")[2])), "A4の幅でない").toBe(595);
-    expect(Math.round(parseFloat(box.split(" ")[3])), "A4の高さでない").toBe(842);
-    expect(pdf.length, "刷った紙が空っぽ").toBeGreaterThan(20000);
-    await list.close();
-
-    // 税理士の紙も同じように出せる
+    const r = await expectPaper(page, "listSheets", "売上帳");
+    expect(r.pages).toBe(1);
+    // 税理士の紙も同じ
     await goto(page, "tax");
-    const tax = await printOpens(page, context, "#btnPrintTax", {
-      title: "売上報告書",
-      text: "売 上 報 告 書",
-    });
-    await tax.close();
-    // 元の画面は何も変わっていない（紙を置く場所を汚さない）
+    await expectPaper(page, "taxSheets", "税理士の紙");
+    // 元の画面は何も変わっていない（紙を置く場所を汚さない・余計な窓も開かない）
     await expect(page.locator("#printArea .sheet")).toHaveCount(0);
-    expect(context.pages().length, "紙の窓が残っている").toBe(1);
+    expect(context.pages().length, "余計な窓が開いている").toBe(1);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
-  test("★ポップアップを塞がれている端末は、今までどおり同じ画面で刷る", async ({ page }) => {
+  test("★新しい窓を開けない端末は、PDFを保存する（ブラウザの印刷は使わない）", async ({ page }) => {
     const errors = await open(page);
     await seed(page);
     // 新しい窓を開けなくする（会社のiPadなどでよくある）
+    const dl = [];
+    page.on("download", (d) => dl.push(d.suggestedFilename()));
     await page.evaluate(() => {
       window.open = function () {
         return null;
       };
     });
     await page.locator("#btnPrintList").click();
-    await page.waitForTimeout(300);
-    expect(await page.evaluate(() => window.__printed), "刷れていない").toBe(1);
-    await expect(page.locator("#printArea .sheet")).toHaveCount(1);
-    // 印刷が終われば中身は片付けられる
-    await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+    await expect.poll(() => dl.length, { timeout: 20000 }).toBe(1);
+    expect(dl[0], "保存する名前が違う").toBe("売上帳.pdf");
+    // ★ブラウザの印刷は使わない（使うと足跡が出る）
+    expect(await page.evaluate(() => window.__printed), "ブラウザの印刷を使っている").toBe(0);
     await expect(page.locator("#printArea .sheet")).toHaveCount(0);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
@@ -2021,8 +2006,7 @@ test.describe("飲み屋 売上管理", () => {
     await expect(page.locator("#closeSheets")).toContainText("日報（レジ締め）");
     await expect(page.locator("#closeSheets")).toContainText("数え直しても合わず");
 
-    const closeWin = await printOpens(page, context, "#btnPrintClose", { title: "日報" });
-    await closeWin.close();
+    await expectPaper(page, "closeSheets", "日報");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
@@ -2664,8 +2648,7 @@ test.describe("飲み屋 売上管理", () => {
     expect(at("罰金")).not.toBe("");
     expect(at("厚生費")).not.toBe("");
     expect(at("返済")).not.toBe("");
-    const payWin = await printOpens(page, context, "#btnPrintPay", { title: "給与一覧" });
-    await payWin.close();
+    await expectPaper(page, "paySheets", "給与一覧");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
@@ -3370,11 +3353,7 @@ test.describe("⑤ 店ごとの決め方（グレー枠）", () => {
     // 紙は1枚
     await expect(page.locator("#castSheets .sheet")).toHaveCount(1);
 
-    const castWin = await printOpens(page, context, "#btnPrintCast", {
-      title: "給与明細",
-      text: "給 与 明 細",
-    });
-    await castWin.close();
+    await expectPaper(page, "castSheets", "給与明細");
 
     // 閉じられる
     await page.locator("#btnCastClose").click();
@@ -4265,11 +4244,7 @@ test.describe("⑫ 渡した記録の紙", () => {
     await expect(page.locator("#logSheets")).toContainText("5,000");
     await expect(page.locator("#logSheets .sheet")).toHaveCount(1);
 
-    const logWin = await printOpens(page, context, "#btnPrintLog", {
-      title: "渡した記録",
-      text: "渡 し た 記 録",
-    });
-    await logWin.close();
+    await expectPaper(page, "logSheets", "渡した記録");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
@@ -5879,48 +5854,73 @@ test.describe("㉒ 判子と印刷の窓", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
-  test("★印刷の窓から戻れる（戻る・もう一度印刷。刷るときは消える）", async ({ page, context }) => {
+  test("★押すとPDFが開く（作れない端末だけ、紙だけの窓で刷る）", async ({ page, context }) => {
     const errors = await open(page);
     await seed(page);
-    const win = await printOpens(page, context, "#btnPrintList", { title: "売上帳" });
-    const bar = await win.evaluate(() => {
-      const b = document.querySelector(".pbar");
-      const back = document.getElementById("pbClose");
-      const pr = document.getElementById("pbPrint");
-      return {
-        ある: !!b,
-        戻る: back ? back.textContent.trim() : "",
-        印刷: pr ? pr.textContent.trim() : "",
-        画面では見える: b ? getComputedStyle(b).display !== "none" : false,
+
+    // 押すと、作ったPDFを新しい窓で開く
+    const [pdfWin] = await Promise.all([
+      context.waitForEvent("page"),
+      page.locator("#btnPrintList").click(),
+    ]);
+    await page.waitForTimeout(1500);
+    // 元の画面では刷ろうとしない（ブラウザの印刷を使わない＝足跡が出ない）
+    expect(await page.evaluate(() => window.__printed), "元の画面で刷ろうとしている").toBe(0);
+    expect(await page.evaluate(() => window.__PDF_ERR__ || ""), "PDFが作れずに逃げている").toBe("");
+    await pdfWin.close().catch(() => {});
+
+    // ★PDFが作れない端末（古い機種など）は、いままでどおり「紙だけの窓」で刷る
+    await page.evaluate(() => {
+      window.html2canvas = undefined;
+      window.jspdf = undefined;
+      // 取りに行っても失敗させる
+      const add = document.createElement;
+      document.createElement = function (t) {
+        const el = add.call(document, t);
+        if (String(t).toLowerCase() === "script") el.src = "vendor/__ない__.js";
+        return el;
       };
     });
-    expect(bar.ある, "印刷の窓に帯が無い＝戻れない").toBe(true);
-    expect(bar.戻る).toContain("戻る");
-    expect(bar.印刷).toContain("印刷");
-    expect(bar.画面では見える).toBe(true);
-    // ★開いただけで自動的に刷りに行く（押し直させない）
-    await win.waitForTimeout(1200);
-    expect(await win.evaluate(() => window.__printed), "自動で刷りに行っていない").toBe(1);
-    expect(await page.evaluate(() => window.__printed), "元の画面で刷ろうとしている").toBe(0);
-    // 「もう一度印刷」でもう一度出せる
-    await win.locator("#pbPrint").click();
-    await win.waitForTimeout(300);
-    expect(await win.evaluate(() => window.__printed)).toBe(2);
-    // 刷るときは帯を出さない（紙にボタンが写らない）
-    await win.emulateMedia({ media: "print" });
-    const onPaper = await win.evaluate(
-      () => getComputedStyle(document.querySelector(".pbar")).display
-    );
-    await win.emulateMedia({ media: "screen" });
-    expect(onPaper, "刷った紙にボタンが写る").toBe("none");
-    // 戻るを押すと窓が閉じる
+    const [win] = await Promise.all([
+      context.waitForEvent("page"),
+      page.locator("#btnPrintList").click(),
+    ]);
+    await win.waitForLoadState("load").catch(() => {});
+    await win.waitForTimeout(1500);
+    const bar = await win.evaluate(() => {
+      const b = document.querySelector(".pbar");
+      return {
+        紙: document.querySelectorAll(".sheet").length,
+        戻る: !!document.getElementById("pbClose"),
+        印刷: !!document.getElementById("pbPrint"),
+        見える: b ? getComputedStyle(b).display !== "none" : false,
+      };
+    });
+    expect(bar.紙, "逃げ道の窓に紙が無い").toBeGreaterThanOrEqual(1);
+    expect(bar.戻る && bar.印刷 && bar.見える, "逃げ道の窓から戻れない").toBe(true);
+    expect(await win.evaluate(() => window.__printed), "逃げ道で刷りに行っていない").toBe(1);
     const closed = win.waitForEvent("close", { timeout: 5000 }).then(
       () => true,
       () => false
     );
     await win.locator("#pbClose").click();
     expect(await closed, "戻るを押しても閉じない").toBe(true);
-    expect(context.pages().length, "窓が残っている").toBe(1);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* ㉓ 指2本のピンチズーム（小さい字を見たい人が必ずいる） */
+test.describe("㉓ ピンチズーム", () => {
+  test("画面を指2本で拡大できる（止めていない）", async ({ page }) => {
+    const errors = await open(page);
+    const v = await page.evaluate(() => {
+      const m = document.querySelector('meta[name="viewport"]');
+      return m ? m.getAttribute("content") : "";
+    });
+    // ★maximum-scale / user-scalable=no を書くと、iPhoneで指2本の拡大が効かなくなる
+    expect(v).toContain("width=device-width");
+    expect(v, "maximum-scale で拡大を止めている").not.toContain("maximum-scale");
+    expect(v, "user-scalable=no で拡大を止めている").not.toContain("user-scalable");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });

@@ -11,7 +11,9 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co https://cdn.jsdelivr.net; base-uri 'none'; form-action 'none'; object-src 'none'"
     />
-    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+    <!-- ★指2本のピンチズームを止めない（maximum-scale/user-scalable=no を書かない）。
+         小さい字を見たい人が必ずいる。 -->
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Castally — 売上管理</title>
     <!-- ホーム画面に追加したときの見え方（PWA）。
          ★Service Worker は入れない。端末に住み着く物は push で直せないので、
@@ -5322,7 +5324,110 @@
            ・新しい窓には A4 の紙のCSSと紙のHTMLしか無いので、何にも邪魔されない。
              代行請求書アプリと同じやり方。
            ・ポップアップを塞がれている端末だけ、今までどおり同じ画面で印刷する。 */
+      /* ★紙は「自前で作ったPDF」で出す。
+           ブラウザの印刷は、紙の一番下に URL・日付・ページ番号を勝手に足す。
+           これは CSS では消せない（iPhone も PC も同じ）。渡す相手に見せる物なので、
+           自分で PDF を組んで、その PDF を開く。＝足跡が1つも出ない。
+           代行請求書アプリと同じ考え方。
+           PDFが作れない端末だけ、いままでどおり「紙だけの窓」を開いて刷る。 */
+      var _pdfLibs = null;
+      function loadPdfLibs() {
+        if (_pdfLibs) return _pdfLibs;
+        var one = function (src, has) {
+          return new Promise(function (ok, ng) {
+            if (has()) return ok();
+            var el = document.createElement("script");
+            el.src = src;
+            el.onload = function () {
+              has() ? ok() : ng(new Error(src));
+            };
+            el.onerror = function () {
+              ng(new Error(src));
+            };
+            document.head.appendChild(el);
+          });
+        };
+        _pdfLibs = Promise.all([
+          one("vendor/html2canvas.min.js", function () {
+            return !!window.html2canvas;
+          }),
+          one("vendor/jspdf.umd.min.js", function () {
+            return !!(window.jspdf && window.jspdf.jsPDF);
+          }),
+        ]).catch(function (e) {
+          _pdfLibs = null; // 失敗は次に押したとき取り直す
+          throw e;
+        });
+        return _pdfLibs;
+      }
+
+      /* 画面に出ている紙（.sheet）を、そのままの大きさでPDFにする。
+         画面では縮めて見せているので、撮るあいだだけ縮小を外して原寸に戻す。 */
+      async function buildPaperPdf(inner) {
+        await loadPdfLibs();
+        var sheets = Array.prototype.slice.call(inner.querySelectorAll(".sheet"));
+        if (!sheets.length) throw new Error("紙がありません");
+        var wrap = inner.parentElement; // .sheet-scale
+        var keepInner = inner.style.transform;
+        var keepWrap = wrap ? wrap.style.height : "";
+        inner.style.transform = "none"; // 原寸に戻す（撮り終わったら戻す）
+        if (wrap) wrap.style.height = "auto";
+        try {
+          var pdf = new window.jspdf.jsPDF({ orientation: "p", unit: "pt", format: "a4" });
+          var W = pdf.internal.pageSize.getWidth();
+          var H = pdf.internal.pageSize.getHeight();
+          for (var i = 0; i < sheets.length; i++) {
+            var cv = await window.html2canvas(sheets[i], {
+              scale: 2, // A4の紙で約192dpi。刷って字がにじまない細かさ
+              backgroundColor: "#ffffff",
+              useCORS: true,
+              logging: false,
+            });
+            if (i) pdf.addPage();
+            pdf.addImage(cv.toDataURL("image/png"), "PNG", 0, 0, W, H, undefined, "FAST");
+          }
+          return pdf.output("blob");
+        } finally {
+          inner.style.transform = keepInner;
+          if (wrap) wrap.style.height = keepWrap;
+          fitAll();
+        }
+      }
+
       function printSheets(innerId, title) {
+        var inner = $(innerId);
+        if (!inner || !inner.innerHTML.trim()) {
+          toast("⚠️ 印刷するものがありません");
+          return;
+        }
+        toast("📄 " + title + "を作っています…");
+        buildPaperPdf(inner)
+          .then(function (blob) {
+            var url = URL.createObjectURL(blob);
+            var w = window.open(url, "_blank");
+            if (!w) {
+              // 新しい窓を開けない端末は、その場で保存する
+              var a = document.createElement("a");
+              a.href = url;
+              a.download = title + ".pdf";
+              a.click();
+              toast("📄 " + title + " を保存しました。開いて印刷してください");
+            } else {
+              toast("📄 " + title + " を開きました。共有／プリントから印刷できます");
+            }
+            setTimeout(function () {
+              URL.revokeObjectURL(url);
+            }, 60000);
+          })
+          .catch(function (e) {
+            // 何で作れなかったかを残す（端末で困ったときに聞けるように）
+            window.__PDF_ERR__ = String((e && e.message) || e);
+            // PDFが作れない端末＝いままでどおり「紙だけの窓」を開いて刷る
+            printSheetsFallback(innerId, title);
+          });
+      }
+
+      function printSheetsFallback(innerId, title) {
         var inner = $(innerId);
         if (!inner || !inner.innerHTML.trim()) {
           toast("⚠️ 印刷するものがありません");
@@ -8537,6 +8642,10 @@
           return pendingCount();
         },
         showScreen: showScreen,
+        // 紙のPDFを作る（試験から中身を確かめるため。画面の動きは変えない）
+        buildPdf: function (id) {
+          return buildPaperPdf($(id || "listSheets"));
+        },
         renderAll: renderAll,
         syncNow: syncNow,
       };
