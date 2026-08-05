@@ -223,8 +223,8 @@ test.describe("飲み屋 売上管理", () => {
     await expect(page.locator("#dayList .li-nm").first()).toContainText("田中");
     await expect(page.locator("#dayList .li-amt").first()).toHaveText("¥8,000");
     const strip = page.locator("#dayStrip .strip-v");
-    await expect(strip.nth(0)).toHaveText("1 組");
-    await expect(strip.nth(1)).toHaveText("2 人");
+    await expect(strip.nth(0)).toHaveText("1組");
+    await expect(strip.nth(1)).toHaveText("2人");
     await expect(strip.nth(2)).toHaveText("¥8,000");
     // 保存したらフォームは空に戻り、日付は残る（続けて次の組を打てる）
     await expect(page.locator("#inName")).toHaveValue("");
@@ -274,8 +274,8 @@ test.describe("飲み屋 売上管理", () => {
 
     await expect(page.locator("#listSheets tr[data-id]")).toHaveCount(5);
     const strip = page.locator("#listStrip .strip-v");
-    await expect(strip.nth(0)).toHaveText("5 組");
-    await expect(strip.nth(1)).toHaveText("15 人");
+    await expect(strip.nth(0)).toHaveText("5組");
+    await expect(strip.nth(1)).toHaveText("15人");
     await expect(strip.nth(2)).toHaveText("¥82,000");
     // 紙の合計欄
     await expect(page.locator("#listSheets .st-v")).toHaveText("¥82,000");
@@ -510,7 +510,7 @@ test.describe("飲み屋 売上管理", () => {
     await goto(page, "tax");
 
     const strip = page.locator("#taxStrip .strip-v");
-    await expect(strip.nth(0)).toHaveText("5 組");
+    await expect(strip.nth(0)).toHaveText("5組");
     await expect(strip.nth(2)).toHaveText("¥82,000");
     await expect(page.locator("#taxSheets .sh-title")).toHaveText("売 上 報 告 書");
     // 内税の消費税額も出る（82,000 → 7,454）
@@ -4430,7 +4430,7 @@ test.describe("飲み屋 入金管理", () => {
     await twoTsuke(page);
     await inv(page, "due");
     await expect(page.locator("#dueStrip")).toContainText("¥16,000");
-    await expect(page.locator("#dueStrip")).toContainText("1 人");
+    await expect(page.locator("#dueStrip")).toContainText("1人");
     await expect(page.locator("#dueList .li")).toHaveCount(1);
     await expect(page.locator("[data-due-name='田中']")).toContainText("¥16,000");
     await expect(page.locator("[data-due-name='田中']")).toContainText("2件");
@@ -6254,6 +6254,103 @@ test.describe("㉗ 上の数字の並びが潰れない", () => {
       return out;
     });
     expect(bad, "見出しが折れている: " + bad.join(",")).toEqual([]);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* ㉘ 上の数字は「パッと見て分かる」並べ方にする（司さん指摘 2026-08-05）
+   真ん中寄せだと、左の箱と右の箱で数字の位置がバラバラになって比べられない。
+   帳簿と同じで、数字は右端をそろえる。単位は数字の一部にしない。 */
+test.describe("㉘ 上の数字は右端をそろえる", () => {
+  test("★数字の右端が、上下・左右でぴたりとそろう", async ({ page }) => {
+    const errors = await open(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => {
+      const now = new Date().toISOString();
+      const s = window.__NOMIYA.sales;
+      [
+        ["cash", 999999999],
+        ["credit", 12345678],
+        ["paypay", 456789],
+      ].forEach(([pay, amount], i) =>
+        s.push({
+          id: "x" + i,
+          date: "2026-08-0" + (i + 1),
+          name: "客",
+          people: 2,
+          amount,
+          pay,
+          receipt: "na",
+          memo: "",
+          staff: "",
+          crew: [],
+          updatedAt: now,
+        })
+      );
+    });
+    await goto(page, "sum");
+    await page.waitForTimeout(350);
+    const r = await page.evaluate(() => {
+      const items = [...document.querySelectorAll("#sumStrip .strip-item")];
+      const cols = {};
+      const info = items.map((it) => {
+        const v = it.querySelector(".strip-v");
+        const box = it.getBoundingClientRect();
+        const key = Math.round(box.left);
+        const right = Math.round(v.getBoundingClientRect().right);
+        (cols[key] = cols[key] || []).push(right);
+        return {
+          align: getComputedStyle(v).textAlign,
+          unitInNumber: /[0-9]\s+[^0-9,.\s]/.test(v.textContent.trim()),
+          hasUnitTag: !!it.querySelector(".strip-u"),
+          txt: v.textContent.trim(),
+        };
+      });
+      // 同じ列の数字の右端が、ぜんぶ同じか
+      const spread = Object.values(cols).map((a) => Math.max(...a) - Math.min(...a));
+      return { info, spread };
+    });
+    for (const it of r.info) {
+      expect(it.align, `数字が右寄せでない: ${it.txt}`).toBe("right");
+      expect(it.unitInNumber, `単位が数字にくっついて空きができている: ${it.txt}`).toBe(false);
+    }
+    expect(Math.max(...r.spread), "同じ列で数字の右端がそろっていない").toBeLessThanOrEqual(1);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("単位（組・人）は数字と別に、小さく出す", async ({ page }) => {
+    const errors = await open(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await addSale(page, {
+      date: "2026-08-01",
+      name: "田中",
+      people: 2,
+      amount: 12000,
+      pay: "cash",
+      receipt: false,
+    });
+    await goto(page, "sum");
+    await page.waitForTimeout(300);
+    const u = await page.evaluate(() => {
+      const out = [];
+      document.querySelectorAll("#sumStrip .strip-item").forEach((it) => {
+        const v = it.querySelector(".strip-v"),
+          s = it.querySelector(".strip-u");
+        out.push({
+          num: (v.childNodes[0].textContent || "").trim(),
+          unit: s ? s.textContent.trim() : "",
+          numSize: parseFloat(getComputedStyle(v).fontSize),
+          unitSize: s ? parseFloat(getComputedStyle(s).fontSize) : 0,
+        });
+      });
+      return out;
+    });
+    const withUnit = u.filter((x) => x.unit);
+    expect(withUnit.length, "単位が別になっていない").toBeGreaterThanOrEqual(2);
+    for (const x of withUnit) {
+      expect(x.unitSize, `単位が数字と同じ大きさ: ${x.unit}`).toBeLessThan(x.numSize);
+      expect(/^[0-9,¥\-—]+$/.test(x.num), `数字の中に単位が混ざっている: ${x.num}`).toBe(true);
+    }
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });

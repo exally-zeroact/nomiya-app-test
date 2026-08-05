@@ -448,13 +448,15 @@
         gap: 8px;
         margin-bottom: 10px;
       }
+      /* ★数字は帳簿と同じで右端をそろえる。真ん中寄せだと、箱ごとに位置がずれて
+         上下・左右で比べられない（司さん指摘 2026-08-05）。 */
       .strip-item {
         min-width: 0;
         background: var(--c-card);
         border: 1px solid var(--c-line);
         border-radius: 12px;
-        padding: 9px 8px;
-        text-align: center;
+        padding: 9px 10px;
+        text-align: right;
       }
       .strip-item:last-child:nth-child(odd) {
         grid-column: 1 / -1;
@@ -464,6 +466,7 @@
         color: var(--c-label);
         font-weight: 700;
         white-space: nowrap; /* 見出しを1文字ずつ縦に割らない */
+        text-align: left; /* 見出しは左・数字は右＝目が行き来しやすい */
       }
       .strip-v {
         font-family: "DM Mono", monospace;
@@ -471,6 +474,16 @@
         font-weight: 500;
         color: var(--c-text);
         white-space: nowrap;
+        text-align: right;
+        font-variant-numeric: tabular-nums; /* 数字の幅をそろえて、桁の位置を合わせる */
+      }
+      /* 単位（組・人・日前）は数字の一部にしない。小さく添える。 */
+      .strip-u {
+        font-family: "Noto Sans JP", sans-serif;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--c-label);
+        margin-left: 3px;
       }
       /* 桁が多いときは字を小さくして、必ず1行に収める（はみ出させない） */
       .strip-v.len-m {
@@ -3195,8 +3208,8 @@
           (C.isIsoDate(d) ? C.jpDate(d) + "（" + C.weekday(d) + "）" : "この日") + " の売上";
         var sum = C.summarize(rows);
         $("dayStrip").innerHTML =
-          stripItem("組数", sum.count + " 組") +
-          stripItem("人数", sum.people + " 人") +
+          stripItem("組数", C.comma(sum.count), "組") +
+          stripItem("人数", C.comma(sum.people), "人") +
           stripItem("売上", C.yen(sum.amount));
         $("dayList").innerHTML = rows.length
           ? rows.map(saleLi).join("")
@@ -3238,9 +3251,9 @@
         );
       }
 
-      function stripItem(k, v) {
-        // 桁数で字の大きさを決める（実測：iPhone幅の2列で16pxは12文字まで）
-        var len = String(v).length;
+      /* 上の数字1つ分。★単位(u)は数字と分ける★＝数字の右端をそろえるため。 */
+      function stripItem(k, v, u) {
+        var len = String(v).length + (u ? 2 : 0);
         var size = len >= 13 ? " len-l" : len >= 10 ? " len-m" : "";
         return (
           '<div class="strip-item"><div class="strip-k">' +
@@ -3249,6 +3262,7 @@
           size +
           '">' +
           esc(v) +
+          (u ? '<span class="strip-u">' + esc(u) + "</span>" : "") +
           "</div></div>"
         );
       }
@@ -3312,8 +3326,8 @@
         var rows = listRows();
         var sum = C.summarize(rows);
         $("listStrip").innerHTML =
-          stripItem("組数", sum.count + " 組") +
-          stripItem("のべ人数", sum.people + " 人") +
+          stripItem("組数", C.comma(sum.count), "組") +
+          stripItem("のべ人数", C.comma(sum.people), "人") +
           stripItem("売上", C.yen(sum.amount));
 
         $("listSheets").innerHTML = ledgerSheetsHtml(rows);
@@ -3576,8 +3590,8 @@
         // 数字は横1列に詰める（上の塊で場所を取らないように）
         $("sumStrip").innerHTML =
           stripItem("売上", C.yen(sum.amount)) +
-          stripItem("組数", sum.count + " 組") +
-          stripItem("のべ人数", sum.people + " 人") +
+          stripItem("組数", C.comma(sum.count), "組") +
+          stripItem("のべ人数", C.comma(sum.people), "人") +
           stripItem("客単価", C.yen(sum.perPerson));
 
         $("sumPay").innerHTML = brkTable(C.byPayMethod(rows), sum.amount);
@@ -3721,13 +3735,17 @@
         }, 0);
         $("dueStrip").innerHTML =
           stripItem("まだもらってない", C.yen(total)) +
-          stripItem("相手", open.length + " 人") +
+          stripItem("相手", C.comma(open.length), "人") +
           // 期限を決めている店だけ「過ぎている分」を出す。決めていない店には出さない。
           (open.some(function (x) {
             return x.due;
           })
             ? stripItem("期限が過ぎた", C.yen(late))
-            : stripItem("一番古い", oldest && oldest.days != null ? oldest.days + " 日前" : "—"));
+            : stripItem(
+              "一番古い",
+              oldest && oldest.days != null ? C.comma(oldest.days) : "—",
+              oldest && oldest.days != null ? "日前" : ""
+            ));
         $("dueOrder")
           .querySelectorAll("[data-do]")
           .forEach(function (b) {
@@ -4188,8 +4206,8 @@
         var rows = taxRows();
         var sum = C.summarize(rows);
         $("taxStrip").innerHTML =
-          stripItem("組数", sum.count + " 組") +
-          stripItem("のべ人数", sum.people + " 人") +
+          stripItem("組数", C.comma(sum.count), "組") +
+          stripItem("のべ人数", C.comma(sum.people), "人") +
           stripItem("売上", C.yen(sum.amount));
         $("taxSheets").innerHTML = taxSheetHtml(rows);
         fitSheets("taxScale", "taxSheets");
