@@ -23,7 +23,10 @@
     <link rel="icon" href="/icons/icon-192.png" sizes="192x192" type="image/png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- ★black-translucent（＝画面を時計の裏まで広げる）は使わない。
+         広げた分の余白を自分で入れないと、iOSが上を測り直したとき
+         （他のアプリから戻る・向きを変える）に、ヘッダーの上が空白になる。 -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta name="apple-mobile-web-app-title" content="Castally" />
     <meta name="mobile-web-app-capable" content="yes" />
     <link
@@ -107,12 +110,17 @@
         font-size: 14px;
         -webkit-text-size-adjust: 100%;
         background: var(--c-bg);
+        /* ★上で引っ張ったときの跳ね返り（バウンス）を止める。
+           跳ねているあいだ、ヘッダーの上に地の色が出て「空白ができた」ように見える。
+           ホーム画面のアプリでは、これが戻らないことがある。 */
+        overscroll-behavior-y: none;
       }
       body {
         font-family: "Noto Sans JP", sans-serif;
         background: var(--c-bg);
         color: var(--c-text);
         padding-bottom: calc(72px + env(safe-area-inset-bottom));
+        overscroll-behavior-y: none;
       }
 
       /* ===== HEADER ===== */
@@ -125,7 +133,9 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 10px 14px;
+        /* ★万一 iOS が画面を時計の裏まで広げてきても崩れないよう、上の安全な余白を持つ。
+           広げていないときは env(safe-area-inset-top)=0 なので、見た目は変わらない。 */
+        padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
         box-shadow: 0 1px 4px rgba(30, 80, 46, 0.06);
       }
       .app-logo {
@@ -8027,6 +8037,20 @@
       function toTop() {
         window.scrollTo(0, 0);
       }
+      /* ★他のアプリから戻ってきたとき・向きを変えたときに、位置を測り直させる。
+         iOSはここで上の余白を測り違えることがあり、ヘッダーの上に空白が残る。
+         同じ位置に置き直すだけ＝見ている場所は動かない。 */
+      function resnap() {
+        var y = window.scrollY;
+        window.scrollTo(0, y < 0 ? 0 : y);
+      }
+      window.addEventListener("pageshow", resnap);
+      window.addEventListener("orientationchange", function () {
+        setTimeout(resnap, 250);
+      });
+      document.addEventListener("visibilitychange", function () {
+        if (!document.hidden) setTimeout(resnap, 50);
+      });
       function showScreen(name) {
         if (name === "sum" || name === "tax") {
           UI.listSeg = name;

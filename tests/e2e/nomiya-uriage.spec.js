@@ -6003,3 +6003,70 @@ test.describe("㉔ 見本の中身・画面の頭出し・iPhoneの勝手な拡�
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
+
+/* ㉕ ホーム画面に追加したときの、画面の一番上（2026-08-05 司さん実機）
+   症状：ヘッダーの上に大きな空白ができて、画面が下にずれる。
+   ホーム画面のアプリ（standalone）で起きていた。原因は2つ。
+   (1) status-bar-style を black-translucent にしていた
+       ＝画面を時計の裏まで広げる指定。上に食い込ませた分の余白を入れていないと、
+         iOSが上を測り直したとき（他のアプリから戻る・向きを変える等）に、そこが空白になる。
+   (2) 上で引っ張ったときの跳ね返り（バウンス）を止めていなかった
+       ＝跳ねているあいだ、ヘッダーの上に地の色が出る。 */
+test.describe("㉕ 画面の一番上に空白を作らない（ホーム画面のアプリ）", () => {
+  test("★上に食い込ませる指定にしない＋安全な余白を持つ", async ({ page }) => {
+    const errors = await open(page);
+    const meta = await page.evaluate(() => {
+      const m = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+      return m ? m.getAttribute("content") : "";
+    });
+    expect(meta, "black-translucent＝時計の裏まで広げる指定は使わない").not.toBe(
+      "black-translucent"
+    );
+    // 万一 iOS が上に食い込ませてきても崩れないよう、ヘッダーは安全な余白を持つ。
+    // ★書いてある文字ではなくCSSの決まりそのものを見る（コメントに書いただけで緑にしない）
+    const pad = await page.evaluate(() => {
+      const out = [];
+      for (const sh of document.styleSheets) {
+        let rules = [];
+        try {
+          rules = sh.cssRules || [];
+        } catch {
+          continue; // 外から読んでいるCSS（フォント）は中を見られない
+        }
+        for (const r of rules) if (r.selectorText === ".app-header") out.push(r.cssText);
+      }
+      return out.join("|");
+    });
+    expect(pad, "ヘッダーの上に safe-area の余白が無い").toContain("safe-area-inset-top");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★上で引っ張っても跳ね返らない（跳ねる間にヘッダーの上へ空白が出る）", async ({
+    page,
+  }) => {
+    const errors = await open(page);
+    const ob = await page.evaluate(() => ({
+      html: getComputedStyle(document.documentElement).overscrollBehaviorY,
+      body: getComputedStyle(document.body).overscrollBehaviorY,
+    }));
+    expect(ob.html, "htmlの跳ね返りを止めていない").toBe("none");
+    expect(ob.body, "bodyの跳ね返りを止めていない").toBe("none");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★どの画面でも、一番上にしたときヘッダーが画面の一番上にある", async ({ page }) => {
+    const errors = await open(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await seed(page);
+    for (const s of ["input", "list", "inv", "close", "pay", "set"]) {
+      await goto(page, s);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.waitForTimeout(50);
+      const top = await page.evaluate(() =>
+        Math.round(document.querySelector(".app-header").getBoundingClientRect().top)
+      );
+      expect(top, `「${s}」でヘッダーの上に空白がある`).toBe(0);
+    }
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
