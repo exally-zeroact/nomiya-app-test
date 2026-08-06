@@ -103,10 +103,20 @@ describe("飲み屋アプリ 倉庫の向き先（テストはテスト・本番
   });
 
   it("棚のDDLは、どちらの倉庫にもそのまま当てられる（冪等・RLS込み）", () => {
-    expect(SQL).toContain("create table if not exists nomiya_staff");
+    expect(SQL).toContain("create table if not exists castally.nomiya_staff");
     expect(SQL).toContain("enable row level security");
-    expect(SQL).toMatch(/alter table nomiya_staff add column if not exists back_pct/);
-    expect(SQL).toMatch(/alter table nomiya_work add column if not exists amount/);
+    expect(SQL).toMatch(/alter table castally\.nomiya_staff add column if not exists back_pct/);
+    expect(SQL).toMatch(/alter table castally\.nomiya_work add column if not exists amount/);
+    // ★public の窓口(view)は「呼んだ人の権利」で開く＝RLSがそのまま効く。
+    //   ここが抜けると、他の店のデータが見えるようになる。
+    expect(SQL).toMatch(/create or replace view public\.nomiya_sales with \(security_invoker = true\)/);
+    const views = [...SQL.matchAll(/create or replace view public\.(\w+) with \(([^)]*)\)/g)];
+    expect(views.length, "public の窓口が8つない").toBe(8);
+    views.forEach((m) =>
+      expect(m[2].replace(/\s/g, ""), m[1] + " が security_invoker=true でない").toBe(
+        "security_invoker=true"
+      )
+    );
   });
 
   it("★棚のDDLに「消す系」が1つも無い（自動で当てても、データが消えない）", () => {
@@ -126,8 +136,16 @@ describe("飲み屋アプリ 倉庫の向き先（テストはテスト・本番
     expect(bad, "消す系のSQLが入っている: " + bad.join(" / ")).toEqual([]);
 
     // 飲み屋の棚以外に触らない（他アプリと同じ倉庫に同居しているため）
-    const other = stmts.filter((s) => !/nomiya_/i.test(s) && !/create extension/i.test(s));
+    const other = stmts.filter(
+      (s) =>
+        !/nomiya_/i.test(s) &&
+        !/create extension/i.test(s) &&
+        !/^create schema if not exists castally$/i.test(s)
+    );
     expect(other, "飲み屋以外の棚に触っている: " + other.join(" / ")).toEqual([]);
+    // ★他のアプリの部屋(kyuyo/daikome/amakase/daikou/exally)には1文字も触らない
+    const room = stmts.filter((s) => /(kyuyo|daikome|amakase|daikou|exally)\./i.test(s));
+    expect(room, "他のアプリの部屋に触っている: " + room.join(" / ")).toEqual([]);
   });
 
   it("このrepoに、別のアプリのファイルが混ざっていない（飲み屋だけのrepo）", () => {

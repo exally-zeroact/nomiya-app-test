@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <!-- ★指2本の拡大を止めない（maximum-scale/user-scalable=no を書かない） -->
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <title>Castally 管理</title>
+    <meta name="theme-color" content="#070F22" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!-- ★black-translucent は使わない（ヘッダーの上に空白ができる） -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="Castally管理" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Playfair+Display:wght@400&family=DM+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* 色は :root にだけ書く（売上管理アプリと同じ決まり） */
+      :root {
+        --c-hd: #070f22;
+        --c-hd-line: #24304a;
+        --c-hd-logo: #e9c97f;
+        --c-bg: #f6f7fa;
+        --c-card: #ffffff;
+        --c-text: #0f1728;
+        --c-label: #5a6480;
+        --c-line: #cfd5e2;
+        --c-line-soft: #e1e4eb;
+        --c-btn: #e7ecf5;
+        --c-btn-t: #1b2740;
+        --c-btn2-line: #7a88a5;
+        --c-on: #0f1728;
+        --c-danger: #a33320;
+        --c-danger-bg: #fbeeec;
+        --c-ok: #1f6b45;
+        --c-ok-bg: #e9f2ed;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html {
+        font-size: 14px;
+        -webkit-text-size-adjust: 100%;
+        background: var(--c-bg);
+        overscroll-behavior-y: none;
+      }
+      body {
+        font-family: "Noto Sans JP", sans-serif;
+        background: var(--c-bg);
+        color: var(--c-text);
+        overscroll-behavior-y: none;
+        padding-bottom: 40px;
+      }
+      .app-header {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        background: var(--c-hd);
+        border-bottom: 1px solid var(--c-hd-line);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
+      }
+      .app-logo {
+        font-family: "Playfair Display", Georgia, "Times New Roman", serif;
+        font-size: 22px;
+        color: var(--c-hd-logo);
+        line-height: 1;
+      }
+      .app-title {
+        margin-left: auto;
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--c-hd-logo);
+        opacity: 0.8;
+      }
+      .wrap {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 14px;
+      }
+      .card {
+        background: var(--c-card);
+        border: 1px solid var(--c-line-soft);
+        border-radius: 14px;
+        padding: 14px;
+        margin-bottom: 12px;
+      }
+      /* ★入力できる欄は16px以上（iPhoneが勝手に拡大して画面がずれるのを防ぐ） */
+      input,
+      button,
+      select {
+        font-family: inherit;
+        font-size: 16px;
+      }
+      .fin {
+        width: 100%;
+        padding: 11px 12px;
+        border: 1.5px solid var(--c-line);
+        border-radius: 10px;
+        background: var(--c-card);
+        color: var(--c-text);
+        margin-bottom: 10px;
+        outline: none;
+      }
+      .btn {
+        width: 100%;
+        padding: 12px;
+        border: 1.5px solid var(--c-btn2-line);
+        border-radius: 12px;
+        background: var(--c-btn);
+        color: var(--c-btn-t);
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .lbl {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--c-label);
+        margin-bottom: 6px;
+      }
+      .msg {
+        color: var(--c-danger);
+        font-size: 12px;
+        font-weight: 700;
+        min-height: 16px;
+        margin: 2px 0 8px;
+      }
+      .hide {
+        display: none !important;
+      }
+      /* 店の行 */
+      .shop {
+        background: var(--c-card);
+        border: 1px solid var(--c-line-soft);
+        border-radius: 14px;
+        padding: 12px 14px;
+        margin-bottom: 10px;
+      }
+      .shop .nm {
+        font-size: 16px;
+        font-weight: 700;
+      }
+      .shop .em {
+        font-size: 12px;
+        color: var(--c-label);
+        word-break: break-all;
+        margin-top: 2px;
+      }
+      .shop .meta {
+        font-family: "DM Mono", monospace;
+        font-size: 11px;
+        color: var(--c-label);
+        margin-top: 4px;
+      }
+      .seg {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px dashed var(--c-line-soft);
+      }
+      .seg button {
+        padding: 8px 14px;
+        border: 1.5px solid var(--c-line);
+        border-radius: 999px;
+        background: var(--c-card);
+        color: var(--c-label);
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .seg button.on {
+        border-color: var(--c-on);
+        border-width: 2px;
+        color: var(--c-text);
+      }
+      .seg button.on.stop {
+        border-color: var(--c-danger);
+        color: var(--c-danger);
+        background: var(--c-danger-bg);
+      }
+      .tools {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .tools .fin {
+        margin-bottom: 0;
+      }
+      .tools .btn {
+        width: auto;
+        white-space: nowrap;
+        padding: 11px 16px;
+      }
+      .stat {
+        font-size: 12px;
+        color: var(--c-label);
+        margin: 0 2px 10px;
+      }
+      .empty {
+        text-align: center;
+        color: var(--c-label);
+        font-size: 13px;
+        padding: 24px;
+      }
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: 18px;
+        transform: translateX(-50%);
+        background: var(--c-hd);
+        color: var(--c-card);
+        padding: 10px 16px;
+        border-radius: 10px;
+        font-size: 13px;
+        opacity: 0;
+        transition: opacity 0.2s;
+        pointer-events: none;
+        z-index: 30;
+      }
+      .toast.show {
+        opacity: 1;
+      }
+      .out {
+        margin-left: auto;
+        background: none;
+        border: 1px solid var(--c-hd-line);
+        border-radius: 10px;
+        color: var(--c-hd-logo);
+        font-size: 12px;
+        padding: 6px 10px;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="app-header">
+      <span class="app-logo">Castally</span>
+      <span class="app-title">管理</span>
+      <button class="out hide" type="button" id="btnOut">ログアウト</button>
+    </header>
+
+    <!-- ログイン -->
+    <div class="wrap" id="login">
+      <div class="card">
+        <div class="lbl">管理者のアカウントで入る</div>
+        <input class="fin" type="email" id="email" placeholder="メールアドレス" autocomplete="username" />
+        <input
+          class="fin"
+          type="password"
+          id="pw"
+          placeholder="パスワード"
+          autocomplete="current-password"
+        />
+        <div class="msg" id="msg"></div>
+        <button class="btn" type="button" id="btnIn">ログイン</button>
+      </div>
+    </div>
+
+    <!-- 管理者ではない -->
+    <div class="wrap hide" id="denied">
+      <div class="card empty">
+        このアカウントは管理者ではありません。<br />管理者のアカウントで入り直してください。
+      </div>
+    </div>
+
+    <!-- 店の一覧 -->
+    <div class="wrap hide" id="panel">
+      <div class="tools">
+        <input class="fin" id="q" placeholder="店名・メールでしぼる" />
+        <button class="btn" type="button" id="btnReload">更新</button>
+      </div>
+      <div class="stat" id="stat"></div>
+      <div id="list"></div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.111.0/dist/umd/supabase.js"></script>
+    <script src="js/supa-config.js"></script>
+    <script>
+      /* Castally 管理 — 司さん（管理者）だけが、店ごとの利用状態を見て変える画面。
+         ------------------------------------------------------------------
+         棚は Exally と共通のものをそのまま使う（新しい棚は作っていない）:
+           exally_admins       … ここに載っている人だけが管理者（自分の行だけ読める）
+           exally_entitlements … 店ごとの利用状態（app='nomiya' の行がCastally）
+           castally.nomiya_settings … 店名。★管理者だけ「読める」許可を足した★（書けない）
+         止めるのは「お金の話」だけ。データは消さない＝また使えるようにすれば元に戻る。 */
+      var APP = "nomiya";
+      var PLANS = [
+        { key: "trial", label: "体験" },
+        { key: "paid", label: "有料" },
+        { key: "free", label: "無料" },
+        { key: "disabled", label: "停止" },
+      ];
+      var $ = function (id) {
+        return document.getElementById(id);
+      };
+      var esc = function (s) {
+        return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+        });
+      };
+      var SB =
+        window.supabase && window.SUPA
+          ? window.supabase.createClient(window.SUPA.url, window.SUPA.key)
+          : null;
+      var ROWS = [];
+      var NAMES = {};
+      var toastT = null;
+      function toast(m) {
+        var el = $("toast");
+        el.textContent = m;
+        el.classList.add("show");
+        clearTimeout(toastT);
+        toastT = setTimeout(function () {
+          el.classList.remove("show");
+        }, 2200);
+      }
+      function show(which) {
+        ["login", "denied", "panel"].forEach(function (id) {
+          $(id).classList.toggle("hide", id !== which);
+        });
+        $("btnOut").classList.toggle("hide", which === "login");
+      }
+      function jp(iso) {
+        if (!iso) return "";
+        var d = new Date(iso);
+        if (isNaN(d)) return "";
+        return d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate();
+      }
+
+      async function boot() {
+        if (!SB) {
+          $("msg").textContent = "つながりません。電波を確かめて開き直してください";
+          return;
+        }
+        var s = null;
+        try {
+          s = (await SB.auth.getSession()).data.session;
+        } catch (e) {
+          /* つながらないときはログイン画面のまま */
+        }
+        if (s && s.user) await afterLogin();
+        else show("login");
+      }
+
+      async function afterLogin() {
+        var admin = false;
+        try {
+          var u = (await SB.auth.getUser()).data.user;
+          var r = await SB.from("exally_admins")
+            .select("account_id")
+            .eq("account_id", u.id)
+            .maybeSingle();
+          admin = !!(r && r.data);
+        } catch (e) {
+          admin = false;
+        }
+        if (!admin) {
+          show("denied");
+          return;
+        }
+        show("panel");
+        await load();
+      }
+
+      async function load() {
+        $("stat").textContent = "読んでいます…";
+        var ent = await SB.from("exally_entitlements")
+          .select("account_id,app,plan,email,created_at,updated_at")
+          .eq("app", APP);
+        if (ent.error) {
+          $("stat").textContent = "読めませんでした: " + ent.error.message;
+          return;
+        }
+        ROWS = ent.data || [];
+        NAMES = {};
+        // 店名は「店の設定」から。読めなくても一覧は出す（メールだけになる）。
+        var st = await SB.from("nomiya_settings").select("account_id,config,updated_at");
+        if (!st.error) {
+          (st.data || []).forEach(function (r) {
+            var cfg = r.config || {};
+            NAMES[r.account_id] = { store: cfg.store || "", at: r.updated_at || "" };
+          });
+        }
+        render();
+      }
+
+      function render() {
+        var q = ($("q").value || "").trim().toLowerCase();
+        var list = ROWS.slice().sort(function (a, b) {
+          return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+        });
+        if (q) {
+          list = list.filter(function (r) {
+            var n = (NAMES[r.account_id] || {}).store || "";
+            return (
+              String(r.email || "").toLowerCase().indexOf(q) >= 0 || n.toLowerCase().indexOf(q) >= 0
+            );
+          });
+        }
+        var stop = ROWS.filter(function (r) {
+          return r.plan === "disabled";
+        }).length;
+        $("stat").textContent = "全部で " + ROWS.length + " 店（止めている店 " + stop + "）";
+        $("list").innerHTML = list.length
+          ? list
+              .map(function (r) {
+                var info = NAMES[r.account_id] || {};
+                return (
+                  '<div class="shop" data-acct="' +
+                  esc(r.account_id) +
+                  '"><div class="nm">' +
+                  esc(info.store || "（店名まだ）") +
+                  '</div><div class="em">' +
+                  esc(r.email || "") +
+                  '</div><div class="meta">はじめ ' +
+                  esc(jp(r.created_at)) +
+                  (info.at ? " ／ 最後に触った " + esc(jp(info.at)) : "") +
+                  '</div><div class="seg">' +
+                  PLANS.map(function (p) {
+                    return (
+                      '<button type="button" data-plan="' +
+                      p.key +
+                      '" class="' +
+                      (r.plan === p.key ? "on" + (p.key === "disabled" ? " stop" : "") : "") +
+                      '">' +
+                      p.label +
+                      "</button>"
+                    );
+                  }).join("") +
+                  "</div></div>"
+                );
+              })
+              .join("")
+          : '<div class="empty">まだ1店もありません</div>';
+        $("list")
+          .querySelectorAll(".shop")
+          .forEach(function (box) {
+            box.querySelectorAll("[data-plan]").forEach(function (b) {
+              b.onclick = function () {
+                setPlan(box.getAttribute("data-acct"), b.getAttribute("data-plan"));
+              };
+            });
+          });
+      }
+
+      async function setPlan(acct, plan) {
+        var row = ROWS.filter(function (r) {
+          return r.account_id === acct;
+        })[0];
+        if (!row || row.plan === plan) return;
+        var before = row.plan;
+        row.plan = plan; // 先に画面を変える（押した手ごたえ）。失敗したら戻す。
+        render();
+        var r = await SB.from("exally_entitlements")
+          .update({ plan: plan, updated_at: new Date().toISOString() })
+          .eq("account_id", acct)
+          .eq("app", APP);
+        if (r.error) {
+          row.plan = before;
+          render();
+          toast("⚠️ 変えられませんでした: " + r.error.message);
+          return;
+        }
+        var name = (NAMES[acct] || {}).store || row.email || "この店";
+        toast(
+          plan === "disabled" ? "⛔ " + name + " を止めました" : "✅ " + name + " を" + PLANS.filter(function (p) {
+            return p.key === plan;
+          })[0].label + "にしました"
+        );
+      }
+
+      $("btnIn").onclick = async function () {
+        $("msg").textContent = "";
+        var em = $("email").value.trim();
+        var pw = $("pw").value;
+        if (!em || !pw) {
+          $("msg").textContent = "メールとパスワードを入れてください";
+          return;
+        }
+        var r = await SB.auth.signInWithPassword({ email: em, password: pw });
+        if (r.error) {
+          $("msg").textContent = "入れませんでした（メールかパスワードが違います）";
+          return;
+        }
+        await afterLogin();
+      };
+      $("pw").onkeydown = function (e) {
+        if (e.key === "Enter") $("btnIn").click();
+      };
+      $("btnOut").onclick = async function () {
+        try {
+          await SB.auth.signOut();
+        } catch (e) {
+          /* つながらなくても画面は戻す */
+        }
+        show("login");
+      };
+      $("btnReload").onclick = load;
+      $("q").oninput = render;
+      window.__ADMIN = {
+        rows: function () {
+          return ROWS;
+        },
+        names: function () {
+          return NAMES;
+        },
+      };
+      boot();
+    </script>
+  </body>
+</html>

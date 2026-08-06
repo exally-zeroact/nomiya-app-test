@@ -274,11 +274,17 @@ describe("identity: 名前を変えるのは表に出る所だけ", () => {
       true
     );
   });
-  it("クラウドの棚の名前は nomiya_ のまま", () => {
+  it("クラウドの棚は castally の部屋の nomiya_ のまま", () => {
+    // 2026-08-06 倉庫をアプリごとの部屋(schema)に分けた。
+    // 実の棚は castally の部屋。棚の名前(nomiya_*)は変えない＝アプリのコードはそのまま。
     const sql = read("supabase/schema-nomiya.sql");
-    const tables = [...sql.matchAll(/create table if not exists (\w+)/g)].map((m) => m[1]);
-    expect(tables.length).toBeGreaterThan(0);
-    expect(tables.filter((x) => !x.startsWith("nomiya_"))).toEqual([]);
+    const full = [...sql.matchAll(/create table if not exists ([\w.]+)/g)].map((m) => m[1]);
+    expect(full.length).toBeGreaterThan(0);
+    expect(
+      full.filter((x) => !x.startsWith("castally.nomiya_")),
+      "castally の部屋の外に棚を作っている: " + full.join(" ")
+    ).toEqual([]);
+    const tables = full.map((x) => x.replace("castally.", ""));
     [
       "nomiya_sales",
       "nomiya_settings",
@@ -304,7 +310,15 @@ describe("identity: 名前を変えるのは表に出る所だけ", () => {
     expect(/class="app-logo">Castally</.test(HTML)).toBe(true);
     // 画面に「Exally／エクサリー」は残さない（ログイン部品の名前は別）
     const body = HTML.slice(HTML.indexOf("<body>"));
-    const shown = body.replace(/ExallyLogin/g, "").match(/Exally|エクサリー/g) || [];
+    // 画面に出ない物（コメント・棚の名前 exally_entitlements）は数えない
+    const shown =
+      body
+        .replace(/<!--[\s\S]*?-->/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/\/\/[^\r\n]*/g, "")
+        .replace(/ExallyLogin/g, "")
+        .replace(/exally_\w+/g, "")
+        .match(/Exally|エクサリー/g) || [];
     expect(shown, "画面に Exally が残っている").toEqual([]);
   });
 });

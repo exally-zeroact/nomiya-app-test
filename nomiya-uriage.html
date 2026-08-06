@@ -1156,6 +1156,38 @@
         padding: 7px 10px;
         margin-top: 6px;
       }
+      .stop-ov {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 200;
+        background: var(--c-hd);
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+      .stop-ov.open {
+        display: flex;
+      }
+      .stop-card {
+        background: var(--c-card);
+        border-radius: 16px;
+        padding: 22px 20px;
+        max-width: 380px;
+        width: 100%;
+        text-align: center;
+      }
+      .stop-h {
+        font-size: 17px;
+        font-weight: 700;
+        margin-bottom: 10px;
+      }
+      .stop-b {
+        font-size: 13px;
+        color: var(--c-label);
+        line-height: 1.9;
+        margin-bottom: 16px;
+      }
       .err {
         color: var(--c-danger);
         font-size: 12px;
@@ -1977,6 +2009,18 @@
     <!-- 印刷のときだけ中身が入る（画面には出ない） -->
     <div id="printArea"></div>
 
+    <!-- 利用が止まっているときだけ出る。データは消していない＝また使えるようにすれば戻る。 -->
+    <div class="stop-ov" id="stopOv">
+      <div class="stop-card">
+        <div class="stop-h">ご利用が止まっています</div>
+        <div class="stop-b">
+          お店のデータは<b>そのまま残っています</b>。<br />
+          また使えるようにすれば、すぐ元どおりになります。
+        </div>
+        <button class="btn btn-ghost" type="button" id="stopOut">ログアウト</button>
+      </div>
+    </div>
+
     <div class="toast" id="toast"></div>
 
     <!-- 判子画像の白抜き（代行請求アプリと同じモジュールを使う） -->
@@ -2773,7 +2817,42 @@
         showLogin(false);
         renderAll();
         await syncNow(false);
+        await checkEntitlement();
       }
+      /* ★利用の状態（体験／有料／無料／停止）。決めるのは管理画面 castally-admin.html。
+         棚は Exally と同じ exally_entitlements を使う（app='nomiya' の行がCastally）。
+         ★つながらないときは絶対に止めない★
+           電波が悪いだけで店が使えなくなるのが一番まずい。読めなければ黙って通す。
+         止めてもデータは1行も消さない＝また使えるようにすれば元どおり。 */
+      var ENT_APP = "nomiya";
+      async function checkEntitlement() {
+        if (!SB || !ACCOUNT) return;
+        try {
+          var r = await SB.from("exally_entitlements")
+            .select("plan")
+            .eq("account_id", ACCOUNT)
+            .eq("app", ENT_APP)
+            .maybeSingle();
+          if (r.error) return; // 読めない＝止めない
+          if (!r.data) {
+            // はじめての店は「体験」で始める（自分の行だけ作れる決まり）
+            await SB.from("exally_entitlements").insert({
+              account_id: ACCOUNT,
+              app: ENT_APP,
+              plan: "trial",
+              email: ACCOUNT_EMAIL || null,
+            });
+            return;
+          }
+          showStopped(r.data.plan === "disabled");
+        } catch (e) {
+          /* 何かあっても店は止めない */
+        }
+      }
+      function showStopped(on) {
+        $("stopOv").classList.toggle("open", !!on);
+      }
+
       async function doLogout() {
         var n = pendingCount();
         if (n) {
@@ -2855,6 +2934,7 @@
         renderAll();
         renderAcct();
         await syncNow(false);
+        await checkEntitlement();
       }
 
       /* ===== 期間 ===== */
@@ -8650,6 +8730,7 @@
           };
         });
         $("btnGear").onclick = toggleGear;
+        $("stopOut").onclick = doLogout;
         $("listSeg")
           .querySelectorAll("[data-lseg]")
           .forEach(function (b) {
@@ -8753,6 +8834,10 @@
 
       // 画面テスト用（E2Eから中身を確かめる）
       window.__NOMIYA = {
+        // 試験から倉庫を覗くための入口（利用の状態の行を確かめる）
+        get sb() {
+          return SB;
+        },
         get sales() {
           return SALES;
         },

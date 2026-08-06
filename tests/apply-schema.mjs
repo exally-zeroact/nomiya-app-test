@@ -49,8 +49,17 @@ const bad = stmts.filter((s) =>
 );
 if (bad.length) die("消す系のSQLが入っています:\n  " + bad.join("\n  "));
 
-const other = stmts.filter((s) => !/nomiya_/i.test(s) && !/create extension/i.test(s));
+// 2026-08-06 room split: allow only creating the castally room
+const other = stmts.filter(
+  (s) =>
+    !/nomiya_/i.test(s) &&
+    !/create extension/i.test(s) &&
+    !/^create schema if not exists castally$/i.test(s)
+);
 if (other.length) die("飲み屋以外の棚に触る文があります:\n  " + other.join("\n  "));
+
+const roomNg = stmts.filter((s) => /(kyuyo|daikome|amakase|daikou|exally)\./i.test(s));
+if (roomNg.length) die("hoka no heya ni fureru bun: " + roomNg.join(" | "));
 
 console.log("SQLを確かめた: " + stmts.length + "文 / 消す系 0件 / 飲み屋以外 0件");
 
@@ -150,14 +159,14 @@ try {
 
   const t = await run(
     "select tablename, rowsecurity from pg_tables " +
-      "where schemaname='public' and tablename like 'nomiya_%' order by 1"
+      "where schemaname='castally' and tablename like 'nomiya_%' order by 1"
   );
   console.log("  棚（RLS）");
   t.forEach((r) => console.log("    " + String(r.tablename).padEnd(18) + " RLS=" + r.rowsecurity));
 
   const c = await run(
     "select table_name, column_name from information_schema.columns " +
-      "where table_schema='public' and table_name like 'nomiya_%' " +
+      "where table_schema='castally' and table_name like 'nomiya_%' " +
       "and column_name in ('crew','use_items','picks','back_pct','amount','paid_cash','close_wday','pay_after','birth','adj','paid_amount','pay_from','ord','how','paid_by','pay_term') order by 1,2"
   );
   console.log("\n  あとから足した列");
@@ -181,13 +190,29 @@ try {
   const miss = want.filter(
     ([tb, col]) => !c.some((r) => r.table_name === tb && r.column_name === col)
   );
+  // public の窓口(view)が8つあり、全部「呼んだ人の権利」で開くこと。
+  // ここが1つでも欠けると、アプリから棚が見えない／他店のデータが見える、のどちらかになる。
+  const v = await run(
+    "select c.relname, coalesce(array_to_string(c.reloptions,','),'') opts from pg_class c " +
+      "join pg_namespace n on n.oid=c.relnamespace " +
+      "where n.nspname='public' and c.relkind='v' and c.relname like 'nomiya_%' order by 1"
+  );
+  const vBad = v.filter((r) => !/security_invoker/i.test(r.opts) || !/true/i.test(r.opts));
   console.log("");
-  if (t.length === 8 && !miss.length) {
-    console.log("APPLY RESULT: OK（棚8つ・必要な列すべて入った）");
+  console.log("  public の窓口(view)");
+  v.forEach((r) => console.log("    " + String(r.relname).padEnd(18) + r.opts));
+
+  console.log("");
+  if (t.length === 8 && !miss.length && v.length === 8 && !vBad.length) {
+    console.log("APPLY RESULT: OK（棚8つ・窓口8つ・必要な列すべて入った）");
   } else {
     console.log(
       "APPLY RESULT: NG（棚 " +
         t.length +
+        "／窓口 " +
+        v.length +
+        "／呼んだ人の権利でない窓口 " +
+        (vBad.map((r) => r.relname).join(", ") || "なし") +
         "／足りない列 " +
         (miss.map((x) => x.join(".")).join(", ") || "なし") +
         "）"

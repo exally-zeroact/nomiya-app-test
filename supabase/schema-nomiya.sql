@@ -24,6 +24,15 @@
 --             端末でも打てる（オフライン）ので、突合の鍵は端末が作る id（cid）。
 -- ════════════════════════════════════════════════════════════════════════
 
+-- ---------------------------------------------------------------
+-- ★2026-08-06 倉庫をアプリごとの部屋(schema)に分けた。
+--   飲み屋(Castally)の実の棚は castally の部屋にある。
+--   public には同じ名前の窓口(view)を置いてあり、アプリのコードは今までどおり。
+--   窓口は security_invoker=true ＝「呼んだ人の権利」で開くので、
+--   ★RLS(本人の行だけ)はそのまま効く★。ここを false にすると全店のデータが漏れる。
+-- ---------------------------------------------------------------
+create schema if not exists castally;
+
 create extension if not exists pgcrypto;
 
 -- ── 売上（1組のお会計） ───────────────────────────────────────────────
@@ -33,7 +42,7 @@ create extension if not exists pgcrypto;
 --   paid_date    = 入金日（請求書送り・ツケが回収済みになった日。未回収は null）
 --   staff        = 担当（誰の客か）。今は画面に出さないが、後からキャスト別売上を
 --                  出すときに過去分が空だと使えないので、最初から器を持つ。
-create table if not exists nomiya_sales (
+create table if not exists castally.nomiya_sales (
   id         uuid primary key default gen_random_uuid(),
   account_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   cid        text not null,
@@ -55,20 +64,20 @@ create table if not exists nomiya_sales (
   deleted_at timestamptz,
   unique (account_id, cid)
 );
-create index if not exists idx_nomiya_sales_acct_ymd on nomiya_sales(account_id, ymd);
-create index if not exists idx_nomiya_sales_acct_upd on nomiya_sales(account_id, updated_at);
+create index if not exists idx_nomiya_sales_acct_ymd on castally.nomiya_sales(account_id, ymd);
+create index if not exists idx_nomiya_sales_acct_upd on castally.nomiya_sales(account_id, updated_at);
 -- 既に作ってある店にも足す（あとから列を増やすときはこの形で書く）
-alter table nomiya_sales add column if not exists paid_cash boolean not null default false;
-alter table nomiya_sales add column if not exists crew jsonb not null default '[]'::jsonb;
+alter table castally.nomiya_sales add column if not exists paid_cash boolean not null default false;
+alter table castally.nomiya_sales add column if not exists crew jsonb not null default '[]'::jsonb;
 -- 「調整」に入れる印（人が1件ずつ選ぶ。領収書の記録そのものは変えない）
-alter table nomiya_sales add column if not exists adj boolean not null default false;
+alter table castally.nomiya_sales add column if not exists adj boolean not null default false;
 -- 入金の記録で埋まった分の印（空＝前の作りで入金済みにした分）
-alter table nomiya_sales add column if not exists paid_by text not null default '';
+alter table castally.nomiya_sales add column if not exists paid_by text not null default '';
 
 -- ── 宛先（請求書送りの相手） ──────────────────────────────────────────
 --   name  = 会社名（そのまま売上の名前になる＝突合の鍵）
 --   honor = 御中 / 様
-create table if not exists nomiya_partners (
+create table if not exists castally.nomiya_partners (
   id           uuid primary key default gen_random_uuid(),
   account_id   uuid not null default auth.uid() references auth.users(id) on delete cascade,
   name         text not null,
@@ -82,14 +91,14 @@ create table if not exists nomiya_partners (
   unique (account_id, name)
 );
 -- 既に作ってある店にも足す
-alter table nomiya_partners add column if not exists pay_term jsonb not null default '{"kind":"none","n":0}'::jsonb;
-create index if not exists idx_nomiya_partners_acct on nomiya_partners(account_id, name);
+alter table castally.nomiya_partners add column if not exists pay_term jsonb not null default '{"kind":"none","n":0}'::jsonb;
+create index if not exists idx_nomiya_partners_acct on castally.nomiya_partners(account_id, name);
 
 -- ── 請求書番号の台帳（相手＋期間ごとに1つ） ───────────────────────────
 --   端末の中だけに置くと、機種を替えた時に番号が重複・欠番する。
 --   （適格請求書の写しを7年保存する話に直結するので、クラウドに置く）
 --   key  = 相手＋期間（アプリが作る一意キー）
-create table if not exists nomiya_invoices (
+create table if not exists castally.nomiya_invoices (
   id         uuid primary key default gen_random_uuid(),
   account_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   key        text not null,
@@ -101,13 +110,13 @@ create table if not exists nomiya_invoices (
   updated_at timestamptz not null default now(),
   unique (account_id, key)
 );
-create index if not exists idx_nomiya_invoices_acct on nomiya_invoices(account_id, no);
+create index if not exists idx_nomiya_invoices_acct on castally.nomiya_invoices(account_id, no);
 
 -- ── 店の設定（1アカウント1行） ────────────────────────────────────────
 --   config 例: { store:'', addr:'', tel:'', regNo:'', bank:'', rate:0.1,
 --                tpl:'card', accent:'', font:'mincho', logoPos:'top',
 --                logo:'data:image/png;base64,...', hanko:'data:image/png;base64,...' }
-create table if not exists nomiya_settings (
+create table if not exists castally.nomiya_settings (
   account_id uuid primary key default auth.uid() references auth.users(id) on delete cascade,
   config     jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
@@ -117,7 +126,7 @@ create table if not exists nomiya_settings (
 --   閉店後の現金合わせ。あるべき額 = 釣銭 ＋ 現金売上 ＋ 現金で回収したツケ − 出金。
 --   outs 例: [{id:'', kind:'buy|taxi|pay|lend|other', amount:0, memo:'', staff:''}]
 --   counted = 数えた実数（数えていないうちは null。0と区別する）
-create table if not exists nomiya_closes (
+create table if not exists castally.nomiya_closes (
   id         uuid primary key default gen_random_uuid(),
   account_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   ymd        date not null,
@@ -130,13 +139,13 @@ create table if not exists nomiya_closes (
   deleted_at timestamptz,
   unique (account_id, ymd)
 );
-create index if not exists idx_nomiya_closes_acct_ymd on nomiya_closes(account_id, ymd);
+create index if not exists idx_nomiya_closes_acct_ymd on castally.nomiya_closes(account_id, ymd);
 
 -- ── スタッフ（人と「決め方」） ───────────────────────────────────────
 --   夜の店の給与は店ごとに全部違うので、決め方をデータで持つ。
 --   back 例: { shimei:2000, jonai:1000, douhan:3000, drink:500, bottle:1000 }
 --   employ = employee(雇用) / contract(業務委託)  cycle = daily/weekly/monthly
-create table if not exists nomiya_staff (
+create table if not exists castally.nomiya_staff (
   id         uuid primary key default gen_random_uuid(),
   account_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   sid        text not null,                      -- アプリが作るID
@@ -158,23 +167,23 @@ create table if not exists nomiya_staff (
   deleted_at timestamptz,
   unique (account_id, sid)
 );
-alter table nomiya_staff add column if not exists back_pct jsonb not null default '{}'::jsonb;
-alter table nomiya_staff add column if not exists use_items jsonb not null default '{}'::jsonb;
+alter table castally.nomiya_staff add column if not exists back_pct jsonb not null default '{}'::jsonb;
+alter table castally.nomiya_staff add column if not exists use_items jsonb not null default '{}'::jsonb;
 -- 締め方（人ごと）。close_wday=週払いの締め曜日(0=日…6=土) / pay_after=締めてから何日後に渡すか
-alter table nomiya_staff add column if not exists close_wday integer not null default 0;
-alter table nomiya_staff add column if not exists pay_after integer not null default 0;
+alter table castally.nomiya_staff add column if not exists close_wday integer not null default 0;
+alter table castally.nomiya_staff add column if not exists pay_after integer not null default 0;
 -- 生年月日（任意）。18歳未満の深夜の注意にだけ使う
-alter table nomiya_staff add column if not exists birth date;
+alter table castally.nomiya_staff add column if not exists birth date;
 -- 渡し方（register=レジから / hand=手元の現金 / bank=振込）。空なら cash から決める
-alter table nomiya_staff add column if not exists pay_from text not null default 'register';
+alter table castally.nomiya_staff add column if not exists pay_from text not null default 'register';
 -- 並び順（0＝まだ決めていない＝入れた順）
-alter table nomiya_staff add column if not exists ord integer not null default 0;
-create index if not exists idx_nomiya_staff_acct on nomiya_staff(account_id, name);
+alter table castally.nomiya_staff add column if not exists ord integer not null default 0;
+create index if not exists idx_nomiya_staff_acct on castally.nomiya_staff(account_id, name);
 
 -- ── 日々の実績（1人×1日） ────────────────────────────────────────────
 --   count 例: { shimei:2, jonai:0, douhan:1, drink:4, bottle:0 }
 --   paid_at が入ると「その日ぶんを渡した」＝日払い済み
-create table if not exists nomiya_work (
+create table if not exists castally.nomiya_work (
   id         uuid primary key default gen_random_uuid(),
   account_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   wid        text not null,                      -- アプリが作るID
@@ -195,48 +204,48 @@ create table if not exists nomiya_work (
   deleted_at timestamptz,
   unique (account_id, wid)
 );
-alter table nomiya_work add column if not exists amount jsonb not null default '{}'::jsonb;
-alter table nomiya_work add column if not exists picks jsonb not null default '{}'::jsonb;
+alter table castally.nomiya_work add column if not exists amount jsonb not null default '{}'::jsonb;
+alter table castally.nomiya_work add column if not exists picks jsonb not null default '{}'::jsonb;
 -- 渡したその時の額（あとで決め方を直しても、渡した記録が動かないように固める）
-alter table nomiya_work add column if not exists paid_amount integer not null default 0;
-create index if not exists idx_nomiya_work_acct_ymd on nomiya_work(account_id, ymd);
-create index if not exists idx_nomiya_work_acct_staff on nomiya_work(account_id, staff_id, ymd);
+alter table castally.nomiya_work add column if not exists paid_amount integer not null default 0;
+create index if not exists idx_nomiya_work_acct_ymd on castally.nomiya_work(account_id, ymd);
+create index if not exists idx_nomiya_work_acct_staff on castally.nomiya_work(account_id, staff_id, ymd);
 
 -- ── RLS: 本人(account_id = auth.uid())の行だけ ────────────────────────
-alter table nomiya_sales    enable row level security;
-alter table nomiya_partners enable row level security;
-alter table nomiya_settings enable row level security;
-alter table nomiya_invoices enable row level security;
-alter table nomiya_closes   enable row level security;
-alter table nomiya_staff    enable row level security;
-alter table nomiya_work     enable row level security;
+alter table castally.nomiya_sales    enable row level security;
+alter table castally.nomiya_partners enable row level security;
+alter table castally.nomiya_settings enable row level security;
+alter table castally.nomiya_invoices enable row level security;
+alter table castally.nomiya_closes   enable row level security;
+alter table castally.nomiya_staff    enable row level security;
+alter table castally.nomiya_work     enable row level security;
 
-drop policy if exists own_nomiya_sales on nomiya_sales;
-create policy own_nomiya_sales on nomiya_sales for all
+drop policy if exists own_nomiya_sales on castally.nomiya_sales;
+create policy own_nomiya_sales on castally.nomiya_sales for all
   using (account_id = auth.uid()) with check (account_id = auth.uid());
 
-drop policy if exists own_nomiya_partners on nomiya_partners;
-create policy own_nomiya_partners on nomiya_partners for all
+drop policy if exists own_nomiya_partners on castally.nomiya_partners;
+create policy own_nomiya_partners on castally.nomiya_partners for all
   using (account_id = auth.uid()) with check (account_id = auth.uid());
 
-drop policy if exists own_nomiya_invoices on nomiya_invoices;
-create policy own_nomiya_invoices on nomiya_invoices for all
+drop policy if exists own_nomiya_invoices on castally.nomiya_invoices;
+create policy own_nomiya_invoices on castally.nomiya_invoices for all
   using (account_id = auth.uid()) with check (account_id = auth.uid());
 
-drop policy if exists own_nomiya_closes on nomiya_closes;
-create policy own_nomiya_closes on nomiya_closes for all
+drop policy if exists own_nomiya_closes on castally.nomiya_closes;
+create policy own_nomiya_closes on castally.nomiya_closes for all
   using (account_id = auth.uid()) with check (account_id = auth.uid());
 
-drop policy if exists own_nomiya_staff on nomiya_staff;
-create policy own_nomiya_staff on nomiya_staff for all
+drop policy if exists own_nomiya_staff on castally.nomiya_staff;
+create policy own_nomiya_staff on castally.nomiya_staff for all
   using (account_id = auth.uid()) with check (account_id = auth.uid());
 
-drop policy if exists own_nomiya_work on nomiya_work;
-create policy own_nomiya_work on nomiya_work for all
+drop policy if exists own_nomiya_work on castally.nomiya_work;
+create policy own_nomiya_work on castally.nomiya_work for all
   using (account_id = auth.uid()) with check (account_id = auth.uid());
 
-drop policy if exists own_nomiya_settings on nomiya_settings;
-create policy own_nomiya_settings on nomiya_settings for all
+drop policy if exists own_nomiya_settings on castally.nomiya_settings;
+create policy own_nomiya_settings on castally.nomiya_settings for all
   using (account_id = auth.uid()) with check (account_id = auth.uid());
 
 -- ── 確認用（適用後に SQL Editor で実行すると3行とも rowsecurity=true で返る） ──
@@ -249,7 +258,7 @@ create policy own_nomiya_settings on nomiya_settings for all
 --   入金は1件ずつ記録して、古いツケから順に充てる（消込）。
 --   充てた結果は持たない＝毎回アプリが計算する。入金を消せば充当もやり直される。
 --   how = bank(振込・カード) / cash(現金で受け取った→レジの現金が増える)
-create table if not exists nomiya_payments (
+create table if not exists castally.nomiya_payments (
   id         uuid primary key default gen_random_uuid(),
   account_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   pid        text not null,                      -- アプリが作るID
@@ -263,9 +272,38 @@ create table if not exists nomiya_payments (
   deleted_at timestamptz,
   unique (account_id, pid)
 );
-create index if not exists idx_nomiya_payments_acct on nomiya_payments(account_id, name, ymd);
+create index if not exists idx_nomiya_payments_acct on castally.nomiya_payments(account_id, name, ymd);
 
-alter table nomiya_payments enable row level security;
-drop policy if exists own_nomiya_payments on nomiya_payments;
-create policy own_nomiya_payments on nomiya_payments for all
+alter table castally.nomiya_payments enable row level security;
+drop policy if exists own_nomiya_payments on castally.nomiya_payments;
+create policy own_nomiya_payments on castally.nomiya_payments for all
   using (account_id = auth.uid()) with check (account_id = auth.uid());
+
+
+-- ── public の窓口(view)。アプリのコードは public の名前のまま動く ──────────
+--   ★security_invoker=true は必ず付ける（付け忘れると他店のデータが見える）
+create or replace view public.nomiya_sales with (security_invoker = true) as select * from castally.nomiya_sales;
+grant select, insert, update, delete on public.nomiya_sales to authenticated;
+create or replace view public.nomiya_partners with (security_invoker = true) as select * from castally.nomiya_partners;
+grant select, insert, update, delete on public.nomiya_partners to authenticated;
+create or replace view public.nomiya_invoices with (security_invoker = true) as select * from castally.nomiya_invoices;
+grant select, insert, update, delete on public.nomiya_invoices to authenticated;
+create or replace view public.nomiya_settings with (security_invoker = true) as select * from castally.nomiya_settings;
+grant select, insert, update, delete on public.nomiya_settings to authenticated;
+create or replace view public.nomiya_closes with (security_invoker = true) as select * from castally.nomiya_closes;
+grant select, insert, update, delete on public.nomiya_closes to authenticated;
+create or replace view public.nomiya_staff with (security_invoker = true) as select * from castally.nomiya_staff;
+grant select, insert, update, delete on public.nomiya_staff to authenticated;
+create or replace view public.nomiya_work with (security_invoker = true) as select * from castally.nomiya_work;
+grant select, insert, update, delete on public.nomiya_work to authenticated;
+create or replace view public.nomiya_payments with (security_invoker = true) as select * from castally.nomiya_payments;
+grant select, insert, update, delete on public.nomiya_payments to authenticated;
+
+-- ── 管理（Castally 管理アプリ用）────────────────────────────────
+--   管理画面で「どの店か」が分かるように、★管理者(exally_admins に登録した人)だけ★が
+--   全店の「店の設定」を読めるようにする。読むだけ。書き換えはできない。
+--   ふつうの店は今までどおり、自分の行しか見えない（own_castally.nomiya_settings が別にある）。
+--   ここを消すと、管理画面の店名がメールアドレスだけの表示に戻る（壊れはしない）。
+drop policy if exists admin_read_nomiya_settings on castally.nomiya_settings;
+create policy admin_read_nomiya_settings on castally.nomiya_settings for select
+  using (public.is_exally_admin());

@@ -6354,3 +6354,68 @@ test.describe("㉘ 上の数字は右端をそろえる", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
+
+/* ㉙ 利用の状態（体験／有料／無料／停止）。決めるのは管理画面 castally-admin.html。
+   ここで見るのは本体側：はじめての店は体験で始まる／止められたら使えない／
+   ★つながらないときは絶対に止めない★（電波が悪いだけで店が使えなくなるのが一番まずい） */
+test.describe("㉙ 利用の状態", () => {
+  test("はじめての店は「体験」で始まる（自分の行が作られる）", async ({ page }) => {
+    const errors = await open(page);
+    await page.waitForTimeout(400);
+    const rows = await page.evaluate(async () => {
+      const r = await window.__NOMIYA.sb.from("exally_entitlements").select("*");
+      return r.data || [];
+    });
+    const mine = rows.filter((r) => r.app === "nomiya");
+    expect(mine.length, "利用の行が作られていない").toBe(1);
+    expect(mine[0].plan).toBe("trial");
+    await expect(page.locator("#stopOv")).not.toHaveClass(/open/);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★止められたら使えない（データは消さない）", async ({ page }) => {
+    const errors = await open(page);
+    await page.waitForTimeout(400);
+    await addSale(page, {
+      date: "2026-08-01",
+      name: "田中",
+      people: 2,
+      amount: 8000,
+      pay: "cash",
+      receipt: false,
+    });
+    // 管理画面で「停止」にした、と同じ状態を作る
+    await page.evaluate(() => {
+      const db = JSON.parse(localStorage.getItem("__fake_supa_db__"));
+      (db.tables.exally_entitlements || []).forEach((r) => {
+        if (r.app === "nomiya") r.plan = "disabled";
+      });
+      localStorage.setItem("__fake_supa_db__", JSON.stringify(db));
+    });
+    await page.reload({ waitUntil: "load" });
+    await page.waitForTimeout(900);
+    await expect(page.locator("#stopOv"), "止めたのに使えてしまう").toHaveClass(/open/);
+    await expect(page.locator("#stopOv")).toContainText("そのまま残っています");
+    // ★売上は1件も消えていない
+    expect(await page.evaluate(() => window.__NOMIYA.sales.length)).toBe(1);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★つながらないときは、止めない（電波が悪いだけで店を止めない）", async ({ page }) => {
+    const errors = await open(page);
+    await page.waitForTimeout(400);
+    await page.evaluate(() => {
+      const db = JSON.parse(localStorage.getItem("__fake_supa_db__"));
+      (db.tables.exally_entitlements || []).forEach((r) => {
+        if (r.app === "nomiya") r.plan = "disabled";
+      });
+      localStorage.setItem("__fake_supa_db__", JSON.stringify(db));
+    });
+    await page.addInitScript(() => (window.__FAKE_OFFLINE__ = true));
+    await page.reload({ waitUntil: "load" });
+    await page.waitForTimeout(900);
+    await expect(page.locator("#stopOv"), "つながらないのに止めてしまった").not.toHaveClass(/open/);
+    await expect(page.locator("#scr-input")).toBeVisible();
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
