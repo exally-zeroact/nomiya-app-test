@@ -55,6 +55,9 @@ function fake(opts) {
                 ? res(null, { message: "Invalid login credentials" })
                 : (OPT.signedIn = true, res({ user: { id: "me" } })),
             signOut: () => { OPT.signedIn = false; return res({}); },
+            signUp: ({ email }) => res({ user: { id: "me", email } }),
+            resetPasswordForEmail: () => res({}),
+            onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
           },
           from: q,
         };
@@ -110,22 +113,26 @@ test.describe("Castally 管理", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
-  test("ログインしていなければ、ログイン画面から始まる", async ({ page }) => {
+  test("★ログイン画面は全アプリ共通の部品（新規登録もパスワードの作り直しもある）", async ({
+    page,
+  }) => {
     const errors = await open(page, { signedIn: false, admin: true });
-    await expect(page.locator("#login")).toBeVisible();
+    // 自前のログイン欄を作らない＝共通部品(#loginOv)がそのまま出る
+    await expect(page.locator("#loginOv")).toHaveClass(/open/);
+    await expect(page.locator("#loginEmail")).toBeVisible();
+    await expect(page.locator("#loginPass")).toBeVisible();
+    // ★入り口が無い画面にしない：新規登録と「パスワードを作り直す」が必ずある
+    await expect(page.locator("#btnSignup"), "新規登録が無い").toBeVisible();
+    const body = await page.locator("#loginOv").innerText();
+    expect(body, "パスワードを作り直す道が無い").toMatch(/パスワード/);
     await expect(page.locator("#panel")).toBeHidden();
-    // 入れない相手なら、そう言う
-    await page.locator("#email").fill("ng@example.com");
-    await page.locator("#pw").fill("x");
-    await page.locator("#btnIn").click();
-    await page.waitForTimeout(200);
-    await expect(page.locator("#msg")).toContainText("入れませんでした");
     // 入れたら一覧へ
-    await page.locator("#email").fill("boss@example.com");
-    await page.locator("#pw").fill("x");
-    await page.locator("#btnIn").click();
-    await page.waitForTimeout(300);
+    await page.locator("#loginEmail").fill("boss@example.com");
+    await page.locator("#loginPass").fill("x");
+    await page.locator("#btnLogin").click();
+    await page.waitForTimeout(400);
     await expect(page.locator("#panel")).toBeVisible();
+    await expect(page.locator("#loginOv")).not.toHaveClass(/open/);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 

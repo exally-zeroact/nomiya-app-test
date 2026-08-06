@@ -247,21 +247,11 @@
       <button class="out hide" type="button" id="btnOut">ログアウト</button>
     </header>
 
-    <!-- ログイン -->
+    <!-- ログイン画面は全アプリ共通の部品（exally-login.js）が出す。
+         ★ここに自前のログイン欄を作らない★＝新規登録もパスワードの作り直しも
+           共通部品が持っている。作り直すと、そこだけ入り口が無い画面になる（実際にそうなった）。 -->
     <div class="wrap" id="login">
-      <div class="card">
-        <div class="lbl">管理者のアカウントで入る</div>
-        <input class="fin" type="email" id="email" placeholder="メールアドレス" autocomplete="username" />
-        <input
-          class="fin"
-          type="password"
-          id="pw"
-          placeholder="パスワード"
-          autocomplete="current-password"
-        />
-        <div class="msg" id="msg"></div>
-        <button class="btn" type="button" id="btnIn">ログイン</button>
-      </div>
+      <div class="card"><div class="lbl">ログインの画面を出しています…</div></div>
     </div>
 
     <!-- 管理者ではない -->
@@ -285,6 +275,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.111.0/dist/umd/supabase.js"></script>
     <script src="js/supa-config.js"></script>
+    <script src="exally-login.js"></script>
     <script>
       /* Castally 管理 — 司さん（管理者）だけが、店ごとの利用状態を見て変える画面。
          ------------------------------------------------------------------
@@ -329,6 +320,7 @@
           $(id).classList.toggle("hide", id !== which);
         });
         $("btnOut").classList.toggle("hide", which === "login");
+        if (LOGIN && which !== "login") LOGIN.hide();
       }
       function jp(iso) {
         if (!iso) return "";
@@ -337,11 +329,24 @@
         return d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate();
       }
 
+      var LOGIN = null;
       async function boot() {
         if (!SB) {
-          $("msg").textContent = "つながりません。電波を確かめて開き直してください";
+          $("login").innerHTML =
+            '<div class="card empty">つながりません。電波を確かめて開き直してください</div>';
           return;
         }
+        LOGIN = window.ExallyLogin.mount({
+          app: "管理",
+          brand: "Castally",
+          brandSub: "",
+          logo: "/icons/logo-castally.png",
+          sb: SB,
+          note: "お店の管理をする画面です。ふだんの売上管理は、こちらではありません。",
+          onLogin: function () {
+            afterLogin();
+          },
+        });
         var s = null;
         try {
           s = (await SB.auth.getSession()).data.session;
@@ -349,7 +354,10 @@
           /* つながらないときはログイン画面のまま */
         }
         if (s && s.user) await afterLogin();
-        else show("login");
+        else {
+          show("login");
+          LOGIN.show();
+        }
       }
 
       async function afterLogin() {
@@ -479,24 +487,6 @@
         );
       }
 
-      $("btnIn").onclick = async function () {
-        $("msg").textContent = "";
-        var em = $("email").value.trim();
-        var pw = $("pw").value;
-        if (!em || !pw) {
-          $("msg").textContent = "メールとパスワードを入れてください";
-          return;
-        }
-        var r = await SB.auth.signInWithPassword({ email: em, password: pw });
-        if (r.error) {
-          $("msg").textContent = "入れませんでした（メールかパスワードが違います）";
-          return;
-        }
-        await afterLogin();
-      };
-      $("pw").onkeydown = function (e) {
-        if (e.key === "Enter") $("btnIn").click();
-      };
       $("btnOut").onclick = async function () {
         try {
           await SB.auth.signOut();
@@ -504,6 +494,7 @@
           /* つながらなくても画面は戻す */
         }
         show("login");
+        if (LOGIN) LOGIN.show();
       };
       $("btnReload").onclick = load;
       $("q").oninput = render;

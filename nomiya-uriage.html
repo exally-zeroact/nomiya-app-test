@@ -1672,6 +1672,10 @@
             <button class="btn btn-ghost" type="button" id="btnSyncNow">今すぐ同期する</button>
             <button class="btn btn-ghost" type="button" id="btnLogout">ログアウト</button>
           </div>
+          <!-- 管理者だけに出る入口。ここから開けば、入り直さなくてよい（同じ入れ物なので） -->
+          <div class="btn-row" style="margin-top: 10px; display: none" id="adminRow">
+            <button class="btn btn-ghost" type="button" id="btnAdmin">お店の管理をひらく</button>
+          </div>
         </div>
 
         <div class="card">
@@ -2818,6 +2822,7 @@
         renderAll();
         await syncNow(false);
         await checkEntitlement();
+        await checkAdmin();
       }
       /* ★利用の状態（体験／有料／無料／停止）。決めるのは管理画面 castally-admin.html。
          棚は Exally と同じ exally_entitlements を使う（app='nomiya' の行がCastally）。
@@ -2851,6 +2856,22 @@
       }
       function showStopped(on) {
         $("stopOv").classList.toggle("open", !!on);
+      }
+      /* ★管理者（司さん）だけに、設定の中へ管理画面の入口を出す。
+         ここから開けば、いま入っているまま管理画面に行ける＝もう一度ログインしなくていい。
+         管理者でない店には、入口そのものが出ない。 */
+      async function checkAdmin() {
+        if (!SB || !ACCOUNT) return;
+        try {
+          var r = await SB.from("exally_admins")
+            .select("account_id")
+            .eq("account_id", ACCOUNT)
+            .maybeSingle();
+          if (r.error || !r.data) return;
+          $("adminRow").style.display = "";
+        } catch (e) {
+          /* 分からなければ出さない（ふつうの店の画面を汚さない） */
+        }
       }
 
       async function doLogout() {
@@ -2935,6 +2956,7 @@
         renderAcct();
         await syncNow(false);
         await checkEntitlement();
+        await checkAdmin();
       }
 
       /* ===== 期間 ===== */
@@ -8731,6 +8753,9 @@
         });
         $("btnGear").onclick = toggleGear;
         $("stopOut").onclick = doLogout;
+        $("btnAdmin").onclick = function () {
+          location.href = "castally-admin.html";
+        };
         $("listSeg")
           .querySelectorAll("[data-lseg]")
           .forEach(function (b) {

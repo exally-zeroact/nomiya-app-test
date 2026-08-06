@@ -6419,3 +6419,38 @@ test.describe("㉙ 利用の状態", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
+
+/* ㉚ 管理画面への入口（司さん指摘：新規もないのにどうやって入るんど）
+   管理画面は「入るところ」を自前で作っていたので、パスワードを忘れたら手も足も出なかった。
+   ふだんの画面から開けば、入っているまま管理画面に行ける＝入り直さなくていい。 */
+test.describe("㉚ 管理画面への入口", () => {
+  test("ふつうの店には、管理の入口を出さない", async ({ page }) => {
+    const errors = await open(page);
+    await page.waitForTimeout(500);
+    await goto(page, "set");
+    await expect(page.locator("#adminRow"), "ふつうの店に管理の入口が出ている").toBeHidden();
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★管理者には出る。押すと入り直さずに管理画面へ行ける", async ({ page }) => {
+    const errors = await open(page);
+    await page.waitForTimeout(500);
+    // 管理者として登録されている状態を作る
+    const me = await page.evaluate(() => {
+      const db = JSON.parse(localStorage.getItem("__fake_supa_db__"));
+      const id = db.session.user.id;
+      db.tables.exally_admins = [{ account_id: id }];
+      localStorage.setItem("__fake_supa_db__", JSON.stringify(db));
+      return id;
+    });
+    expect(me).toBeTruthy();
+    await page.reload({ waitUntil: "load" });
+    await page.waitForTimeout(900);
+    await goto(page, "set");
+    await expect(page.locator("#adminRow"), "管理者なのに入口が出ない").toBeVisible();
+    await page.locator("#btnAdmin").click();
+    await page.waitForURL(/castally-admin\.html/, { timeout: 8000 });
+    expect(page.url()).toContain("castally-admin.html");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
