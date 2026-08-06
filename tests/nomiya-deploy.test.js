@@ -66,6 +66,41 @@ describe("飲み屋アプリ 倉庫の向き先（テストはテスト・本番
     expect(csp[0]).toContain("base-uri 'none'");
   });
 
+  /* ★倉庫の場所（どのSupabaseにつなぐか）を書いてよいのは js/supa-config.js だけ。
+     2つのrepoで違うのはこの1本と package.json の名前だけ、という決まりを機械で守る。
+     配るファイルのどこかに倉庫の名前が混ざると、テストrepoが本番に書く事故になる。
+     ※CSPの "https://*.supabase.co" は「どこにつないでよいか」の許可であって
+       倉庫の場所ではないので、これは通す（倉庫名が入っていたら赤）。 */
+  it("★倉庫の場所を書いてよいのは js/supa-config.js だけ（配る物に混ぜない）", () => {
+    const REFS = /(khawdrnvssdenumbiwfg|tnfwipbgfgjaymlszeid)/;
+    const ship = [];
+    const walk = (dir, rel) => {
+      for (const e of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+        if (e.name === "node_modules" || e.name === ".git" || e.name === "test-results") continue;
+        const r = rel ? rel + "/" + e.name : e.name;
+        if (e.isDirectory()) {
+          if (r === "tests" || r === "supabase" || r === ".github") continue;
+          walk(path.join(dir, e.name), r);
+        } else if (/\.(html|js)$/.test(e.name) && r !== "js/supa-config.js") {
+          ship.push(r);
+        }
+      }
+    };
+    walk(".", "");
+    expect(ship.length, "配るファイルが1つも見つからない").toBeGreaterThan(2);
+    const bad = [];
+    for (const f of ship) {
+      const t = fs.readFileSync(path.join(ROOT, f), "utf8");
+      if (REFS.test(t)) bad.push(f + " に倉庫の名前が書いてある");
+      // supabase.co を書いてよいのは CSP の「*.supabase.co」だけ
+      const hits = (t.match(/[a-z0-9*.-]*\.supabase\.co/gi) || []).filter(
+        (h) => h.toLowerCase() !== "*.supabase.co"
+      );
+      if (hits.length) bad.push(f + " に倉庫のURLが書いてある: " + hits.join(","));
+    }
+    expect(bad, bad.join(" / ")).toEqual([]);
+  });
+
   it("★実機検証は本番倉庫では走らない（テストが本番に書かないための鍵）", () => {
     for (const [f, name] of [
       [LIVE, "live-nomiya.mjs"],

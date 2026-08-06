@@ -1785,6 +1785,10 @@
               <button class="chip chip-sm" type="button" data-gs="1">引く</button>
             </div>
           </div>
+          <!-- ★1回の支払いごとに「5,000円×計算期間の日数」を引いてから率を掛ける
+                 （国税庁 No.2807／所得税法204条1項6号）。日数は出勤日数ではなく暦日数。
+                 率だけを説明文に書き写さない（式が変わると文だけ取り残される）。 -->
+          <div class="hint" id="gensenHow" style="margin-top: -4px"></div>
           <div class="frow" id="ruleGensenRow">
             <span class="flabel">源泉の率（％）</span>
             <input
@@ -5857,7 +5861,17 @@
         if (!SETTINGS.nightPay)
           note.push("⚠️ 深夜割増は付けていません。22時〜5時は2割5分以上の割増が要る決まりです。");
         if (!SETTINGS.gensen)
-          note.push("⚠️ 源泉は引いていません。業務委託の報酬は10.21%を引くのが本来です。");
+          note.push(
+            "⚠️ 源泉は引いていません。ホステス等の報酬は、1回の支払いごとに" +
+              "「5,000円×その支払いの計算期間の日数」を引いた残りに税率を掛けて引くのが本来です。"
+          );
+        // 引く店には、どう計算しているかを1行だけ出す（率は設定から取る＝書き写さない）
+        $("gensenHow").textContent = SETTINGS.gensen
+          ? "1回の支払いごとに「5,000円×その支払いの計算期間の日数（出勤日数ではなく暦の日数）」を" +
+            "引いた残りに、下の率を掛けて引きます。日払いの人は1日ぶん、締めてまとめて払う人は" +
+            "その区切りの日数ぶんです。"
+          : "";
+        $("gensenHow").style.display = SETTINGS.gensen ? "" : "none";
         $("ruleNote").innerHTML = note
           .map(function (t) {
             return "<div>" + esc(t) + "</div>";

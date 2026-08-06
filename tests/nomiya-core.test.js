@@ -2450,35 +2450,39 @@ describe("源泉（選べる・既定は引かない）", () => {
     expect(d.gensen).toBe(0);
     expect(d.net).toBe(100000);
   });
-  it("引くを選ぶと、業務委託の人から10.21%を引く", () => {
+  /* ★2026-08-07 直し：前は「支払額×10.21%」だけで、5,000円×計算期間の日数 の控除が
+     無かった＝引き過ぎ。国税庁 No.2807（204条1項6号）に合わせた。
+     この人は日払い＝計算期間1日なので 5,000円を引いてから掛ける。
+     ★この試験自体が、間違った引き方を固定していた（自分で書いた試験の勘違い）。 */
+  it("引くを選ぶと、業務委託の人から (支払額−5,000円×日数)×10.21% を引く", () => {
     const d = C.payDay(contract, w1, { settings: { gensen: true } });
-    expect(d.gensen).toBe(10210);
-    expect(d.deduct).toBe(10210);
-    expect(d.net).toBe(89790);
+    expect(d.gensen).toBe(9699); // (100,000−5,000)×0.1021=9699.5 → 切り捨て
+    expect(d.deduct).toBe(9699);
+    expect(d.net).toBe(100000 - 9699);
   });
   it("雇用の人からは引かない（税額表が別なので、ここでは引かせない）", () => {
     expect(C.payDay(employee, w2, { settings: { gensen: true } }).gensen).toBe(0);
   });
-  it("率は店で変えられる", () => {
+  it("率は店で変えられる（5,000円×日数の控除は残る）", () => {
     const d = C.payDay(contract, w1, { settings: { gensen: true, gensenRate: 20.42 } });
-    expect(d.gensen).toBe(20420);
+    expect(d.gensen).toBe(19399); // (100,000−5,000)×0.2042=19399
   });
   it("罰金などより先に、支給から引く", () => {
     const w3 = C.normalizeWork({ ymd: "2026-08-01", staffId: "s1", fine: 5000 });
     const d = C.payDay(contract, w3, { settings: { gensen: true } });
-    expect(d.gensen).toBe(10210); // 罰金を引く前の支給から
-    expect(d.net).toBe(100000 - 10210 - 5000);
+    expect(d.gensen).toBe(9699); // 罰金を引く前の支給から
+    expect(d.net).toBe(100000 - 9699 - 5000);
   });
   it("引いている店には、「源泉を確かめて」の注意を出さない", () => {
     const d = C.payDay(contract, w1, { settings: { gensen: true } });
     expect(C.payWarnings(contract, w1, d, { withholding: true }).join("")).not.toContain("源泉");
   });
-  it("期間のまとめにも源泉が積まれる", () => {
+  it("期間のまとめにも源泉が積まれる（日払いは1日ずつ引いた合計）", () => {
     const t = C.paySummary(contract, [w1], [], "2026-08-01", "2026-08-31", {
       settings: { gensen: true },
     });
-    expect(t.gensen).toBe(10210);
-    expect(t.net).toBe(89790);
+    expect(t.gensen).toBe(9699);
+    expect(t.net).toBe(100000 - 9699);
   });
 });
 

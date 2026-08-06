@@ -1883,10 +1883,13 @@
     var lend = staffUses(st, "lend") ? _int(w.lend) : 0;
     // 源泉（選べる・既定は引かない）。業務委託の人だけ、支給から先に引く。
     // 雇用の人は税額表が別なので、ここでは引かせない（間違った額を黙って引かない）。
+    /* ★源泉は「1回の支払い」ごとに、5,000円×計算期間の日数 を引いてから掛ける。
+         日払いの人は、その日が1回の支払い＝計算期間1日。
+         まとめて払う人（週/15日/月末締め）は、ここでは引かず、
+         paySummary が区切り全体の日数で計算する（1日ずつ引くと控除が増えすぎる）。 */
     var gensen = 0;
-    if (cfg.gensen && st.employ === "contract" && guaranteed > 0) {
-      var gr = cfg.gensenRate == null ? 10.21 : _num(cfg.gensenRate);
-      gensen = Math.floor((guaranteed * gr) / 100);
+    if (cfg.gensen && st.employ === "contract" && guaranteed > 0 && payCycleOf(st) === "daily") {
+      gensen = gensen6(guaranteed, 1, cfg.gensenRate);
     }
     var deduct = fine + kousei + repay + gensen;
     return {
@@ -2055,6 +2058,20 @@
           t.backAmts[b.key] = (t.backAmts[b.key] || 0) + b.amount;
         });
       });
+    /* ★まとめて払う人（週/15日/月末締め）の源泉は、ここで区切り全体から計算する。
+         1回の支払い＝この区切りなので、控除は 5,000円×「初日から末日までの全日数」。
+         日ごとに引くと控除が日数ぶん増えて、引かなさすぎになる。
+         日払いの人は payDay で1日ずつ引いてあるので、ここでは触らない。 */
+    var cyc = payCycleOf(staff);
+    if ((o.settings || {}).gensen && (staff || {}).employ === "contract" && cyc !== "daily") {
+      var g = gensen6(t.gross, periodDays(from, to), (o.settings || {}).gensenRate);
+      var diff = g - t.gensen;
+      t.gensen = g;
+      t.deduct += diff;
+      t.net -= diff;
+      // まとめ払いは「渡していない分」から引く（もう渡した分は動かさない）
+      t.unpaidNet -= diff;
+    }
     t.rows = rows;
     return t;
   }
@@ -2161,14 +2178,43 @@
    *  日払い＝その日1日。週払い＝締め曜日まで（締め曜日その日は、その週に入る）。
    *  15日締め＝16日〜翌15日。月末締め＝1日〜末日。
    */
-  function payPeriod(staff, ymd) {
-    if (!isIsoDate(ymd)) return null;
+  /* ★源泉徴収（所得税法204条1項6号＝ホステス等の報酬）
+       出典: 国税庁 タックスアンサー No.2807
+       「報酬・料金の額から、同一人に対し1回に支払われる金額について、
+         5,000円にその報酬・料金の『計算期間の日数』を乗じて計算した金額を
+         差し引いた残額に 10.21％ の税率を乗じて算出します」
+       ★「計算期間の日数」＝営業日数でも出勤日数でもなく、
+         支払金額の計算のもとになった期間の初日から末日までの★全日数（暦日）★。
+       前は「支払額×10.21％」だけで、この控除が無かった＝★引き過ぎていた★。
+       ※Kyually には6号の式が無い（A/B/Cだけ実装・6号は非該当扱いに逃がしている）ので
+         流用元が無く、国税庁の一次情報から作った。 */
+  function periodDays(from, to) {
+    if (!isIsoDate(from) || !isIsoDate(to)) return 0;
+    var n = Math.round((_dateOf(to) - _dateOf(from)) / 86400000) + 1;
+    return n > 0 ? n : 0;
+  }
+  function gensen6(amount, days, ratePct) {
+    var a = _num(amount);
+    var d = _num(days);
+    if (!isFinite(d) || d < 0) d = 0;
+    var r = ratePct == null ? 10.21 : _num(ratePct);
+    var base = a - 5000 * d;
+    if (!(base > 0)) return 0;
+    return Math.floor((base * r) / 100);
+  }
+
+  function payCycleOf(staff) {
     var st = staff || {};
-    var cycle = PAY_CYCLES.some(function (c) {
+    return PAY_CYCLES.some(function (c) {
       return c.key === st.cycle;
     })
       ? st.cycle
       : "daily";
+  }
+  function payPeriod(staff, ymd) {
+    if (!isIsoDate(ymd)) return null;
+    var st = staff || {};
+    var cycle = payCycleOf(st);
     var from, to;
     if (cycle === "weekly") {
       // 締め曜日まで何日か。締め曜日その日なら 0 日＝その日で締める。
@@ -2949,6 +2995,8 @@
     num: _num,
     validateSale: validateSale,
     dateNote: dateNote,
+    gensen6: gensen6,
+    periodDays: periodDays,
     normalizeSale: normalizeSale,
     makeId: makeId,
     filterSales: filterSales,

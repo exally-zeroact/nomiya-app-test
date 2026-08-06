@@ -3289,7 +3289,9 @@ test.describe("⑤ 店ごとの決め方（グレー枠）", () => {
     await setPayDay(page, "2026-08-01");
     const akari = page.locator("#payDayList .li", { hasText: "あかり" });
     const yui = page.locator("#payDayList .li", { hasText: "ゆい" });
-    await expect(akari.locator(".li-amt")).toHaveText("¥89,790");
+    // ★(支払額−5,000円×計算期間の日数)×10.21%（国税庁 No.2807・204条1項6号）
+    //   日払い＝計算期間1日 → (100,000−5,000)×0.1021=9,699 → 100,000−9,699
+    await expect(akari.locator(".li-amt")).toHaveText("¥90,301");
     await expect(yui.locator(".li-amt")).toHaveText("¥100,000");
     // 月のまとめの内訳にも出る
     await expect(page.locator("#paySheets")).toContainText("源泉");
