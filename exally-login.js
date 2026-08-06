@@ -88,6 +88,20 @@
       return "メールの確認がまだです。届いたメールを開いてください";
     if (/Failed to fetch|NetworkError|fetch failed/i.test(m))
       return "つながりませんでした。電波を確かめてください";
+    // 短い間に何度も押したときの断り（あと何秒かは向こうが教えてくれる）
+    var wait = m.match(/after (\d+) seconds?/i);
+    if (wait) return "送ったばかりです。あと" + wait[1] + "秒たってから、もう一度押してください";
+    if (/rate limit|too many requests|only request this/i.test(m))
+      return "短い間に何度も試しました。少し待ってから、もう一度やってください";
+    if (/Unable to validate email|invalid format/i.test(m)) return "メールアドレスの形が違います";
+    if (/expired|invalid.*(token|otp)/i.test(m))
+      return "リンクの期限が切れています。もう一度「パスワードを忘れた」を押してください";
+    /* ★最後の砦：ひらがな・カタカナ・漢字が1文字も無い言い方は、そのまま画面に出さない。
+         向こうの言葉は英語で増えていくので、知らない物が出るたびに
+         店の人が読めない画面になる（実機に出た：
+         "For security purposes, you can only request this after 53 seconds."）。 */
+    if (!/[぀-ヿ一-鿿]/.test(m))
+      return "うまくいきませんでした。少し待ってから、もう一度やってみてください";
     return m;
   }
 

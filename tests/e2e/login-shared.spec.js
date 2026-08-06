@@ -191,3 +191,55 @@ test.describe("パスワードを作り直して戻ってきたとき", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
+
+/* ★向こうの言葉（英語）を、そのまま店の人に見せない（司さん指摘 2026-08-07）
+   実機に出た：「For security purposes, you can only request this after 53 seconds.」
+   知らない英語が増えるたびに読めない画面になるので、最後の砦を入れた。 */
+test.describe("エラーの言い方は必ず日本語", () => {
+  test("★英語のまま出さない（知らない言い方でも日本語に落とす）", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await page.route(/cdn\.jsdelivr\.net/, (r) => r.abort());
+    await page.addInitScript({ path: "tests/e2e/fake-supabase.js" });
+    await page.goto("/nomiya-uriage.html");
+    await page.waitForTimeout(400);
+    const out = await page.evaluate(() => {
+      const list = [
+        "For security purposes, you can only request this after 53 seconds.",
+        "Email rate limit exceeded",
+        "Too many requests",
+        "Unable to validate email address: invalid format",
+        "Token has expired or is invalid",
+        "Invalid login credentials",
+        "Password should be at least 6 characters",
+        "Something nobody has ever seen before",
+        "",
+      ];
+      return list.map((m) => ({ in: m, out: window.ExallyLogin.friendly({ message: m }) }));
+    });
+    for (const r of out) {
+      expect(
+        /[぀-ヿ一-鿿]/.test(r.out),
+        `英語のまま出ている: 「${r.in}」→「${r.out}」`
+      ).toBe(true);
+    }
+    // 「あと何秒」は、その秒数をそのまま伝える
+    const wait = out.find((r) => r.in.includes("53 seconds"));
+    expect(wait.out).toContain("53秒");
+    expect(wait.out).toContain("もう一度");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("今までの言い方は変えない（他のアプリの画面を壊さない）", async ({ page }) => {
+    await page.route(/cdn\.jsdelivr\.net/, (r) => r.abort());
+    await page.addInitScript({ path: "tests/e2e/fake-supabase.js" });
+    await page.goto("/nomiya-uriage.html");
+    await page.waitForTimeout(400);
+    const f = (m) => page.evaluate((x) => window.ExallyLogin.friendly({ message: x }), m);
+    expect(await f("Invalid login credentials")).toBe("メールかパスワードが違います");
+    expect(await f("User already registered")).toContain("もう登録されています");
+    expect(await f("Failed to fetch")).toContain("電波");
+    // 日本語で来た物は、そのまま通す
+    expect(await f("すでに使われています")).toBe("すでに使われています");
+  });
+});
