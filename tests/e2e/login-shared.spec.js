@@ -154,7 +154,7 @@ test.describe("パスワードを作り直して戻ってきたとき", () => {
         },
       };
     });
-    // ★メールのリンクと同じ形（# に type=recovery が付いて戻ってくる）
+    // ★メールのリンクと同じ形。戻り方は版によって違うので、どれでも拾えること。
     await page.goto("/nomiya-uriage.html#access_token=xxx&type=recovery");
     await page.waitForTimeout(700);
     await expect(page.locator("#loginOv"), "戻ってきたのにログイン画面が閉じている").toHaveClass(
@@ -177,6 +177,125 @@ test.describe("パスワードを作り直して戻ってきたとき", () => {
     );
     await expect(page.locator("#loginOv"), "決めたのに閉じない").not.toHaveClass(/open/);
     expect(page.url(), "#のゴミが残っている").not.toContain("type=recovery");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+
+  /* ★司さん実機（2026-08-07）：メールから行ったら「そのままログイン」になった。
+     ＝戻り方に type=recovery が付かない版があるということ。
+     だから、こちらで付ける目印と、Supabaseからの合図でも拾えること。 */
+  for (const [name, url] of [
+    ["自分で付けた目印だけ（type=recovery が付かない版）", "/nomiya-uriage.html?pwreset=1"],
+    ["? に type=recovery が付く版", "/nomiya-uriage.html?type=recovery"],
+    ["目印と合図の両方", "/nomiya-uriage.html?pwreset=1#access_token=x&type=recovery"],
+  ]) {
+    test(`★どの戻り方でも決める画面になる：${name}`, async ({ page }) => {
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await page.route(/cdn\.jsdelivr\.net/, (r) => r.abort());
+      await page.addInitScript({ path: "tests/e2e/fake-supabase.js" });
+      await page.goto(url);
+      await page.waitForTimeout(800);
+      await expect(page.locator("#loginOv"), "そのままログインになっている").toHaveClass(/open/);
+      await expect(page.locator("#loginReset"), "決める画面が出ない").toBeVisible();
+      expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+    });
+  }
+
+  test("★Supabaseからの合図（PASSWORD_RECOVERY）だけでも決める画面になる", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await page.route(/cdn\.jsdelivr\.net/, (r) => r.abort());
+    await page.addInitScript(() => {
+      window.__FIRE = null;
+      const res = (d, e) => Promise.resolve({ data: d, error: e || null });
+      window.supabase = {
+        createClient() {
+          return {
+            auth: {
+              getSession: () => res({ session: { user: { id: "u1", email: "a@b.c" } } }),
+              getUser: () => res({ user: { id: "u1", email: "a@b.c" } }),
+              updateUser: () => res({ user: { id: "u1" } }),
+              signInWithPassword: () => res({ user: { id: "u1" } }),
+              signUp: () => res({ user: { id: "u1" } }),
+              resetPasswordForEmail: () => res({}),
+              signOut: () => res({}),
+              onAuthStateChange: (cb) => {
+                window.__FIRE = cb;
+                return { data: { subscription: { unsubscribe() {} } } };
+              },
+            },
+            from: () => ({
+              select: function () {
+                return this;
+              },
+              eq: function () {
+                return this;
+              },
+              maybeSingle: () => res(null),
+              then: (f) => res([]).then(f),
+            }),
+          };
+        },
+      };
+    });
+    // 目印も type=recovery も付かない、ふつうのURLで開く
+    await page.goto("/nomiya-uriage.html");
+    await page.waitForTimeout(700);
+    await expect(page.locator("#loginReset")).toBeHidden();
+    // ここで Supabase が「作り直しだ」と教えてくる
+    await page.evaluate(() => window.__FIRE && window.__FIRE("PASSWORD_RECOVERY", {}));
+    await page.waitForTimeout(300);
+    await expect(page.locator("#loginOv"), "合図が来たのに閉じたまま").toHaveClass(/open/);
+    await expect(page.locator("#loginReset"), "合図が来たのに決める画面が出ない").toBeVisible();
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★メールの戻り先に、自分の目印を付けて送っている", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await page.route(/cdn\.jsdelivr\.net/, (r) => r.abort());
+    await page.addInitScript(() => {
+      window.__BACK = null;
+      const res = (d, e) => Promise.resolve({ data: d, error: e || null });
+      window.supabase = {
+        createClient() {
+          return {
+            auth: {
+              getSession: () => res({ session: null }),
+              getUser: () => res({ user: null }),
+              updateUser: () => res({ user: { id: "u1" } }),
+              signInWithPassword: () => res(null, { message: "Invalid login credentials" }),
+              signUp: () => res({ user: { id: "u1" } }),
+              signOut: () => res({}),
+              onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
+              resetPasswordForEmail: (email, opt) => {
+                window.__BACK = opt && opt.redirectTo;
+                return res({});
+              },
+            },
+            from: () => ({
+              select: function () {
+                return this;
+              },
+              eq: function () {
+                return this;
+              },
+              maybeSingle: () => res(null),
+              then: (f) => res([]).then(f),
+            }),
+          };
+        },
+      };
+    });
+    await page.goto("/nomiya-uriage.html");
+    await expect(page.locator("#loginOv")).toHaveClass(/open/);
+    await page.locator("#loginEmail").fill("mama@snack.example");
+    await page.locator("#btnForgot").click();
+    await page.waitForTimeout(400);
+    const back = await page.evaluate(() => window.__BACK);
+    expect(back, "「パスワードを忘れた」を押しても送っていない").toBeTruthy();
+    expect(back, "戻り先に目印が付いていない").toContain("pwreset=1");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 

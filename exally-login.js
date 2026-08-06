@@ -106,13 +106,22 @@
   }
 
   /* ★「パスワードを作り直す」メールから戻ってきたか。
-       Supabase は戻り先の # に type=recovery を付けて返す。
        これを見ないと、戻ってきた人はログインだけできて
-       ★新しいパスワードを決める画面が出ない＝毎回「忘れた」を押す羽目になる★。 */
+       ★新しいパスワードを決める画面が出ない＝毎回「忘れた」を押す羽目になる★。
+       ★戻り方は当てにならない★（版や設定で # だったり ? だったり、type=recovery が
+       付かないこともある。実際に「そのままログインになった」と司さんに出た）。
+       だから3本立てで見る：
+         ①自分で戻り先に付けた目印（これが主）
+         ②Supabase が付ける type=recovery（# でも ? でも）
+         ③Supabase からの合図 PASSWORD_RECOVERY（mount の中で拾う） */
+  var RESET_MARK = "pwreset=1";
+  var recoveryOn = false;
   function isRecovery() {
+    if (recoveryOn) return true;
     try {
       var h = String(location.hash || "") + "&" + String(location.search || "");
-      return /(^|[#&?])type=recovery(&|$)/.test(h.replace(/^#/, "#"));
+      if (h.indexOf(RESET_MARK) >= 0) return true;
+      return /(^|[#&?])type=recovery(&|$)/.test(h);
     } catch {
       return false;
     }
@@ -254,9 +263,9 @@
       }
       err("");
       busy(true);
-      var r = await sb.auth.resetPasswordForEmail(email, {
-        redirectTo: location.origin + location.pathname,
-      });
+      // ★戻り先に自分で目印を付ける（戻り方が版によって違っても拾えるように）
+      var back = location.origin + location.pathname + "?" + RESET_MARK;
+      var r = await sb.auth.resetPasswordForEmail(email, { redirectTo: back });
       busy(false);
       if (r && r.error) {
         err(friendly(r.error));
@@ -294,8 +303,10 @@
         return;
       }
       // #のゴミを消してから、ふつうに入る
+      recoveryOn = false;
       try {
-        history.replaceState(null, "", location.pathname + location.search);
+        var q = String(location.search || "").replace(RESET_MARK, "").replace(/[?&]+$/, "");
+        history.replaceState(null, "", location.pathname + q);
       } catch {
         /* 消せなくても入れる */
       }
@@ -318,6 +329,20 @@
     if (isRecovery()) {
       showReset(true);
       show();
+    }
+    // ★もう1つの道：Supabase からの合図。目印が消えていてもこれで拾える。
+    try {
+      if (sb && sb.auth && sb.auth.onAuthStateChange) {
+        sb.auth.onAuthStateChange(function (ev) {
+          if (ev === "PASSWORD_RECOVERY") {
+            recoveryOn = true;
+            showReset(true);
+            show();
+          }
+        });
+      }
+    } catch {
+      /* 合図が取れなくても、目印の方で拾える */
     }
 
     $("btnLogin").onclick = login;
