@@ -91,6 +91,19 @@
     return m;
   }
 
+  /* ★「パスワードを作り直す」メールから戻ってきたか。
+       Supabase は戻り先の # に type=recovery を付けて返す。
+       これを見ないと、戻ってきた人はログインだけできて
+       ★新しいパスワードを決める画面が出ない＝毎回「忘れた」を押す羽目になる★。 */
+  function isRecovery() {
+    try {
+      var h = String(location.hash || "") + "&" + String(location.search || "");
+      return /(^|[#&?])type=recovery(&|$)/.test(h.replace(/^#/, "#"));
+    } catch {
+      return false;
+    }
+  }
+
   function mount(opt) {
     var o = opt || {};
     var sb = o.sb;
@@ -136,6 +149,15 @@
         : "") +
       '<div class="login-note">' +
       esc(o.note || "一度ログインすれば、次からは自動で入れます。") +
+      "</div>" +
+      // ★メールから戻ってきた人が、その場で新しいパスワードを決める所
+      '<div id="loginReset" style="display:none">' +
+      '<div class="login-sub">新しいパスワードを決めてください</div>' +
+      '<input class="login-inp" id="loginNew" type="password" ' +
+      'autocomplete="new-password" placeholder="新しいパスワード（6文字以上）">' +
+      '<div class="login-err" id="loginResetErr"></div>' +
+      '<button class="login-btn login-btn-main" type="button" id="btnNewPass">' +
+      "このパスワードにする</button>" +
       "</div>" +
       "</div>";
 
@@ -231,6 +253,59 @@
         "パスワードを作り直すメールを送りました。届いたメールを開いてください";
     }
 
+    // ★新しいパスワードを決める（メールから戻ってきた人だけ）
+    function showReset(on) {
+      var box = $("loginReset");
+      if (!box) return;
+      box.style.display = on ? "" : "none";
+      ["loginEmail", "loginPass", "btnLogin", "btnSignup", "btnForgot"].forEach(function (id) {
+        var el = $(id);
+        if (el) el.style.display = on ? "none" : "";
+      });
+      var mid = ov.querySelector(".login-mid");
+      if (mid) mid.style.display = on ? "none" : "";
+    }
+    async function setNewPass() {
+      var pw = $("loginNew").value;
+      if (!pw || pw.length < 6) {
+        $("loginResetErr").textContent = "6文字以上で決めてください";
+        return;
+      }
+      $("loginResetErr").textContent = "";
+      busy(true);
+      var r = await sb.auth.updateUser({ password: pw });
+      busy(false);
+      if (r && r.error) {
+        $("loginResetErr").textContent = friendly(r.error);
+        return;
+      }
+      // #のゴミを消してから、ふつうに入る
+      try {
+        history.replaceState(null, "", location.pathname + location.search);
+      } catch {
+        /* 消せなくても入れる */
+      }
+      showReset(false);
+      var u = null;
+      try {
+        u = (await sb.auth.getUser()).data.user;
+      } catch {
+        u = null;
+      }
+      hide();
+      if (o.onLogin) o.onLogin(u || {});
+    }
+    if ($("btnNewPass")) $("btnNewPass").onclick = setNewPass;
+    if ($("loginNew"))
+      $("loginNew").onkeydown = function (ev) {
+        if (ev.key === "Enter") setNewPass();
+      };
+    // メールから戻ってきていたら、開いた時点でその画面にする
+    if (isRecovery()) {
+      showReset(true);
+      show();
+    }
+
     $("btnLogin").onclick = login;
     $("btnSignup").onclick = signup;
     if ($("btnForgot")) $("btnForgot").onclick = forgot;
@@ -238,8 +313,15 @@
       if (ev.key === "Enter") login();
     };
 
-    return { show: show, hide: hide, error: err, el: ov };
+    return {
+      show: show,
+      hide: hide,
+      error: err,
+      el: ov,
+      isRecovery: isRecovery,
+      showReset: showReset,
+    };
   }
 
-  root.ExallyLogin = { mount: mount, friendly: friendly };
+  root.ExallyLogin = { mount: mount, friendly: friendly, isRecovery: isRecovery };
 })(typeof window !== "undefined" ? window : this);

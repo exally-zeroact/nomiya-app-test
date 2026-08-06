@@ -320,7 +320,8 @@
           $(id).classList.toggle("hide", id !== which);
         });
         $("btnOut").classList.toggle("hide", which === "login");
-        if (LOGIN && which !== "login") LOGIN.hide();
+        // メールから戻ってきたときは、新しいパスワードを決める画面を閉じない
+        if (LOGIN && which !== "login" && !(LOGIN.isRecovery && LOGIN.isRecovery())) LOGIN.hide();
       }
       function jp(iso) {
         if (!iso) return "";

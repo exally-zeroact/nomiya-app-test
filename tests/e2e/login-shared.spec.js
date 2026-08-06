@@ -32,7 +32,8 @@ test.describe("ログイン画面（全アプリ共通）", () => {
       // 飲み屋は文字入りのロゴ画像。字のときは .login-logo に製品名が出る。
       await expect(page.locator("#loginOv .login-mark")).toHaveAttribute("alt", "Castally");
       await expect(page.locator("#loginOv .login-title")).toHaveText(app.name); // ここだけアプリ名
-      await expect(page.locator("#loginOv .login-sub")).toHaveText("メールでログイン");
+      // 「新しいパスワードを決めてください」も同じ見出しの形なので、1つめを見る
+      await expect(page.locator("#loginOv .login-sub").first()).toHaveText("メールでログイン");
       await expect(page.locator("#loginEmail")).toHaveAttribute("placeholder", "メールアドレス");
       await expect(page.locator("#loginPass")).toHaveAttribute(
         "placeholder",
@@ -108,6 +109,85 @@ test.describe("ログイン画面（全アプリ共通）", () => {
     await page.reload({ waitUntil: "load" });
     await expect(page.locator("#scr-input")).toBeVisible();
     await expect(page.locator("#loginOv")).not.toHaveClass(/open/);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});
+
+/* ★パスワードを作り直すメールから戻ってきた人の道（2026-08-07）
+   これが無いと、戻ってきた人はログインだけできて新しいパスワードを決められず、
+   次に開いたときにまた「忘れた」を押す羽目になる（＝直っていない）。 */
+test.describe("パスワードを作り直して戻ってきたとき", () => {
+  test("★新しいパスワードを決める画面が出て、決めたら中に入れる", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await page.route(/cdn\.jsdelivr\.net/, (r) => r.abort());
+    await page.addInitScript(() => {
+      window.__NEWPASS = null;
+      window.supabase = {
+        createClient() {
+          const res = (d, e) => Promise.resolve({ data: d, error: e || null });
+          return {
+            auth: {
+              getSession: () => res({ session: { user: { id: "u1", email: "a@b.c" } } }),
+              getUser: () => res({ user: { id: "u1", email: "a@b.c" } }),
+              updateUser: ({ password }) => {
+                window.__NEWPASS = password;
+                return res({ user: { id: "u1" } });
+              },
+              signInWithPassword: () => res({ user: { id: "u1" } }),
+              signUp: () => res({ user: { id: "u1" } }),
+              resetPasswordForEmail: () => res({}),
+              signOut: () => res({}),
+              onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
+            },
+            from: () => ({
+              select: function () {
+                return this;
+              },
+              eq: function () {
+                return this;
+              },
+              maybeSingle: () => res(null),
+              then: (f) => res([]).then(f),
+            }),
+          };
+        },
+      };
+    });
+    // ★メールのリンクと同じ形（# に type=recovery が付いて戻ってくる）
+    await page.goto("/nomiya-uriage.html#access_token=xxx&type=recovery");
+    await page.waitForTimeout(700);
+    await expect(page.locator("#loginOv"), "戻ってきたのにログイン画面が閉じている").toHaveClass(
+      /open/
+    );
+    await expect(page.locator("#loginReset"), "新しいパスワードを決める所が無い").toBeVisible();
+    await expect(page.locator("#loginPass"), "ふだんのログイン欄が出たまま").toBeHidden();
+    // 短いパスワードは断る
+    await page.locator("#loginNew").fill("123");
+    await page.locator("#btnNewPass").click();
+    await page.waitForTimeout(200);
+    await expect(page.locator("#loginResetErr")).toContainText("6文字以上");
+    expect(await page.evaluate(() => window.__NEWPASS)).toBe(null);
+    // 決めたら中に入れる
+    await page.locator("#loginNew").fill("newpass123");
+    await page.locator("#btnNewPass").click();
+    await page.waitForTimeout(600);
+    expect(await page.evaluate(() => window.__NEWPASS), "新しいパスワードにしていない").toBe(
+      "newpass123"
+    );
+    await expect(page.locator("#loginOv"), "決めたのに閉じない").not.toHaveClass(/open/);
+    expect(page.url(), "#のゴミが残っている").not.toContain("type=recovery");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("ふつうに開いたときは、新しいパスワードの欄は出ない", async ({ page }) => {
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await page.route(/cdn\.jsdelivr\.net/, (r) => r.abort());
+    await page.addInitScript({ path: "tests/e2e/fake-supabase.js" });
+    await page.goto("/nomiya-uriage.html");
+    await page.waitForTimeout(600);
+    await expect(page.locator("#loginReset")).toBeHidden();
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
