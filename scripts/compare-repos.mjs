@@ -32,6 +32,16 @@ const ALLOWED = {
   "CLAUDE.md": "そのrepo向けの作業の決まり",
 };
 
+/* ★1文字だけ違ってよい所★
+   nomiya-uriage.html は両repoで同じ物でなければならないが、
+   js/supa-config.js の中身が違う＝その ?v=<版> だけは必ず違う。
+   ★そこだけを伏せて比べる（ファイルごと許すのではない）★
+   これを「まるごと許す」にすると、画面の中身が違っていても気づけなくなる。 */
+const NORMALIZE = {
+  "nomiya-uriage.html": (t) =>
+    t.replace(/js\/supa-config\.js\?v=[0-9a-f]{8}/g, "js/supa-config.js?v=<版>"),
+};
+
 const other =
   process.argv[2] ||
   path.join(
@@ -56,7 +66,10 @@ const tracked = (dir) =>
 const hash = (dir, rel) => {
   const p = path.join(dir, rel);
   if (!fs.existsSync(p)) return null;
-  return crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex");
+  const norm = NORMALIZE[rel];
+  const buf = fs.readFileSync(p);
+  const body = norm ? Buffer.from(norm(buf.toString("utf8")), "utf8") : buf;
+  return crypto.createHash("sha256").update(body).digest("hex");
 };
 
 const mine = tracked(ROOT);
@@ -84,6 +97,11 @@ console.log("★違ってよい物★");
 for (const f of Object.keys(ALLOWED)) {
   const mark = differ.includes(f) ? "違う" : missingAllowed.includes(f) ? "同じ" : "無い";
   console.log(`  ${mark}  ${f}  … ${ALLOWED[f]}`);
+}
+for (const f of Object.keys(NORMALIZE)) {
+  console.log(
+    `  伏せて比較  ${f}  … supa-config の ?v=<版> だけ違ってよい（それ以外は同じであること）`
+  );
 }
 
 let ng = false;
