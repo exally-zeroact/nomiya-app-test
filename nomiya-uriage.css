@@ -1,0 +1,1208 @@
+/* nomiya-uriage.css — 画面の見た目（Castally）
+ * ------------------------------------------------------------------------------
+ * ★2026-08-07 に nomiya-uriage.html の <style> から そのまま出した物★
+ *   中身は1行も書き換えていない（切って移しただけ）。
+ * ★色は :root の変数だけ。部品に生の色コードを直書きしない★
+ *   （見張り: tests/nomiya-brand.test.js。tests/app-source.mjs 経由でこのファイルを読む）
+ * ※A4の紙のCSS（SHEET_CSS）はここには無い。紙は白地に黒のままにする決まりなので、
+ *   画面の変数に寄せず、JS側（nomiya-ui-kami.js）に置いてある。
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+/* ===== 色の決まり（Castally） =====
+         ★色はここだけに書く。部品のCSSに生の色コードを書かない。
+           1か所だけ直して全体が崩れる、を止めるため（tests/nomiya-brand.test.js が見張る）。
+         ★A4の紙（SHEET_CSS）と印刷用は別。紙は白地に黒のままにするので変数に寄せない。 */
+:root {
+  --c-bg: #f6f7fa;
+  --c-card: #ffffff;
+  --c-line: #e1e4eb;
+  --c-line-soft: #e1e4eb;
+  --c-line2: #b4bac9;
+  --c-sum: #f1f3f8;
+  --c-sum2: #f1f3f8;
+  --c-soft: #f1f3f8;
+  --c-text: #0f1728;
+  --c-text2: #0f1728;
+  --c-flabel: #3e4964;
+  --c-label: #5a6480;
+  --c-label2: #5a6480;
+  --c-ph: #6b7690;
+  --c-minus: #a33320;
+  --c-accent: #0f1728;
+  --c-btn: #e7ecf5;
+  --c-btn-t: #1b2740;
+  --c-on-dark: #ffffff;
+  --c-btn-line: #1b2740;
+  --c-btn-act: #dde3ef;
+  --c-btn2: #e7ecf5;
+  --c-btn2-t: #1b2740;
+  --c-btn2-line: #7a88a5;
+  --c-btn2-act: #dde3ef;
+  --c-chip: #f2f4f8;
+  --c-chip-t: #3e4964;
+  --c-chip-line: #7a88a5;
+  --c-chip-on: #e7ecf5;
+  --c-chip-on-t: #0f1728;
+  --c-chip-on-line: #0f1728;
+  --c-hd: #070f22;
+  --c-hd-logo: #e9c97f;
+  --c-hd-t: #a99e82;
+  --c-hd-line: #1d2947;
+  --c-nav: #ffffff;
+  --c-nav-line: #e1e4eb;
+  --c-nav-on: #0f1728;
+  --c-nav-off: #6f7a92;
+  --c-badge: #a33320;
+  --c-danger: #a33320;
+  --c-danger-bg: #fbeeec;
+  --c-danger-line: #e0b5ae;
+  --c-danger-act: #f4ded9;
+  --c-warn: #8a5a0b;
+  --c-warn2: #8a5a0b;
+  --c-warn-bg: #fbf1e3;
+  --c-warn-line: #e2cba4;
+  --c-info: #1f4e86;
+  --c-info-bg: #e9f0fa;
+  --c-plus: #1f4e86;
+  --c-ok: #1f6b45;
+  --c-ok-bg: #e9f2ed;
+  --c-tint: #e7ecf5;
+  --c-line-soft2: #e1e4eb;
+  --c-line-soft3: #e1e4eb;
+  --c-line-soft4: #e1e4eb;
+  --c-label3: #5a6480;
+  --c-line2b: #b4bac9;
+  --c-lock: #f1f3f8;
+}
+html {
+  font-size: 14px;
+  -webkit-text-size-adjust: 100%;
+  background: var(--c-bg);
+  /* 上で引っ張ったときの跳ね返り（バウンス）を止める。
+           跳ねているあいだ、ヘッダーの上に地の色が出て「空白ができた」ように見える。
+           ★正直に書く：iPhoneのSafari/WebKitはこの指定に対応していない（実測 CSS.supports=false）。
+             効くのは Android の Chrome。iPhone側は status-bar-style を広げない指定にしたのと、
+             戻ってきたときに位置を測り直すので直っている（司さん実機で確認済み 2026-08-05）。 */
+  overscroll-behavior-y: none;
+}
+body {
+  font-family: "Noto Sans JP", sans-serif;
+  background: var(--c-bg);
+  color: var(--c-text);
+  padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  overscroll-behavior-y: none;
+}
+
+/* ===== HEADER ===== */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--c-hd);
+  border-bottom: 1px solid var(--c-hd-line);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* ★万一 iOS が画面を時計の裏まで広げてきても崩れないよう、上の安全な余白を持つ。
+           広げていないときは env(safe-area-inset-top)=0 なので、見た目は変わらない。 */
+  padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
+  box-shadow: 0 1px 4px rgba(30, 80, 46, 0.06);
+}
+.app-logo {
+  font-family:
+    "Playfair Display", Georgia, "Times New Roman", "Yu Mincho", "Hiragino Mincho ProN", serif;
+  font-size: 22px;
+  font-weight: 400;
+  color: var(--c-hd-logo);
+  letter-spacing: 0.5px;
+  line-height: 1;
+}
+/* 右上の歯車。設定はここ1つだけ（下ナビは毎日使う5つに絞る） */
+.hdr-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--c-hd-line);
+  border-radius: 10px;
+  padding: 5px 10px;
+  font-size: 17px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.hdr-btn.on {
+  background: var(--c-hd-line);
+  border-color: var(--c-hd-logo);
+}
+/* 画面の中の切替（一覧の中の集計・税理士 / 設定の中の4つ）。中身は1つだけ出す。 */
+.pane {
+  display: none;
+}
+.pane.active {
+  display: block;
+}
+.app-title {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-hd-t);
+}
+
+/* ===== SCREEN ===== */
+.screen {
+  display: none;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 14px 12px;
+}
+.screen.active {
+  display: block;
+}
+.scr-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--c-text);
+  margin-bottom: 4px;
+}
+.scr-sub {
+  font-size: 11px;
+  color: var(--c-label2);
+  margin-bottom: 14px;
+  line-height: 1.6;
+}
+
+/* ===== CARD ===== */
+.card {
+  background: var(--c-card);
+  border: 1px solid var(--c-line);
+  border-radius: 16px;
+  box-shadow: 0 1px 4px rgba(30, 80, 46, 0.06);
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.card-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--c-label);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+/* ===== FIELDS ===== */
+.frow {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+.frow:last-child {
+  margin-bottom: 0;
+}
+.flabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--c-flabel);
+}
+/* ★入力できる欄は16px以上にする。
+         iPhoneは「字が16pxより小さい入力欄」を触ると勝手に画面を拡大し、
+         そのまま戻らないので上に空白が出て画面がずれる（＝スクロールがおかしい）。
+         viewport の maximum-scale で止めるのは間違い＝指2本の拡大まで殺してしまう。 */
+.finput,
+.fselect {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1.5px solid var(--c-line);
+  border-radius: 10px;
+  font-size: 16px;
+  font-family: "Noto Sans JP", sans-serif;
+  color: var(--c-text);
+  outline: none;
+  background: var(--c-card);
+  transition: border-color 0.15s;
+}
+.finput:focus,
+.fselect:focus {
+  border-color: var(--c-accent);
+}
+.finput::placeholder {
+  color: var(--c-ph);
+}
+.fnum {
+  font-family: "DM Mono", monospace;
+  text-align: right;
+  font-size: 17px;
+}
+.fselect {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' stroke='%235a6480' stroke-width='1.6' fill='none' stroke-linecap='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 30px;
+}
+.f2 {
+  display: flex;
+  gap: 10px;
+}
+.f2 > * {
+  flex: 1;
+}
+
+/* ===== BUTTONS ===== */
+/* ★面がうすいので、枠が「押せる」の唯一の手がかり。枠を消さない。
+           tests/nomiya-brand.test.js が「1.5px 以上・決めた濃さ以上」を見張る。 */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1.5px solid var(--c-btn2-line);
+  border-radius: 12px;
+  font-family: "Noto Sans JP", sans-serif;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+/* 主役のボタンは、枠を太く濃くして見分ける（面の色は同じ） */
+.btn-primary {
+  background: var(--c-btn);
+  color: var(--c-btn-t);
+  border: 2px solid var(--c-btn-line);
+  padding: 14px 16px;
+  font-size: 15px;
+  width: 100%;
+  box-shadow: 0 2px 8px rgba(15, 23, 40, 0.1);
+}
+.btn-primary:hover {
+  background: var(--c-btn-act);
+}
+.btn-ghost {
+  background: var(--c-btn2);
+  color: var(--c-btn2-t);
+  border: 1.5px solid var(--c-btn2-line);
+  padding: 11px 14px;
+  font-size: 13px;
+  width: 100%;
+}
+.btn-ghost:hover {
+  background: var(--c-btn2-act);
+}
+.btn-sm {
+  padding: 8px 12px;
+  font-size: 12px;
+  width: auto;
+}
+.btn-danger {
+  background: var(--c-danger-bg);
+  color: var(--c-danger);
+  border: 1.5px solid var(--c-danger-line);
+}
+.btn-danger:hover {
+  background: var(--c-danger-act);
+}
+.btn-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.btn-row .btn {
+  flex: 1;
+}
+/* 操作ボタンは右寄せ（親指で押しやすい） */
+.btn-right {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ===== CHIPS（タップで選ぶ） ===== */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* 画面の上に置く1行のタブ（カードで囲まず場所を取らない） */
+.chips-bar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+  -webkit-overflow-scrolling: touch;
+}
+.chips-bar::-webkit-scrollbar {
+  display: none;
+}
+.chips-bar .chip {
+  flex: 0 0 auto;
+}
+.chip {
+  background: var(--c-chip);
+  border: 1.5px solid var(--c-chip-line);
+  color: var(--c-chip-t);
+  border-radius: 999px;
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: "Noto Sans JP", sans-serif;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.chip:hover {
+  border-color: var(--c-line2);
+}
+/* ★選んだチップは「面の色」だけでは見分けられない（差が小さい）。
+           枠を太く濃くして分ける。細くしたら tests が赤になる。 */
+.chip.on {
+  background: var(--c-chip-on);
+  border: 2px solid var(--c-chip-on-line);
+  color: var(--c-chip-on-t);
+}
+.chip-sm {
+  padding: 7px 11px;
+  font-size: 12px;
+}
+.chip-num {
+  min-width: 40px;
+  font-family: "DM Mono", monospace;
+  text-align: center;
+  justify-content: center;
+}
+
+/* ===== 期間バー ===== */
+.period {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--c-card);
+  border: 1px solid var(--c-line);
+  border-radius: 14px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.period-arrow {
+  background: var(--c-btn2);
+  border: 1.5px solid var(--c-btn2-line);
+  color: var(--c-btn2-t);
+  border-radius: 10px;
+  width: 38px;
+  height: 38px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.period-lb {
+  flex: 1;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--c-text);
+  font-family: "DM Mono", monospace;
+}
+.period-sub {
+  display: block;
+  font-family: "Noto Sans JP", sans-serif;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--c-label);
+}
+
+/* ===== 集計ストリップ ===== */
+/* ★横に4つ詰めない。売上が10桁になると、狭くなった箱の中で
+         「組数」が「組／数」、「のべ人数」が「の／べ／人／数」と1文字ずつ縦に割れて、
+         客単価は枠からはみ出していた（司さん指摘 2026-08-05）。
+         幅が足りなければ2列に折り返す。数が奇数のときは最後を横いっぱいに使う。 */
+.strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+/* ★数字は帳簿と同じで右端をそろえる。真ん中寄せだと、箱ごとに位置がずれて
+         上下・左右で比べられない（司さん指摘 2026-08-05）。 */
+.strip-item {
+  min-width: 0;
+  background: var(--c-card);
+  border: 1px solid var(--c-line);
+  border-radius: 12px;
+  padding: 9px 10px;
+  text-align: right;
+}
+.strip-item:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+.strip-k {
+  font-size: 10px;
+  color: var(--c-label);
+  font-weight: 700;
+  white-space: nowrap; /* 見出しを1文字ずつ縦に割らない */
+  text-align: left; /* 見出しは左・数字は右＝目が行き来しやすい */
+}
+.strip-v {
+  font-family: "DM Mono", monospace;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--c-text);
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums; /* 数字の幅をそろえて、桁の位置を合わせる */
+}
+/* 単位（組・人・日前）は数字の一部にしない。小さく添える。 */
+.strip-u {
+  font-family: "Noto Sans JP", sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--c-label);
+  margin-left: 3px;
+}
+/* 桁が多いときは字を小さくして、必ず1行に収める（はみ出させない） */
+.strip-v.len-m {
+  font-size: 14px;
+}
+.strip-v.len-l {
+  font-size: 12px;
+}
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.stat {
+  background: var(--c-card);
+  border: 1px solid var(--c-line);
+  border-radius: 14px;
+  padding: 12px;
+}
+.stat-k {
+  font-size: 11px;
+  color: var(--c-label);
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+.stat-v {
+  font-family: "DM Mono", monospace;
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--c-text);
+  line-height: 1.2;
+}
+.stat-v small {
+  font-family: "Noto Sans JP", sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--c-label2);
+}
+
+/* ===== 読める一覧＋バー（散布図は使わない） ===== */
+.brk {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.brk th {
+  font-size: 10px;
+  color: var(--c-label);
+  text-align: right;
+  font-weight: 700;
+  padding: 0 4px 6px;
+  border-bottom: 1px solid var(--c-line-soft);
+}
+.brk th:first-child {
+  text-align: left;
+}
+.brk td {
+  font-size: 13px;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--c-line-soft2);
+  text-align: right;
+  font-family: "DM Mono", monospace;
+  white-space: nowrap;
+}
+.brk td:first-child {
+  text-align: left;
+  font-family: "Noto Sans JP", sans-serif;
+  font-weight: 700;
+  color: var(--c-text);
+  white-space: normal;
+  word-break: break-all;
+}
+.brk tr:last-child td {
+  border-bottom: none;
+}
+.brk .zero {
+  color: var(--c-ph);
+}
+.bar {
+  height: 6px;
+  background: var(--c-sum2);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.bar > i {
+  display: block;
+  height: 100%;
+  background: var(--c-accent);
+  border-radius: 4px;
+}
+/* ★桁が大きいときは、棒グラフの方を細くする。
+         数字が読めないより、棒が短い方がまし（監査で「金額と割合が重なる」を実測）。 */
+.barcell {
+  width: 48px;
+  min-width: 48px;
+}
+.brk th:nth-child(2),
+.brk td:nth-child(2),
+.brk th:nth-child(4),
+.brk td:nth-child(4) {
+  width: 46px;
+}
+/* ★金額の列は、桁が増えたら広がってよい（固定幅だと割合と重なる＝監査で実測）。
+         割合の列との間には、必ずすき間を空ける。 */
+.brk th:nth-child(3),
+.brk td:nth-child(3) {
+  width: auto;
+  min-width: 76px;
+  padding-right: 12px;
+}
+
+/* ===== 明細リスト（入力画面のその日の分・未回収） ===== */
+.li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--c-line-soft2);
+  cursor: pointer;
+}
+.li:last-child {
+  border-bottom: none;
+}
+.li:hover {
+  background: var(--c-soft);
+}
+.li-main {
+  flex: 1;
+  min-width: 0;
+}
+.li-nm {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.li-sub {
+  font-size: 11px;
+  color: var(--c-label);
+  margin-top: 2px;
+}
+.li-amt {
+  font-family: "DM Mono", monospace;
+  font-size: 15px;
+  color: var(--c-text);
+  white-space: nowrap;
+}
+/* 並べ替えの ↑↓（設定のマスタだけ）。押す所は指のサイズにする。 */
+.ord {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 34px;
+}
+.ord-b {
+  background: var(--c-sum);
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  color: var(--c-btn2-t);
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 0;
+  cursor: pointer;
+}
+.ord-b:hover {
+  background: var(--c-tint);
+}
+.ord-b:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+/* 画面の中の小さな表（この月のまとめ など）。名前と数字がぶつからないようにする */
+.sum-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.sum-tbl th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--c-label3);
+  text-align: right;
+  padding: 2px 6px 6px;
+  white-space: nowrap;
+}
+.sum-tbl td {
+  font-family: "DM Mono", monospace;
+  font-size: 13px;
+  color: var(--c-text);
+  text-align: right;
+  padding: 5px 6px;
+  border-top: 1px solid var(--c-line-soft3);
+  white-space: nowrap;
+}
+.sum-tbl th:first-child,
+.sum-tbl td:first-child {
+  text-align: left;
+  font-family: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin-right: 4px;
+}
+.tag-pay {
+  background: var(--c-sum2);
+  color: var(--c-flabel);
+}
+.tag-unpaid {
+  background: var(--c-warn-bg);
+  color: var(--c-warn);
+}
+.tag-rc {
+  background: var(--c-info-bg);
+  color: var(--c-info);
+}
+.empty {
+  text-align: center;
+  color: var(--c-ph);
+  font-size: 12px;
+  padding: 18px 0;
+}
+
+/* ===== 未回収（請求書送り / ツケ を分けて出す） ===== */
+.ug {
+  border: 1px solid var(--c-line-soft4);
+  border-radius: 12px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.ug:last-child {
+  margin-bottom: 0;
+}
+.ug-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border-bottom: 1px solid var(--c-line-soft);
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+}
+.ug-t {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-text);
+}
+.ug-c {
+  font-size: 11px;
+  color: var(--c-label);
+  font-family: "DM Mono", monospace;
+}
+.ug-v {
+  margin-left: auto;
+  font-family: "DM Mono", monospace;
+  font-size: 15px;
+  color: var(--c-warn);
+}
+
+/* ===== A4プレビュー（原寸794pxを画面幅にフィット） ===== */
+.sheet-scale {
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.sheet-scale-inner {
+  transform-origin: top left;
+  width: 794px;
+}
+
+/* ===== BOTTOM NAV ===== */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  background: var(--c-nav);
+  border-top: 1px solid var(--c-nav-line);
+  display: flex;
+  justify-content: space-around;
+  box-shadow: 0 -2px 8px rgba(30, 80, 46, 0.05);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 2px 7px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: "Noto Sans JP", sans-serif;
+  color: var(--c-nav-off);
+}
+.nav-item.active {
+  color: var(--c-nav-on);
+}
+.nav-ic {
+  font-size: 18px;
+  line-height: 1;
+}
+.nav-lb {
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.nav-badge {
+  position: absolute;
+  top: 4px;
+  margin-left: 26px;
+  background: var(--c-badge);
+  color: var(--c-on-dark);
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 1px 5px;
+}
+
+/* ===== MODAL ===== */
+.modal-ov {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(20, 50, 35, 0.45);
+  align-items: flex-end;
+  justify-content: center;
+}
+.modal-ov.open {
+  display: flex;
+}
+.modal {
+  background: var(--c-card);
+  width: 100%;
+  max-width: 520px;
+  border-radius: 18px 18px 0 0;
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 18px 16px 28px;
+}
+.modal-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.modal-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--c-text);
+}
+.modal-x {
+  background: none;
+  border: 1.5px solid var(--c-line);
+  color: var(--c-label);
+  border-radius: 18px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ===== TOAST ===== */
+.toast {
+  position: fixed;
+  bottom: 86px;
+  left: 50%;
+  transform: translateX(-50%) translateY(10px);
+  background: var(--c-text);
+  color: var(--c-on-dark);
+  font-size: 12.5px;
+  font-weight: 700;
+  padding: 10px 16px;
+  border-radius: 999px;
+  opacity: 0;
+  transition: all 0.2s;
+  z-index: 200;
+  pointer-events: none;
+  max-width: 88vw;
+  text-align: center;
+}
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--c-label);
+  line-height: 1.6;
+}
+/* 押した結果（入れた分）。押すボタンとは見た目をはっきり変える＝どっちが入力か迷わない */
+.picked {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--c-btn2);
+  border: 1px dashed var(--c-line2b);
+  border-radius: 10px;
+}
+.picked:empty {
+  display: none;
+}
+.picked-hd {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--c-flabel);
+  margin-bottom: 6px;
+}
+.picked-it {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--c-card);
+  border: 1px solid var(--c-line);
+  border-radius: 999px;
+  padding: 5px 6px 5px 11px;
+  margin: 0 6px 6px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--c-text);
+}
+.picked-it b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--c-sum);
+  color: var(--c-label);
+  font-size: 11px;
+  cursor: pointer;
+}
+/* 色見本（丸）。押すとその色になる */
+.acc-sw {
+  width: 34px;
+  height: 34px;
+  border: 2px solid var(--c-card);
+  border-radius: 50%;
+  padding: 0;
+  background: var(--c-card);
+  box-shadow: 0 0 0 1.5px var(--c-line);
+  cursor: pointer;
+}
+.acc-sw > i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+.acc-sw.on {
+  box-shadow: 0 0 0 2.5px var(--c-btn);
+}
+.acc-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--c-card);
+  border: 1.5px solid var(--c-line);
+  border-radius: 999px;
+  padding: 6px 10px 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-flabel);
+  cursor: pointer;
+}
+.acc-pick.on {
+  border-color: var(--c-chip-on-line);
+  background: var(--c-chip-on);
+  color: var(--c-chip-on-t);
+}
+.acc-pick input {
+  width: 26px;
+  height: 26px;
+  border: none;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  /* ★色を選ぶ欄も「入力欄」。iPhoneは16px未満だと触った瞬間に画面を拡大する。
+           iPhoneでは色の選択が出ず、ただの文字欄になることがある（そのときこの字が出る）。 */
+  font-size: 16px;
+}
+.li-tag {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--c-ok);
+  background: var(--c-ok-bg);
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  padding: 1px 6px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.li-warn {
+  font-size: 11px;
+  color: var(--c-warn2);
+  line-height: 1.6;
+  margin-top: 3px;
+}
+/* 締め（現金合わせ）の表 */
+.cl-tbl {
+  width: 100%;
+  border-collapse: collapse;
+}
+.cl-tbl th {
+  text-align: left;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--c-flabel);
+  padding: 7px 0;
+  white-space: nowrap;
+}
+.cl-tbl td {
+  text-align: right;
+  padding: 7px 0;
+}
+.cl-v {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--c-text2);
+  font-variant-numeric: tabular-nums;
+}
+.cl-sum th,
+.cl-sum td {
+  border-top: 1px solid var(--c-line);
+  padding-top: 10px;
+}
+.cl-sum .cl-v {
+  font-size: 17px;
+}
+.cl-diff th,
+.cl-diff td {
+  border-top: 1px solid var(--c-line-soft);
+}
+.cl-diff .cl-v {
+  font-size: 17px;
+}
+.cl-minus {
+  color: var(--c-minus);
+}
+.cl-plus {
+  color: var(--c-plus);
+}
+.cl-in {
+  width: 130px;
+  box-sizing: border-box;
+  text-align: right;
+  font-size: 16px;
+  font-family: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--c-line);
+  border-radius: 10px;
+  background: var(--c-card);
+  color: var(--c-text2);
+}
+.cl-in:focus {
+  outline: none;
+  border-color: var(--c-accent);
+}
+.cl-locked .cl-in {
+  background: var(--c-lock);
+  color: var(--c-label);
+}
+/* ふだんは閉じておく設定（開くと中身が出る） */
+.look {
+  background: var(--c-card);
+  border: 1px solid var(--c-line);
+  border-radius: 16px;
+  box-shadow: 0 1px 4px rgba(30, 80, 46, 0.06);
+  padding: 0 14px;
+  margin-bottom: 12px;
+}
+.look > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--c-flabel);
+  padding: 13px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.look > summary::-webkit-details-marker {
+  display: none;
+}
+.look > summary::after {
+  content: "▼";
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--c-label);
+}
+.look[open] > summary {
+  border-bottom: 1px solid var(--c-line-soft);
+  margin-bottom: 12px;
+}
+.look[open] > summary::after {
+  content: "▲";
+}
+.look > .frow:last-child {
+  margin-bottom: 14px;
+}
+.hanko-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.hanko-prev {
+  width: 68px;
+  height: 68px;
+  flex: 0 0 68px;
+  border: 1.5px dashed var(--c-line);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--c-ph);
+  overflow: hidden;
+  background: var(--c-card);
+}
+.hanko-prev img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.md-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--c-flabel);
+  background: var(--c-soft);
+  border: 1.5px solid var(--c-line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-top: 10px;
+  cursor: pointer;
+}
+.md-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--c-btn);
+}
+/* ★断られた欄そのものを赤くする。赤い字だけだと、どこを直すか分からない（監査で指摘） */
+.finput.ng,
+.fselect.ng {
+  border-color: var(--c-danger);
+  background: var(--c-danger-bg);
+}
+/* 止めないための注意（黄色）。エラー（赤）と違い、押せば保存できる。 */
+.warn-note {
+  color: var(--c-warn);
+  background: var(--c-warn-bg);
+  border: 1px solid var(--c-warn-line);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 10px;
+  margin-top: 6px;
+}
+.stop-ov {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: var(--c-hd);
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.stop-ov.open {
+  display: flex;
+}
+.stop-card {
+  background: var(--c-card);
+  border-radius: 16px;
+  padding: 22px 20px;
+  max-width: 380px;
+  width: 100%;
+  text-align: center;
+}
+.stop-h {
+  font-size: 17px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.stop-b {
+  font-size: 13px;
+  color: var(--c-label);
+  line-height: 1.9;
+  margin-bottom: 16px;
+}
+.err {
+  color: var(--c-danger);
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 6px;
+  white-space: pre-line;
+}
+
+/* ===== 印刷 ===== */
+#printArea {
+  display: none;
+}
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+  html,
+  body {
+    background: var(--c-card);
+    padding: 0;
+  }
+  /* 画面のものは全部隠して、紙だけ出す */
+  .app-header,
+  .bottom-nav,
+  .screen,
+  .modal-ov,
+  .toast,
+  .no-print {
+    display: none !important;
+  }
+  #printArea {
+    display: block;
+  }
+  #printArea .sheet {
+    border: none;
+    box-shadow: none;
+    margin: 0 auto;
+    page-break-after: always;
+  }
+  #printArea .sheet:last-child {
+    page-break-after: auto;
+  }
+}

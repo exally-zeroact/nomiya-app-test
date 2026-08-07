@@ -134,9 +134,16 @@ describe("㉗-③ 実際の給料での引き方（1回の支払いごと）", (
   });
 
   it("源泉を使わない店は、今までどおり1円も引かない", () => {
-    const t = C.paySummary(staff({ cycle: "monthly" }), [work("2026-08-01")], [], "2026-08-01", "2026-08-31", {
-      settings: {},
-    });
+    const t = C.paySummary(
+      staff({ cycle: "monthly" }),
+      [work("2026-08-01")],
+      [],
+      "2026-08-01",
+      "2026-08-31",
+      {
+        settings: {},
+      }
+    );
     expect(t.gensen).toBe(0);
     expect(t.net).toBe(20000);
   });

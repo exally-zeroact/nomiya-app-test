@@ -1,21 +1,28 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 /* 「テストはテスト、本番は本番」を機械で縛る。
  *
  *   nomiya-app       … 本番。本番倉庫 tnfwipbgfgjaymlszeid を見る
  *   nomiya-app-test  … テスト。DB-test khawdrnvssdenumbiwfg を見る
  *
- * 2つのrepoで違うファイルは js/supa-config.js の1本だけ。
+ * ★2つのrepoで違ってよいのは4本★（2026-08-07 実測して数え直した）
+ *     js/supa-config.js … どの倉庫を見るか
+ *     package.json / package-lock.json … repoの名前
+ *     CLAUDE.md … そのrepo向けの作業の決まり
+ *   前はここに「違うのは js/supa-config.js の1本だけ」と書いてあったが、
+ *   ★実際は4本違っていた＝書いてある決まりと実物がズレていた★。
+ *   4本かどうかを機械で数えるのは scripts/compare-repos.mjs（npm run compare・手元専用）。
+ *
  * このテストファイル自体は両方のrepoで同じ物で、package.json の名前を見て
  * 「このrepoはどっちを向いているべきか」を判定する＝取り違えたら赤くなる。
  */
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const R = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
+/* ★どこに書いてあるかは tests/app-source.mjs だけが知っている★
+   HTML の中でも、分割した nomiya-ui-*.js の中でも、同じ物が返る。 */
+import { ROOT, HTML, PAGE_JS, SCRIPT_SRCS } from "./app-source.mjs";
 
-const HTML = R("nomiya-uriage.html");
+const R = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
 const CONF = R("js/supa-config.js");
 const SQL = R("supabase/schema-nomiya.sql");
 const LIVE = R("tests/live-nomiya.mjs");
@@ -43,19 +50,32 @@ describe("飲み屋アプリ 倉庫の向き先（テストはテスト・本番
     expect(key[1].length).toBeGreaterThan(20);
   });
 
-  it("HTMLには倉庫の名前を1文字も書かない（2つのrepoで同じ物にするため）", () => {
+  it("配る物には倉庫の名前を1文字も書かない（2つのrepoで同じ物にするため）", () => {
     expect(HTML.includes(PROD), "HTMLに本番倉庫が直書きされている").toBe(false);
     expect(HTML.includes(DBTEST), "HTMLにDB-testが直書きされている").toBe(false);
-    // 倉庫は supa-config から受け取る
-    expect(HTML).toMatch(/var SUPA_URL = \(window\.SUPA \|\| \{\}\)\.url/);
-    expect(HTML).toMatch(/var SUPA_KEY = \(window\.SUPA \|\| \{\}\)\.key/);
+    expect(PAGE_JS.includes(PROD), "画面のJSに本番倉庫が直書きされている").toBe(false);
+    expect(PAGE_JS.includes(DBTEST), "画面のJSにDB-testが直書きされている").toBe(false);
+    // 倉庫は supa-config から受け取る（分割しても、画面のJSのどこかに1回はある）
+    expect(PAGE_JS).toMatch(/var SUPA_URL = \(window\.SUPA \|\| \{\}\)\.url/);
+    expect(PAGE_JS).toMatch(/var SUPA_KEY = \(window\.SUPA \|\| \{\}\)\.key/);
   });
 
-  it("supa-config.js は、それを使う部品より先に読み込む", () => {
-    const iConf = HTML.indexOf('src="js/supa-config.js"');
-    const iLogin = HTML.indexOf('src="exally-login.js"');
-    expect(iConf, "supa-config.js を読んでいない").toBeGreaterThan(-1);
-    expect(iLogin).toBeGreaterThan(iConf);
+  /* ★読み込む順番★
+     supa-config.js が先。これを使う exally-login.js と画面のJSは後。
+     ★?v=<SHA> が付いても壊れないように、SCRIPT_SRCS（?以降を落とした一覧）で見る★
+     （前は HTML.indexOf('src="js/supa-config.js"') で見ていたので、
+       版を付けた瞬間に -1 になって赤くなった） */
+  it("supa-config.js は、それを使う部品より先に読み込む（?v= が付いても効く）", () => {
+    const at = (f) => SCRIPT_SRCS.indexOf(f);
+    expect(at("js/supa-config.js"), "supa-config.js を読んでいない").toBeGreaterThan(-1);
+    expect(at("exally-login.js"), "exally-login.js を読んでいない").toBeGreaterThan(-1);
+    expect(at("exally-login.js")).toBeGreaterThan(at("js/supa-config.js"));
+    // 画面のJSを分割したら、それも supa-config より後で読む
+    SCRIPT_SRCS.filter((s) => s.includes("nomiya-ui-")).forEach((s) =>
+      expect(at(s), s + " が supa-config より先に読まれている").toBeGreaterThan(
+        at("js/supa-config.js")
+      )
+    );
   });
 
   it("CSPは supabase 全体を許す形（倉庫名を書かない）＋つなぐ先は絞ったまま", () => {
@@ -144,7 +164,9 @@ describe("飲み屋アプリ 倉庫の向き先（テストはテスト・本番
     expect(SQL).toMatch(/alter table castally\.nomiya_work add column if not exists amount/);
     // ★public の窓口(view)は「呼んだ人の権利」で開く＝RLSがそのまま効く。
     //   ここが抜けると、他の店のデータが見えるようになる。
-    expect(SQL).toMatch(/create or replace view public\.nomiya_sales with \(security_invoker = true\)/);
+    expect(SQL).toMatch(
+      /create or replace view public\.nomiya_sales with \(security_invoker = true\)/
+    );
     const views = [...SQL.matchAll(/create or replace view public\.(\w+) with \(([^)]*)\)/g)];
     expect(views.length, "public の窓口が8つない").toBe(8);
     views.forEach((m) =>

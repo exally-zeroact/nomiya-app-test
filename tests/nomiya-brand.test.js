@@ -12,19 +12,10 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const HTML = fs.readFileSync(path.join(ROOT, "nomiya-uriage.html"), "utf8");
-
-/* 画面用のCSS＝最初の <style>〜</style>。A4の紙のCSS(SHEET_CSS)は別物で、
-   紙は白地に黒のままにするので、この見張りの対象に入れない。 */
-const SCREEN_CSS = (() => {
-  const i = HTML.indexOf("<style>");
-  const j = HTML.indexOf("</style>", i);
-  if (i < 0 || j < 0) throw new Error("画面用の<style>が見つからない");
-  return HTML.slice(i + 7, j);
-})();
+/* ★どこに書いてあるかは tests/app-source.mjs だけが知っている★
+   （1ファイルでも分割後でも同じ物を返す。取れなければ その場で赤くなる） */
+import { ROOT, HTML, SCREEN_CSS, PAGE_JS, REST } from "./app-source.mjs";
 
 /* 色の決まりを書く場所＝:root{...}。ここだけは生の色コードを書いてよい。 */
 const ROOT_BLOCK = (() => {
@@ -206,10 +197,10 @@ describe("紙（A4）は白地に黒。緑を残さない", () => {
      ただし Castally にしたので、緑がかった罫や見出しが残っていると
      見出しの帯（濃紺）とちぐはぐになる。緑が1つでも残っていたら赤にする。 */
   const PAPER = (() => {
-    const i = HTML.indexOf("var SHEET_CSS = [");
-    const j = HTML.indexOf("].join(", i);
+    const i = PAGE_JS.indexOf("var SHEET_CSS = [");
+    const j = PAGE_JS.indexOf("].join(", i);
     if (i < 0 || j < 0) throw new Error("紙のCSSが見つからない");
-    return HTML.slice(i, j);
+    return PAGE_JS.slice(i, j);
   })();
   // 緑がかった色（緑が一番強い色）を1つでも見つけたら赤。
   const greens = (PAPER.match(/#[0-9a-fA-F]{6}/g) || []).filter(function (h) {
@@ -247,7 +238,7 @@ describe("画面にも前の緑を残さない（▼のような絵の中まで�
   });
   it("画面を作るJSの中にも、前の緑を直書きしていない", () => {
     // 店が選ぶ紙の色（深緑・若草）は店の持ち物なので対象外。それ以外の直書きを見る。
-    const js = HTML.slice(HTML.indexOf("</style>"));
+    const js = REST;
     const skin = /\{ label: "[^"]+", hex: "#[0-9a-fA-F]{6}" \}|moss: "#[0-9a-fA-F]{6}"/g;
     const body = js.replace(skin, "").replace(/var SHEET_CSS = \[[\s\S]*?\]\.join\(/, "");
     const bad = (body.match(/(?:#|%23)[0-9a-fA-F]{6}/g) || [])
@@ -297,7 +288,7 @@ describe("identity: 名前を変えるのは表に出る所だけ", () => {
     ].forEach((t) => expect(tables).toContain(t));
   });
   it("端末の控えの鍵は nomiya_*_v1 のまま（変えたら、みんなのデータが消える）", () => {
-    const keys = [...HTML.matchAll(/var (K_\w+) = "([^"]+)"/g)].map((m) => m[2]);
+    const keys = [...PAGE_JS.matchAll(/var (K_\w+) = "([^"]+)"/g)].map((m) => m[2]);
     expect(keys.length).toBeGreaterThanOrEqual(10);
     expect(keys.filter((k) => !/^nomiya_[a-z_]+_v1$/.test(k))).toEqual([]);
   });
@@ -309,7 +300,8 @@ describe("identity: 名前を変えるのは表に出る所だけ", () => {
     expect(/<title>Castally — 売上管理<\/title>/.test(HTML)).toBe(true);
     expect(/class="app-logo">Castally</.test(HTML)).toBe(true);
     // 画面に「Exally／エクサリー」は残さない（ログイン部品の名前は別）
-    const body = HTML.slice(HTML.indexOf("<body>"));
+    // ★分割しても範囲が痩せないように、body＋画面を作るJS の両方を見る★
+    const body = HTML.slice(HTML.indexOf("<body>")) + "\n" + PAGE_JS;
     // 画面に出ない物（コメント・棚の名前 exally_entitlements）は数えない
     const shown =
       body
