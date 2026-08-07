@@ -1283,10 +1283,90 @@ function loadPdfLibs() {
   return _pdfLibs;
 }
 
+/* ★明朝(Noto Serif JP)は、紙と請求書でしか使わない★
+   ------------------------------------------------------------------------------
+   2026-08-08 実測: 起動のときに明朝の実体を ★0本★ しか取っていなかった
+   （＝起動の画面には明朝で描く文字が1つも無い）。それなのに「目録(CSS)」だけは
+   起動時に読んでいて、そこに ★61KB★ 積まれていた。
+   だから起動の <link> からは外し、★紙を出すこの場所で読む★。
+
+   ★注意：外した以上、読み終わるのを待たないと紙がゴシックのまま出る★
+   この紙は html2canvas で「画面に出ている物をそのまま写す」作り。
+   字が届く前に写すと、写った絵はゴシックのまま固定される（あとから直らない）。 */
+var SERIF_CSS = "https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600&display=swap";
+/* ★<link> を足しただけでは、まだ書体は「登録」されていない★
+   目録(CSS)が届いて読み込まれるまで document.fonts の中に明朝は1つも無い。
+   その状態で document.fonts.load() を呼んでも「該当なし」で即座に終わる＝
+   ★待ったつもりで1バイトも待っていない★（2026-08-08、試験が実際にこれを捕まえた）。
+   だから ★目録が読み込まれたことを待てる形★ にしておく。 */
+var _serifCss = null;
+function addSerifCss() {
+  if (_serifCss) return _serifCss;
+  _serifCss = new Promise(function (done) {
+    var l = document.createElement("link");
+    l.rel = "stylesheet";
+    l.href = SERIF_CSS;
+    l.onload = function () {
+      done(true);
+    };
+    l.onerror = function () {
+      done(false); // 届かなくても紙は出す（今までどおりの見た目に落ちるだけ）
+    };
+    document.head.appendChild(l);
+  });
+  return _serifCss;
+}
+
+/* 紙に使う字が ぜんぶ届くまで待つ。
+   ★document.fonts.load に「その紙の文字」を渡すのが肝★。
+   日本語のWebフォントは文字の範囲ごとに約120枚へ切り分けて配られるので、
+   文字を渡さないと「代表の1枚」しか取りに行かず、待っても揃わない。
+   ★固まらせない★ため、待つのは最大12秒。それを超えたら待たずに進み、一言出す。 */
+var PAPER_FONTS = [
+  '400 16px "Noto Serif JP"',
+  '600 16px "Noto Serif JP"',
+  '400 16px "Noto Sans JP"',
+  '500 16px "Noto Sans JP"',
+  '700 16px "Noto Sans JP"',
+  '400 16px "DM Mono"',
+  '500 16px "DM Mono"',
+];
+async function ensurePaperFonts(inner) {
+  var d = document;
+  if (!d.fonts || !d.fonts.load) {
+    addSerifCss();
+    return true; // 対応していない端末は今までどおり
+  }
+  // ★まず目録が読み込まれるのを待つ（これを飛ばすと「該当なし」で素通りする）★
+  await addSerifCss();
+  var text = String((inner && inner.textContent) || "").slice(0, 4000);
+  var wait = Promise.all(
+    PAPER_FONTS.map(function (f) {
+      return d.fonts.load(f, text).catch(function () {});
+    })
+  ).then(function () {
+    return d.fonts.ready;
+  });
+  var timedOut = false;
+  await Promise.race([
+    wait.catch(function () {}),
+    new Promise(function (ok) {
+      setTimeout(function () {
+        timedOut = true;
+        ok();
+      }, 12000);
+    }),
+  ]);
+  if (timedOut) toast("⚠️ 書体が届かないまま紙を作りました（電波の良い所で作り直せます）");
+  return !timedOut;
+}
+
 /* 画面に出ている紙（.sheet）を、そのままの大きさでPDFにする。
          画面では縮めて見せているので、撮るあいだだけ縮小を外して原寸に戻す。 */
 async function buildPaperPdf(inner) {
   await loadPdfLibs();
+  // ★字がそろってから写す（そろう前に写すと、紙がゴシックのまま固定される）★
+  await ensurePaperFonts(inner);
   var sheets = Array.prototype.slice.call(inner.querySelectorAll(".sheet"));
   if (!sheets.length) throw new Error("紙がありません");
   var wrap = inner.parentElement; // .sheet-scale

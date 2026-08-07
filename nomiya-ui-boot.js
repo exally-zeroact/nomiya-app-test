@@ -53,6 +53,13 @@ function showScreen(name) {
     b.classList.toggle("active", b.getAttribute("data-scr") === name);
   });
   $("btnGear").classList.toggle("on", name === "set");
+  /* ★紙が出る画面に来たら、明朝(Noto Serif JP)を読み始める★
+     明朝は 紙・請求書でしか使わないので、起動の <link> からは外してある
+     （起動の受け取りが 61KB 減る。実測 2026-08-08）。
+     ここで先に読み始めておけば、印刷/PDFを押したときには もう届いている。
+     押した時点でまだ届いていなくても、buildPaperPdf が届くまで待つので
+     ★紙がゴシックのまま出ることはない★。 */
+  if ((name === "list" || name === "inv") && typeof addSerifCss === "function") addSerifCss();
   syncPanes();
   renderAll();
   fitAll();

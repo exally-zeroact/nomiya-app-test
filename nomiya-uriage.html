@@ -29,8 +29,17 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta name="apple-mobile-web-app-title" content="Castally" />
     <meta name="mobile-web-app-capable" content="yes" />
+    <!-- ★書体をつなぐ先を先に知らせる（0バイト・見た目そのまま。つなぎ始めの往復が減る） -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- ★明朝(Noto Serif JP)はここに入れない★
+         2026-08-08 実測: 起動のとき明朝の実体は0本しか取っていなかった
+         （＝起動の画面に明朝で描く文字が1つも無い）のに、目録(CSS)だけが61KB積まれていた。
+         明朝は 紙・請求書だけで使うので、そこへ来たときに読む（nomiya-ui-kami.js の addSerifCss）。
+         ★紙は「画面に出ている物を写して」PDFにするので、写す前に字が届くのを待つ★
+         （buildPaperPdf → ensurePaperFonts）。待たないと紙がゴシックのまま出る。 -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@400;600&family=DM+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="nomiya-uriage.css?v=e6ec89fa" />
@@ -850,9 +859,9 @@
     <script defer src="nomiya-ui-base.js?v=b1f08c2b"></script>
     <script defer src="nomiya-ui-uriage.js?v=c218b1b9"></script>
     <script defer src="nomiya-ui-kaishu.js?v=53cff47e"></script>
-    <script defer src="nomiya-ui-kami.js?v=273a38b5"></script>
+    <script defer src="nomiya-ui-kami.js?v=d43cbe70"></script>
     <script defer src="nomiya-ui-settei.js?v=bdb8d67a"></script>
     <script defer src="nomiya-ui-kyuryo.js?v=1b52a0dd"></script>
-    <script defer src="nomiya-ui-boot.js?v=37bb9529"></script>
+    <script defer src="nomiya-ui-boot.js?v=a371c039"></script>
   </body>
 </html>
