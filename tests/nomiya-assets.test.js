@@ -42,6 +42,22 @@ describe("配る js/css の版（?v=）", () => {
     expect(stale, stale.join(" / ") + "（npm run stamp で直る）").toEqual([]);
   });
 
+  /* ★2026-08-07 実測★
+     分割した直後、8本のJSが ★完全に直列★ で取られていた（1本25msずつ順番待ち＝312ms）。
+     初めて開く人の DOMContentLoaded が 484ms → 720ms に悪化した。
+     defer を付けると、並び順は保ったまま同時に取りに行くので、この待ちが消える。
+     ★誰かが defer を外すと、また遅くなる。だからここで縛る★ */
+  it("★配るJSは全部 defer（並び順は保ったまま同時に取る＝初回が遅くならない）★", () => {
+    const tags = [...HTML.matchAll(/<script\b([^>]*)>/gi)].map((m) => m[1]);
+    const withSrc = tags.filter((a) => /\bsrc\s*=/.test(a));
+    expect(withSrc.length, "読み込んでいるJSが無い").toBeGreaterThanOrEqual(5);
+    const noDefer = withSrc.filter((a) => !/\bdefer\b/.test(a));
+    expect(
+      noDefer.map((a) => (a.match(/src\s*=\s*"([^"]+)"/) || [])[1]),
+      "defer が付いていない（初回の読み込みが直列になって遅くなる）"
+    ).toEqual([]);
+  });
+
   it("★画面のJS(nomiya-ui-*.js)は、起動(boot)を最後に読む★", () => {
     const ui = REFS.map((r) => r.file).filter((f) => f.startsWith("nomiya-ui-"));
     expect(ui.length, "画面のJSを1本も読んでいない").toBeGreaterThanOrEqual(2);

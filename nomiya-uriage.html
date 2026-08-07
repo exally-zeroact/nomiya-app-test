@@ -835,23 +835,24 @@
     <!-- 判子画像の白抜き（代行請求アプリと同じモジュールを使う） -->
     <!-- クラウド（ログイン＋保存）。テストでは偽物を差し込むので読めなくても動く -->
     <script
+      defer
       src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.111.0/dist/umd/supabase.js"
       integrity="sha384-faMlYZUtkJj+Sh6Bmu/L0GzPcraRWN6CW+9RH3GUrK/Z0WS9tgaNNt0tHiLxsbdb"
       crossorigin="anonymous"
       referrerpolicy="no-referrer"
     ></script>
     <!-- ★どの倉庫に繋ぐかは、このファイル1本だけが決める（本番repoとテストrepoの唯一の違い） -->
-    <script src="js/supa-config.js?v=ba3902e3"></script>
-    <script src="exally-login.js?v=203814e6"></script>
-    <script src="hanko.js?v=d1d32621"></script>
-    <script src="nomiya-core.js?v=f0399771"></script>
+    <script defer src="js/supa-config.js?v=ba3902e3"></script>
+    <script defer src="exally-login.js?v=203814e6"></script>
+    <script defer src="hanko.js?v=d1d32621"></script>
+    <script defer src="nomiya-core.js?v=f0399771"></script>
     <!-- ★画面のJS。読み込む順番が命（起動は最後）。tests/app-source.mjs が食い違いを見張る -->
-    <script src="nomiya-ui-base.js?v=b1f08c2b"></script>
-    <script src="nomiya-ui-uriage.js?v=c218b1b9"></script>
-    <script src="nomiya-ui-kaishu.js?v=53cff47e"></script>
-    <script src="nomiya-ui-kami.js?v=273a38b5"></script>
-    <script src="nomiya-ui-settei.js?v=bdb8d67a"></script>
-    <script src="nomiya-ui-kyuryo.js?v=1b52a0dd"></script>
-    <script src="nomiya-ui-boot.js?v=37bb9529"></script>
+    <script defer src="nomiya-ui-base.js?v=b1f08c2b"></script>
+    <script defer src="nomiya-ui-uriage.js?v=c218b1b9"></script>
+    <script defer src="nomiya-ui-kaishu.js?v=53cff47e"></script>
+    <script defer src="nomiya-ui-kami.js?v=273a38b5"></script>
+    <script defer src="nomiya-ui-settei.js?v=bdb8d67a"></script>
+    <script defer src="nomiya-ui-kyuryo.js?v=1b52a0dd"></script>
+    <script defer src="nomiya-ui-boot.js?v=37bb9529"></script>
   </body>
 </html>
