@@ -174,4 +174,62 @@ test.describe("紙の書体（明朝がそろってから写す）", () => {
     expect(done.length, "紙を1枚も作れていない").toBeGreaterThanOrEqual(3);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
+
+  /* ★紙が出ないのが一番まずい★
+     店は電波の細い所でも紙を出す。書体が来ないなら
+     ★ゴシックで出てでも、紙は出さないといけない★。
+     2026-08-08、最初の実装は「目録(CSS)の読み込み待ち」だけ時間制限の外にあり、
+     目録が永久に返ってこない回線では ★紙が一生出なかった★。ここで固める。 */
+  test("★書体が永久に来なくても、紙は出る（12秒で待つのをやめる）", async ({ page }) => {
+    const errors = await install(page);
+    await page.goto(PAGE, { waitUntil: "load" });
+    await page.evaluate(() => localStorage.clear());
+    await page.reload({ waitUntil: "load" });
+    await expect(page.locator("#scr-input")).toBeVisible();
+
+    // ★ここから先、明朝の目録は「返事が返ってこない」ままにする（圏外に近い回線）
+    let hung = 0;
+    await page.route(/fonts\.(googleapis|gstatic)\.com/, async (route) => {
+      if (/Noto\+Serif\+JP/.test(route.request().url())) {
+        hung++;
+        return; // ★応答しない（握ったまま離さない）★
+      }
+      await route.continue();
+    });
+
+    await page.locator(".nav-item[data-scr='list']").click();
+    await expect(page.locator("#scr-list")).toBeVisible();
+
+    const r = await page.evaluate(async () => {
+      const t0 = performance.now();
+      const blob = await window.__NOMIYA.buildPdf("listSheets");
+      const ms = performance.now() - t0;
+      const u8 = new Uint8Array(await blob.arrayBuffer());
+      let head = "";
+      for (let k = 0; k < 5; k++) head += String.fromCharCode(u8[k]);
+      const all = new TextDecoder("latin1").decode(u8);
+      const box = (all.match(/\/MediaBox\s*\[([^\]]+)\]/) || [])[1] || "0 0 0 0";
+      return {
+        ms,
+        head,
+        size: u8.length,
+        w: Math.round(parseFloat(box.split(" ")[2])),
+        h: Math.round(parseFloat(box.split(" ")[3])),
+      };
+    });
+
+    expect(hung, "明朝の目録を取りに行っていない（この試験が効いていない）").toBeGreaterThan(0);
+    // ★出ること★（これが一番大事）
+    expect(r.head, "★書体が来ないと紙が出ない★").toBe("%PDF-");
+    expect(r.w, "A4の幅でない").toBe(595);
+    expect(r.h, "A4の高さでない").toBe(842);
+    expect(r.size, "紙が空っぽ").toBeGreaterThan(20000);
+    // ★決めた時間で見切りを付けていること（永久に待っていない）
+    expect(r.ms, `${Math.round(r.ms)}ms かかった＝12秒で見切りを付けていない`).toBeLessThan(20000);
+    expect(
+      r.ms,
+      `${Math.round(r.ms)}ms で出た＝待たずに素通りしている（待ちが効いていない）`
+    ).toBeGreaterThan(8000);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
 });
