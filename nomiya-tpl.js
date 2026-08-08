@@ -123,7 +123,13 @@
     { key: "cDate", label: "明細列：日付", kind: "col" },
     { key: "cName", label: "明細列：内容", kind: "col" },
     { key: "cPeople", label: "明細列：人数", kind: "col" },
-    { key: "cAmount", label: "明細列：金額", kind: "col" },
+    { key: "cAmount", label: "明細列：金額（税込）", kind: "col" },
+    /* ★お店の紙は「金額＝税抜／消費税は別の列」であることが多い★
+       司さんの実物がまさにこれ（E列=税抜・F列=消費税・合計は SUM で足している）。
+       税込だけを入れると ★消費税ぶん多い請求書★ になるので、両方を入れ口にする。
+       税抜と消費税の出し方は nomiya-core.js が唯一の正（ここでは割り算しない）。 */
+    { key: "cNet", label: "明細列：金額（税抜）", kind: "col" },
+    { key: "cTax", label: "明細列：消費税", kind: "col" },
     { key: "cMemo", label: "明細列：備考", kind: "col" },
     { key: "lastRow", label: "明細の最終行", kind: "row" },
   ];
@@ -208,7 +214,8 @@
       if (!c[f.key]) return;
       var x = val[f.key];
       if (!x || x.v == null || x.v === "") return;
-      edits.push({ ref: c[f.key], kind: f.kind, value: x.v, text: x.t });
+      // ★お店が指したマスなので、計算式でも上書きする（触らないと何も入らない）★
+      edits.push({ ref: c[f.key], kind: f.kind, value: x.v, text: x.t, force: true });
     });
 
     var start = detailStart(c);
@@ -223,6 +230,8 @@
         cName: { get: "name", kind: "text" },
         cPeople: { get: "people", kind: "number" },
         cAmount: { get: "amount", kind: "number" },
+        cNet: { get: "net", kind: "number" },
+        cTax: { get: "tax", kind: "number" },
         cMemo: { get: "memo", kind: "text" },
       };
       for (var i = 0; i < n; i++) {
@@ -236,6 +245,7 @@
             kind: map[k].kind,
             value: v,
             text: k === "cDate" ? r.dateText : null,
+            force: true,
           });
         });
       }

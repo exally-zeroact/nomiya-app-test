@@ -174,7 +174,7 @@ describe("自社テンプレ：Excelのどのマスに入れるか", () => {
   };
 
   it("入れられる項目がそろっている", async () => {
-    await covering("Excelに入れる項目", 16, async (c) => {
+    await covering("Excelに入れる項目", 18, async (c) => {
       T.CELL_FIELDS.forEach((f) => c.seen(f.key));
     });
   });
@@ -249,6 +249,15 @@ describe("自社テンプレ：Excelのどのマスに入れるか", () => {
     expect(by.B4.kind, "宛名が文字でない").toBe("text");
     expect(by.A10.kind, "明細の日付が日付でない").toBe("date");
     expect(by.A10.text).toBe("8/1");
+  });
+
+  it("★割り当てたマスは「上書きしてよい」印を付ける（式でも入る）★", () => {
+    const p = T.planEdits(CELLS, D);
+    expect(p.edits.length).toBeGreaterThan(5);
+    expect(
+      p.edits.filter((e) => e.force !== true).map((e) => e.ref),
+      "★印の付いていない物がある＝そのマスが式だと入らない★"
+    ).toEqual([]);
   });
 
   it("割り当てていない項目には、何も書かない", () => {

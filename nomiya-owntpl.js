@@ -422,6 +422,23 @@ function wireCellPlacer(TL, book, cells, labels, si) {
     var cap = TL.detailCapacity(cells);
     var msgs = [];
     if (picked) msgs.push("「" + labels[picked] + "」を入れるマスを押してください");
+    /* ★計算式のマスを指したら、その場で知らせる★
+       お店の紙は明細の行に式が書いてあることがある（実物は E11 が =8500/1.1*4）。
+       そこは入れてよいが、★合計の式（=SUM(...)）を指したら壊れる★ので必ず気づかせる。 */
+    var onF = Object.keys(cells).filter(function (k) {
+      var c = book.sheets[si].cells[cells[k]];
+      return c && c.f;
+    });
+    if (onF.length)
+      msgs.push(
+        "★計算式のマスに入れます（" +
+          onF
+            .map(function (k) {
+              return labels[k] + " " + cells[k];
+            })
+            .join("・") +
+          "）＝その式は消えます★"
+      );
     if (TL.detailCols(cells).length && !start)
       msgs.push("★明細の列が別々の行を指しています（同じ行のマスを選んでください）★");
     else if (start)
@@ -545,12 +562,16 @@ function ownXlsxData() {
     name: iv.name,
     ym: iv.to ? C.jpMonth(C.ymOf(iv.to)) : "",
     rows: iv.rows.map(function (s) {
+      // ★税抜と消費税は core が唯一の正★（ここで /1.1 と書かない）
+      var t = C.taxIncluded(s.amount, SETTINGS.rate);
       return {
         date: s.date,
         dateText: C.mdShort(s.date),
         name: "ご飲食代",
         people: s.people,
         amount: s.amount,
+        net: t.net,
+        tax: t.tax,
         memo: s.memo || "",
       };
     }),
@@ -582,6 +603,8 @@ function exportOwnXlsx() {
       var si = Math.min(SETTINGS.ownSheet || 0, book.sheets.length - 1);
       var made = window.NomiyaXlsxTpl.fill(book, si, plan.edits);
       var msgs = plan.warn.slice();
+      if (made.overwritten.length)
+        msgs.push("★計算式を消して値を入れます：" + made.overwritten.join("・") + "★");
       if (made.skipped.length)
         msgs.push("計算式のマス（" + made.skipped.join("・") + "）には入れていません");
       var suggest = ownXlsxSuggestName(d);

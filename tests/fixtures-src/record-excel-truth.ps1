@@ -57,7 +57,7 @@ foreach ($n in @("tpl-invoice.xlsx", "tpl-real-like.xlsx")) {
   }
   # ★値が0のマス★（「ゼロを表示しない」の確認が生きている証拠。無いと落ちようがない）
   $zeros = @()
-  foreach ($ref in @("E12", "F12", "C13")) {
+  foreach ($ref in @("F12", "C13", "C14", "C15")) {
     $v = $ws.Range($ref).Value2
     if ($null -ne $v -and "$v" -eq "0") {
       $zeros += [ordered]@{ ref = $ref; text = "$($ws.Range($ref).Text)" }

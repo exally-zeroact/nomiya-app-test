@@ -125,6 +125,12 @@
     });
   }
 
+  /** その名前の物が入っているか */
+  function hasEntry(zip, name) {
+    for (var i = 0; i < zip.entries.length; i++) if (zip.entries[i].name === name) return true;
+    return false;
+  }
+
   /** 中の1ファイルを文字として取り出す */
   function textOf(zip, name) {
     var e = null;
@@ -148,11 +154,15 @@
    * @param {object} zip readZip の結果
    * @param {object} replaced { "xl/worksheets/sheet1.xml": "…新しい中身…" }
    */
-  function rebuild(zip, replaced) {
+  function rebuild(zip, replaced, dropped) {
     var parts = [];
     var central = [];
     var offset = 0;
-    zip.entries.forEach(function (e) {
+    var drop = dropped || {};
+    var keep = zip.entries.filter(function (e) {
+      return !drop[e.name];
+    });
+    keep.forEach(function (e) {
       var name = X._utf8(e.name);
       var body, method, crc, csize, usize;
       if (Object.prototype.hasOwnProperty.call(replaced, e.name)) {
@@ -210,8 +220,8 @@
     w32(end, 0x06054b50);
     w16(end, 0);
     w16(end, 0);
-    w16(end, zip.entries.length);
-    w16(end, zip.entries.length);
+    w16(end, keep.length);
+    w16(end, keep.length);
     w32(end, cenSize);
     w32(end, offset);
     w16(end, 0);
@@ -658,6 +668,7 @@
         if (!wb) throw new Error("Excelの中身が見つかりません");
         book.workbookXml = wb;
         return textOf(zip, "xl/_rels/workbook.xml.rels").then(function (rels) {
+          book.workbookRels = rels;
           var map = {};
           var rre = /<Relationship\b[^>]*\/>/g;
           var rm;
@@ -677,6 +688,10 @@
         });
       })
       .then(function () {
+        return textOf(zip, "[Content_Types].xml");
+      })
+      .then(function (ct) {
+        book.contentTypes = ct;
         return textOf(zip, "xl/sharedStrings.xml");
       })
       .then(function (ss) {
@@ -964,10 +979,74 @@
    * @param {Array<{ref:string,kind:string,value:*}>} edits
    * @returns {{xml:string, skipped:string[], wrote:number}}
    */
+  /* ★共有の式（1つの式を何行にも使い回す形）★
+     Excelは同じ形の式を、親1つ＋子（親を指すだけの空タグ）で持つ:
+       親  <c r="F12"><f t="shared" ref="F12:F26" si="0">E12*0.1</f><v>0</v></c>
+       子  <c r="F13"><f t="shared" si="0"/><v>0</v></c>
+     ★親を消すと、子が親を見失って Excel が「壊れています」と言って開けない★
+     （2026-08-09、司さんの紙で実際に開けなくなった）。
+     そこで、親を消す前に ★全部の子に式を書き下ろして、親子の関係をほどく★。
+     式の中の番地は、親からのズレのぶんだけずらす（$ が付いている所は動かさない）。 */
+
+  /** 式の中の番地を、行と列のズレのぶん動かす */
+  function shiftFormula(text, dRow, dCol) {
+    return String(text).replace(/(\$?)([A-Z]{1,3})(\$?)(\d+)/g, function (all, ac, col, ar, row) {
+      var c = 0;
+      for (var i = 0; i < col.length; i++) c = c * 26 + (col.charCodeAt(i) - 64);
+      c -= 1;
+      var r = +row - 1;
+      if (!ac) c += dCol;
+      if (!ar) r += dRow;
+      if (c < 0 || r < 0) return "#REF!";
+      return ac + X.col(c) + ar + (r + 1);
+    });
+  }
+
+  /** 共有の式を、1つずつの式に書き下ろす（中身は変えない） */
+  function expandShared(inner) {
+    var master = {};
+    /* ★ここも「控えめな切り出し(tagRe)」でないと駄目★
+       中身の無いマス <c r="E12" s="21"/> を欲張りに読むと、次の </c> まで飲み込んで
+       ★親の番地を取り違える★。実際に取り違えて、式が F14→=D15*0.1（正しくは =E14*0.1）に
+       ズレた（2026-08-09）。金額の式がズレると ★静かに金額が狂う★ ので、いちばん危ない。 */
+    var re = tagRe("c");
+    var m;
+    while ((m = re.exec(inner))) {
+      if (!m[2]) continue;
+      var f = /<f\b([^>]*?)\s*>([\s\S]*?)<\/f>/.exec(m[2]);
+      if (!f) continue;
+      var si = attr("<f" + f[1] + ">", "si");
+      if (si == null || !/t="shared"/.test(f[1]) || !/\bref=/.test(f[1])) continue;
+      var pos = parseRef(attr("<c" + m[1] + ">", "r") || "");
+      if (pos) master[si] = { text: f[2], row: pos.row, col: pos.col };
+    }
+    if (!Object.keys(master).length) return inner;
+    return inner.replace(/<c\b([^>]*?)\s*(?:\/>|>([\s\S]*?)<\/c>)/g, function (all, a, body) {
+      if (!body || !/<f\b[^>]*t="shared"/.test(body)) return all;
+      var ftag = /<f\b([^>]*?)\s*(?:\/>|>([\s\S]*?)<\/f>)/.exec(body);
+      if (!ftag) return all;
+      var si2 = attr("<f" + ftag[1] + ">", "si");
+      var mm = master[si2];
+      if (!mm) return all;
+      var p = parseRef(attr("<c" + a + ">", "r") || "");
+      if (!p) return all;
+      var text = ftag[2] ? ftag[2] : shiftFormula(mm.text, p.row - mm.row, p.col - mm.col);
+      return "<c" + a + ">" + body.replace(ftag[0], "<f>" + text + "</f>") + "</c>";
+    });
+  }
+
   function setCells(xml, edits) {
     var body = /(<sheetData\b[^>]*?)\s*(\/>|>([\s\S]*?)<\/sheetData>)/.exec(xml);
     if (!body) throw new Error("このシートには表がありません");
     var inner = body[2] === "/>" ? "" : body[3] || "";
+    /* ★共有の式の親を消すなら、先に親子の関係をほどく★
+       ほどかずに親を消すと、子が迷子になって Excel が開けなくなる（実物で踏んだ）。 */
+    var willHitSharedMaster = edits.some(function (e) {
+      if (!e.force) return false;
+      var c = new RegExp('<c\\b[^>]*?\\br="' + e.ref + '"[^>]*?>[\\s\\S]*?<\\/c>').exec(inner);
+      return !!(c && /<f\b[^>]*t="shared"[^>]*\bref=/.test(c[0]));
+    });
+    if (willHitSharedMaster) inner = expandShared(inner);
 
     // 行に分ける
     var rows = [];
@@ -983,6 +1062,7 @@
     });
 
     var skipped = [];
+    var overwritten = []; // 計算式を値に置き換えたマス（必ず知らせる）
     var wrote = 0;
     var want = {};
     edits.forEach(function (e) {
@@ -1023,9 +1103,18 @@
             hit = cells[i];
             break;
           }
+        /* ★計算式のマス★
+           何も言われなければ触らない（合計の式を壊さないため）。
+           ただし ★お店が「ここに入れて」と指したマス★ は上書きする。
+           お店の紙は、明細の行そのものに式が書いてあることがある
+           （司さんの実物は E11 が `=8500/1.1*4`）。触らないと ★明細が1つも入らない★。
+           上書きした分は必ず呼び出し元へ返し、書き出す前に知らせる。 */
         if (hit && hit.f) {
-          skipped.push(ref);
-          return;
+          if (!w.e.force) {
+            skipped.push(ref);
+            return;
+          }
+          overwritten.push(ref);
         }
         var made = cellXml(ref, hit ? hit.s : null, w.e.kind, w.e.value);
         wrote++;
@@ -1073,7 +1162,7 @@
       });
       return '<dimension ref="' + refOf(a.col, a.row) + ":" + refOf(c2, r2) + '"/>';
     });
-    return { xml: out, skipped: skipped, wrote: wrote };
+    return { xml: out, skipped: skipped, overwritten: overwritten, wrote: wrote };
   }
 
   /** workbook.xml に「開いたら全部計算し直す」印を立てる */
@@ -1114,7 +1203,32 @@
        こちらが元の値だけ入れ替えると、その書き置きは嘘になる（合計が0のまま出る＝実際に踏んだ）。
        ★開いたとき全部計算し直す★という印を立てておく。 */
     if (book.workbookXml) rep["xl/workbook.xml"] = withFullCalc(book.workbookXml);
-    return { bytes: rebuild(book.zip, rep), skipped: r.skipped, wrote: r.wrote };
+    /* ★計算式を消したら「計算の順番表」も外す★
+       Excel は「どのマスに式があるか」を xl/calcChain.xml に別に持っている。
+       式を消したのに、そこに名前が残っていると ★Excelが『壊れている』と言って開けない★
+       （2026-08-09、司さんの紙で実際に開けなくなった）。
+       印(fullCalcOnLoad)を立ててあるので、Excelが開いたときに作り直す。
+       外すときは ★中身の目録([Content_Types].xml)と繋ぎ(rels)からも消す★ こと。 */
+    var drop = {};
+    if (r.overwritten.length && hasEntry(book.zip, "xl/calcChain.xml")) {
+      drop["xl/calcChain.xml"] = 1;
+      if (book.contentTypes)
+        rep["[Content_Types].xml"] = book.contentTypes.replace(
+          /<Override[^>]*calcChain\.xml[^>]*\/>/,
+          ""
+        );
+      if (book.workbookRels)
+        rep["xl/_rels/workbook.xml.rels"] = book.workbookRels.replace(
+          /<Relationship[^>]*calcChain\.xml[^>]*\/>/,
+          ""
+        );
+    }
+    return {
+      bytes: rebuild(book.zip, rep, drop),
+      skipped: r.skipped,
+      overwritten: r.overwritten,
+      wrote: r.wrote,
+    };
   }
 
   return {
@@ -1127,6 +1241,8 @@
     refOf: refOf,
     fromSerial: fromSerial,
     _readZip: readZip,
+    _shiftFormula: shiftFormula,
+    _expandShared: expandShared,
     _rawOf: rawOf,
     _rebuild: rebuild,
     _withFullCalc: withFullCalc,

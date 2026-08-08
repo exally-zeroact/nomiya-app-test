@@ -85,9 +85,19 @@ $ws.Range("F11").Value2 = [double]3090.909090909091
 $ws.Range("E11:F26").NumberFormat = '#,##0_ '
 # ★値が 0 のマスを入れておく★（「ゼロを表示しない」が効いているかを測るため。
 #   これが無いと「0を出していない」という確認が、何も見ていない緑になる）
-$ws.Range("E12").Value2 = [double]0
-$ws.Range("F12").Value2 = [double]0
+# ★E12 は「空のマス」にしておく★
+#   司さんの紙がこの形だった：<c r="E12" s="21"/> が 共有の式の親 <c r="F12" ...> の直前にある。
+#   タグの切り出しが欲張りだと、E12がF12の中身を飲み込んで ★親の番地を取り違える★。
+#   （その結果 F14 の式が =D15*0.1 にズレた。金額が静かに狂う一番危ない形）
 $ws.Range("C13").Formula = "=C11-C11"
+$ws.Range("C14").Value2 = [double]0
+$ws.Range("C15").Value2 = [double]0
+# ★共有の式（1つの式を何行にも使い回す形）を作る★
+#   親を消すと子が迷子になって Excel が「壊れています」と言う罠を、見本に持たせる。
+$ws.Range("F11").Formula = "=E11*0.1"
+$ws.Range("F11").Copy()
+$ws.Range("F12:F26").PasteSpecial(-4123)   # 数式だけ貼る＝共有の式になる
+$xl.CutCopyMode = 0
 
 $ws.Range("A27").Value2 = "お振込先"
 $ws.Range("A27").SetPhonetic()

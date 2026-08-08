@@ -119,12 +119,29 @@ describe("値を差し込む", () => {
     expect(T.cellText(back, s, "D33")).toBe("合計");
   });
 
-  it("★数式のセルには書かない（答えだけ書き換えると嘘になる）★", async () => {
+  it("★何も言われなければ、数式のセルには書かない（合計の式を壊さない）★", async () => {
     const book = await T.open(bytes());
     const out = T.fill(book, 0, EDITS);
     expect(out.skipped, "数式のセルを避けていない").toEqual(["E34"]);
+    expect(out.overwritten, "頼んでいないのに式を消している").toEqual([]);
     const back = await T.open(out.bytes);
     expect(back.sheets[0].cells.E34.f, "数式そのものが消えている").toBe(true);
+  });
+
+  /* ★お店の紙は、明細の行そのものに式が書いてあることがある★
+     司さんの実物は E11 が `=8500/1.1*4`（単価÷1.1×数量）。
+     ここを触らないと ★明細が1つも入らない★。だから「お店が指したマス」は上書きする。
+     ただし合計の式を指してしまうと壊れるので、★上書きした分は必ず返して知らせる★。 */
+  it("★お店が指したマスなら、計算式でも上書きする（そして必ず知らせる）★", async () => {
+    const book = await T.open(bytes());
+    const before = book.sheets[0].cells.E34;
+    expect(before.f, "見本のE34が数式でない＝この確認は無効").toBe(true);
+    const out = T.fill(book, 0, [{ ref: "E34", kind: "number", value: 999, force: true }]);
+    expect(out.overwritten, "上書きしたことを知らせていない").toEqual(["E34"]);
+    expect(out.skipped).toEqual([]);
+    const back = await T.open(out.bytes);
+    expect(back.sheets[0].cells.E34.f, "式が残っている＝値が入っていない").toBe(false);
+    expect(back.sheets[0].cells.E34.v).toBe("999");
   });
 
   it("★開いたとき計算し直す印を立てる（合計が古いまま出ない）★", async () => {
@@ -348,6 +365,58 @@ describe("本物のExcelと、1マスずつ突き合わせる", () => {
       Math.abs(Math.round(im.h) - want.h),
       "絵の高さ Excel=" + want.h + " こちら=" + Math.round(im.h)
     ).toBeLessThanOrEqual(2);
+  });
+
+  /* ★Excelは同じ形の式を「親1つ＋子（親を指すだけ）」で持つ★
+       親  <c r="F12"><f t="shared" ref="F12:F26" si="0">E12*0.1</f><v>0</v></c>
+       子  <c r="F13"><f t="shared" si="0"/><v>0</v></c>
+     ★親を消すと子が迷子になり、Excelが「壊れています」と言って開けない★
+     （2026-08-09、司さんの紙で実際に開けなくなった）。
+     だから親を消す前に、子へ式を書き下ろす。★書き下ろす式がズレたら、静かに金額が狂う★ */
+  it("★共有の式の親を消すとき、子に正しい式を書き下ろす★", async () => {
+    const bytes2 = new Uint8Array(
+      fs.readFileSync(path.join(ROOT, "tests/e2e/fixtures/tpl-real-like.xlsx"))
+    );
+    const raw = await T._textOf(T._readZip(bytes2), "xl/worksheets/sheet1.xml");
+    expect(
+      (raw.match(/t="shared"[^>]*ref=/g) || []).length,
+      "★見本に共有の式が無い＝この確認は何も見ていない★"
+    ).toBeGreaterThanOrEqual(1);
+    expect((raw.match(/<f t="shared" si="\d+"\s*\/>/g) || []).length).toBeGreaterThanOrEqual(5);
+
+    const book = await T.open(bytes2);
+    const master = "F12"; // 親（=E12*0.1）
+    expect(book.sheets[0].cells[master].f, "見本のF12が式でない").toBe(true);
+    const out = T.fill(book, 0, [{ ref: master, kind: "number", value: 4000, force: true }]);
+    expect(out.overwritten).toEqual([master]);
+
+    const back = await T.open(out.bytes);
+    const xml2 = back.sheets[0].xml;
+    expect((xml2.match(/t="shared"/g) || []).length, "★共有の式が残っている＝子が迷子のまま★").toBe(
+      0
+    );
+    const fOf = (ref) => {
+      const c = new RegExp('<c\\b[^>]*?\\br="' + ref + '"[^>]*?>([\\s\\S]*?)<\\/c>').exec(xml2);
+      return c ? (/<f[^>]*>([^<]*)<\/f>/.exec(c[1]) || [])[1] : null;
+    };
+    expect(fOf("F13"), "F13の式がズレている").toBe("E13*0.1");
+    expect(fOf("F14"), "F14の式がズレている").toBe("E14*0.1");
+    expect(fOf("F26"), "F26の式がズレている").toBe("E26*0.1");
+    expect(fOf(master), "親のマスに式が残っている").toBe(undefined);
+
+    /* ★式を消したら「計算の順番表」も外す★（残すとExcelが開けない） */
+    const names = T._readZip(out.bytes).entries.map((e) => e.name);
+    expect(names, "calcChain を外していない").not.toContain("xl/calcChain.xml");
+    expect(back.contentTypes, "目録から calcChain を消していない").not.toMatch(/calcChain/);
+    expect(back.workbookRels, "繋ぎから calcChain を消していない").not.toMatch(/calcChain/);
+  });
+
+  it("★式の番地のずらし方（$ が付いた所は動かさない）★", () => {
+    expect(T._shiftFormula("E12*0.1", 2, 0)).toBe("E14*0.1");
+    expect(T._shiftFormula("SUM(E11:E26)", 1, 0)).toBe("SUM(E12:E27)");
+    expect(T._shiftFormula("$E$12*A1", 3, 1)).toBe("$E$12*B4");
+    expect(T._shiftFormula("$E12+E$12", 1, 1)).toBe("$E13+F$12");
+    expect(T._shiftFormula("A1", -5, 0), "紙の外へ出たら #REF!").toBe("#REF!");
   });
 
   /* ★列幅の換算がズレると、判子や合計欄が横へ寄る（実物で59pxズレた）★ */
