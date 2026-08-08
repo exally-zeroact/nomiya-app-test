@@ -125,3 +125,140 @@ describe("自社テンプレ：項目の置き方", () => {
     );
   });
 });
+
+/* ★自社テンプレが「Excel」のとき★
+ * お店のExcelは、位置(％)ではなく ★どのマスに入れるか★ で決める。
+ * ここが狂うと、日付と金額が別の行に出る／明細がテンプレの枠からあふれる。
+ */
+describe("自社テンプレ：Excelのどのマスに入れるか", () => {
+  const D = {
+    date: "2026-08-09",
+    dateText: "2026年8月9日",
+    no: "2026-08-01",
+    to: "山田商事　御中",
+    grand: 132000,
+    net: 120000,
+    tax: 12000,
+    total: 132000,
+    store: "Lounge Castally",
+    bank: "○○銀行 △△支店 普通 1234567",
+    rows: [
+      { date: "2026-08-01", dateText: "8/1", name: "ご飲食代", people: 3, amount: 44000, memo: "" },
+      {
+        date: "2026-08-05",
+        dateText: "8/5",
+        name: "ご飲食代",
+        people: 2,
+        amount: 44000,
+        memo: "ボトル",
+      },
+      { date: "2026-08-09", dateText: "8/9", name: "ご飲食代", people: 4, amount: 44000, memo: "" },
+    ],
+  };
+  const CELLS = {
+    date: "E3",
+    no: "E4",
+    to: "B4",
+    grand: "B7",
+    net: "E31",
+    tax: "E32",
+    total: "E33",
+    store: "D36",
+    bank: "A37",
+    cDate: "A10",
+    cName: "C10",
+    cPeople: "D10",
+    cAmount: "E10",
+    cMemo: "F10",
+    lastRow: "A29",
+  };
+
+  it("入れられる項目がそろっている", async () => {
+    await covering("Excelに入れる項目", 15, async (c) => {
+      T.CELL_FIELDS.forEach((f) => c.seen(f.key));
+    });
+  });
+
+  it("おかしい番地は覚えない（打ち間違い・古い設定）", () => {
+    const n = T.normalizeCells({ to: "b4", grand: "あ1", tax: "", cDate: "A10", ゴミ: "A1" });
+    expect(n, "小文字は直す／おかしい物は捨てる").toEqual({ to: "B4", cDate: "A10" });
+  });
+
+  it("★明細の列が別々の行を指していたら、明細を書かない★", () => {
+    const bad = { cDate: "A10", cAmount: "E12" }; // 10行目と12行目
+    expect(T.detailStart(bad), "バラバラなのに始まりを決めている").toBe(0);
+    const p = T.planEdits(bad, D);
+    expect(p.edits.length, "バラバラのまま並べている").toBe(0);
+    expect(p.warn.join(""), "理由を出していない").toContain("別々の行");
+  });
+
+  it("明細は、選んだ行から下へ並ぶ", () => {
+    const p = T.planEdits(CELLS, D);
+    const refs = p.edits.map((e) => e.ref);
+    expect(refs).toContain("A10");
+    expect(refs).toContain("A11");
+    expect(refs).toContain("A12");
+    expect(refs, "4件目は無いのに書いている").not.toContain("A13");
+    const amt = p.edits.filter((e) => /^E1[012]$/.test(e.ref));
+    expect(amt.length, "金額が3行ぶん入っていない").toBe(3);
+    expect(
+      amt.every((e) => e.kind === "number"),
+      "金額が数字で入っていない"
+    ).toBe(true);
+  });
+
+  it("★テンプレの枠に入りきらない分は、書かずに知らせる★", () => {
+    const many = { ...D, rows: [] };
+    for (let i = 0; i < 30; i++)
+      many.rows.push({ date: "2026-08-01", dateText: "8/1", name: "x", people: 1, amount: 1000 });
+    const cells = { ...CELLS, lastRow: "A14" }; // 10〜14行＝5行しか無い
+    expect(T.detailCapacity(cells), "入る行数を数え違えている").toBe(5);
+    const p = T.planEdits(cells, many);
+    expect(p.over, "あふれた件数が合わない").toBe(25);
+    expect(p.warn.join(""), "あふれたことを知らせていない").toContain("25 件");
+    // 明細の日付の列だけを数える（A37=振込先は明細ではないので混ぜない）
+    const detailDates = p.edits.filter((e) => e.kind === "date" && /^A\d+$/.test(e.ref));
+    expect(detailDates.length, "枠を越えて書いている").toBe(5);
+    expect(
+      detailDates.map((e) => e.ref),
+      "並べる行が違う"
+    ).toEqual(["A10", "A11", "A12", "A13", "A14"]);
+    expect(
+      p.edits.some((e) => e.ref === "A15"),
+      "★最終行の下まで書いている★"
+    ).toBe(false);
+  });
+
+  it("最終行を決めていなければ、件数ぶんそのまま並べる", () => {
+    const cells = { ...CELLS };
+    delete cells.lastRow;
+    expect(T.detailCapacity(cells)).toBe(0);
+    const p = T.planEdits(cells, D);
+    expect(p.over).toBe(0);
+    expect(p.warn).toEqual([]);
+  });
+
+  it("金額は数字・日付は日付・宛名は文字で入れる（型を取り違えない）", () => {
+    const p = T.planEdits(CELLS, D);
+    const by = {};
+    p.edits.forEach((e) => (by[e.ref] = e));
+    expect(by.E33.kind, "合計が数字でない").toBe("number");
+    expect(by.E33.value).toBe(132000);
+    expect(by.E3.kind, "請求日が日付でない").toBe("date");
+    expect(by.E3.text, "日付の見え方を持たせていない").toBe("2026年8月9日");
+    expect(by.B4.kind, "宛名が文字でない").toBe("text");
+    expect(by.A10.kind, "明細の日付が日付でない").toBe("date");
+    expect(by.A10.text).toBe("8/1");
+  });
+
+  it("割り当てていない項目には、何も書かない", () => {
+    const p = T.planEdits({ to: "B4" }, D);
+    expect(p.edits.length, "決めていないマスにも書いている").toBe(1);
+    expect(p.edits[0].ref).toBe("B4");
+  });
+
+  it("★中身が空の項目は、マスを空けたまま触らない★", () => {
+    const p = T.planEdits(CELLS, { ...D, bank: "", store: null, rows: [] });
+    expectNoneOf(p.edits, (e) => e.ref === "A37" || e.ref === "D36", "空の項目", { min: 3 });
+  });
+});

@@ -94,6 +94,155 @@
     });
   }
 
+  /* ══════════════════════════════════════════════════════════════════
+     ★お店のテンプレが「Excel」のとき★
+     ------------------------------------------------------------------
+     紙(PDF/写真)のときは「A4の上のどこに置くか（％）」だった。
+     Excel のときは ★どのセルに入れるか（A1形式の番地）★ になる。
+     置き方の考え方が違うだけで、やることは同じ＝「お店の物を捨てない」。
+
+     ★番地は手で打たせない★
+       画面にそのExcelを出して、押して選ばせる。打たせると必ず打ち間違える
+       （司さんの「幅はExcelで見な分からん＝盲打ちは無意味」と同じ話）。
+     ══════════════════════════════════════════════════════════════════ */
+
+  /* 明細は「列」で指す。1行目の場所は、この列たちが指すセルの行から決まる
+     （日付の列に A10 を選んだら、明細は10行目から下へ並ぶ）。 */
+  var CELL_FIELDS = [
+    { key: "date", label: "請求日", kind: "date" },
+    { key: "no", label: "請求番号", kind: "text" },
+    { key: "to", label: "宛名", kind: "text" },
+    { key: "grand", label: "ご請求金額（税込）", kind: "number" },
+    { key: "net", label: "小計（税抜）", kind: "number" },
+    { key: "tax", label: "消費税", kind: "number" },
+    { key: "total", label: "合計", kind: "number" },
+    { key: "store", label: "店名", kind: "text" },
+    { key: "bank", label: "振込先", kind: "text" },
+    { key: "cDate", label: "明細列：日付", kind: "col" },
+    { key: "cName", label: "明細列：内容", kind: "col" },
+    { key: "cPeople", label: "明細列：人数", kind: "col" },
+    { key: "cAmount", label: "明細列：金額", kind: "col" },
+    { key: "cMemo", label: "明細列：備考", kind: "col" },
+    { key: "lastRow", label: "明細の最終行", kind: "row" },
+  ];
+
+  var REF = /^[A-Z]{1,3}[1-9]\d{0,6}$/;
+
+  /** 保存されている割り当てから、いまも意味のある物だけ残す */
+  function normalizeCells(saved) {
+    var s = saved || {};
+    var out = {};
+    CELL_FIELDS.forEach(function (f) {
+      var v = String(s[f.key] || "").toUpperCase();
+      if (REF.test(v)) out[f.key] = v;
+    });
+    return out;
+  }
+
+  function rowOf(ref) {
+    var m = /^[A-Z]{1,3}(\d+)$/.exec(String(ref || "").toUpperCase());
+    return m ? +m[1] : 0;
+  }
+  function colLetters(ref) {
+    var m = /^([A-Z]{1,3})\d+$/.exec(String(ref || "").toUpperCase());
+    return m ? m[1] : "";
+  }
+
+  /** 明細に使う列だけ取り出す（割り当てられている物だけ） */
+  function detailCols(cells) {
+    return CELL_FIELDS.filter(function (f) {
+      return f.kind === "col" && cells[f.key];
+    });
+  }
+
+  /**
+   * 明細が始まる行。★列たちがバラバラの行を指していたら 0 を返す★
+   * （バラバラのまま並べると、日付と金額が別の行に出て紙が壊れる）
+   */
+  function detailStart(cells) {
+    var cs = detailCols(cells);
+    if (!cs.length) return 0;
+    var rows = cs.map(function (f) {
+      return rowOf(cells[f.key]);
+    });
+    for (var i = 1; i < rows.length; i++) if (rows[i] !== rows[0]) return 0;
+    return rows[0];
+  }
+
+  /** 明細に使える行数（最終行を決めていなければ 0＝上限なし） */
+  function detailCapacity(cells) {
+    var s = detailStart(cells);
+    var last = rowOf(cells.lastRow);
+    if (!s || !last) return 0;
+    return Math.max(0, last - s + 1);
+  }
+
+  /**
+   * ★お店のExcelに入れる「値の一覧」を作る（画面に依らない）★
+   * @param {object} cells 割り当て（normalizeCells の結果）
+   * @param {object} d 中身
+   *   { date, dateText, no, to, grand, net, tax, total, store, bank,
+   *     rows:[{date,dateText,name,people,amount,memo}] }
+   * @returns {{edits:Array, over:number, warn:string[]}}
+   */
+  function planEdits(cells, d) {
+    var c = normalizeCells(cells);
+    var edits = [];
+    var warn = [];
+    var val = {
+      date: { v: d.date, t: d.dateText },
+      no: { v: d.no },
+      to: { v: d.to },
+      grand: { v: d.grand },
+      net: { v: d.net },
+      tax: { v: d.tax },
+      total: { v: d.total },
+      store: { v: d.store },
+      bank: { v: d.bank },
+    };
+    CELL_FIELDS.forEach(function (f) {
+      if (f.kind === "col" || f.kind === "row") return;
+      if (!c[f.key]) return;
+      var x = val[f.key];
+      if (!x || x.v == null || x.v === "") return;
+      edits.push({ ref: c[f.key], kind: f.kind, value: x.v, text: x.t });
+    });
+
+    var start = detailStart(c);
+    var over = 0;
+    if (start) {
+      var cap = detailCapacity(c);
+      var rows = d.rows || [];
+      var n = cap ? Math.min(rows.length, cap) : rows.length;
+      over = rows.length - n;
+      var map = {
+        cDate: { get: "date", kind: "date" },
+        cName: { get: "name", kind: "text" },
+        cPeople: { get: "people", kind: "number" },
+        cAmount: { get: "amount", kind: "number" },
+        cMemo: { get: "memo", kind: "text" },
+      };
+      for (var i = 0; i < n; i++) {
+        var r = rows[i];
+        Object.keys(map).forEach(function (k) {
+          if (!c[k]) return;
+          var v = r[map[k].get];
+          if (v == null || v === "") return;
+          edits.push({
+            ref: colLetters(c[k]) + (start + i),
+            kind: map[k].kind,
+            value: v,
+            text: k === "cDate" ? r.dateText : null,
+          });
+        });
+      }
+      if (over > 0) warn.push("明細が " + over + " 件 入りきりません（合計には入っています）");
+    } else if (detailCols(c).length) {
+      warn.push("明細の列が ★別々の行★ を指しています。同じ行のセルを選んでください");
+    }
+    return { edits: edits, over: over, warn: warn };
+  }
+
   return {
     FIELDS: FIELDS,
     defaults: defaults,
@@ -102,5 +251,11 @@
     styleOf: styleOf,
     fromPx: fromPx,
     visible: visible,
+    CELL_FIELDS: CELL_FIELDS,
+    normalizeCells: normalizeCells,
+    detailStart: detailStart,
+    detailCapacity: detailCapacity,
+    detailCols: detailCols,
+    planEdits: planEdits,
   };
 });

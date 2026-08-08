@@ -42,7 +42,7 @@
       href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="nomiya-uriage.css?v=4ff91ae8" />
+    <link rel="stylesheet" href="nomiya-uriage.css?v=dbd4bb39" />
     <!-- A4用紙のスタイル（画面プレビューと印刷用の新しい窓で同じものを使う＝見た目のズレを作らない） -->
     <style id="sheetCss"></style>
     <!-- 店の色・書体の上書き（設定で選んだときだけ中身が入る） -->
@@ -296,7 +296,7 @@
             <span class="flabel">自社のテンプレ</span>
             <div class="btn-row">
               <button class="btn btn-ghost btn-sm" type="button" id="btnOwnPick">
-                紙を選ぶ（PDF・写真）
+                テンプレを選ぶ（Excel・PDF・写真）
               </button>
               <button class="btn btn-ghost btn-sm" type="button" id="btnOwnPlace">
                 項目の置き場所を決める
@@ -305,7 +305,7 @@
             <input
               type="file"
               id="ownTplFile"
-              accept="application/pdf,image/*"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf,image/*"
               style="display: none"
             />
             <span class="hint" id="ownTplNote"></span>
@@ -349,6 +349,12 @@
 
         <div class="btn-row no-print">
           <button class="btn btn-ghost" id="btnPrintInv">🖨 印刷 / PDFにする</button>
+        </div>
+        <!-- 自社のテンプレが Excel のときだけ出る（お店のExcelに入れて渡す） -->
+        <div class="btn-row no-print">
+          <button class="btn btn-ghost" id="btnOwnXlsx" style="display: none">
+            📊 お店のExcelに入れて出す
+          </button>
         </div>
         <div class="btn-row no-print">
           <button class="btn btn-ghost" id="btnPaid">この請求分を入金済みにする</button>
@@ -879,10 +885,10 @@
     <script defer src="hanko.js?v=d1d32621"></script>
     <script defer src="nomiya-core.js?v=f0399771"></script>
     <!-- ★画面のJS。読み込む順番が命（起動は最後）。tests/app-source.mjs が食い違いを見張る -->
-    <script defer src="nomiya-ui-base.js?v=0c18e38f"></script>
-    <script defer src="nomiya-ui-uriage.js?v=bea0a105"></script>
+    <script defer src="nomiya-ui-base.js?v=a07d5bb1"></script>
+    <script defer src="nomiya-ui-uriage.js?v=92a87159"></script>
     <script defer src="nomiya-ui-kaishu.js?v=53cff47e"></script>
-    <script defer src="nomiya-ui-kami.js?v=2b796509"></script>
+    <script defer src="nomiya-ui-kami.js?v=b05f9cc5"></script>
     <script defer src="nomiya-ui-settei.js?v=bdb8d67a"></script>
     <script defer src="nomiya-ui-kyuryo.js?v=1b52a0dd"></script>
     <script defer src="nomiya-ui-boot.js?v=9d7617e4"></script>

@@ -792,8 +792,97 @@ function loadOwnTplUi() {
   return _ownUi;
 }
 
+/* お店のテンプレが Excel のときに要る部品。★使う店だけが読む★
+   nomiya-xlsx.js（ZIPとCRC）→ nomiya-xlsx-tpl.js（読み書き）の順で要る。 */
+var _xlTplLib = null;
+function loadXlsxTplLib() {
+  if (_xlTplLib) return _xlTplLib;
+  _xlTplLib = loadXlsxLib()
+    .then(function () {
+      if (window.NomiyaXlsxTpl) return window.NomiyaXlsxTpl;
+      return new Promise(function (ok, ng) {
+        var el = document.createElement("script");
+        el.src = "nomiya-xlsx-tpl.js";
+        el.onload = function () {
+          window.NomiyaXlsxTpl ? ok(window.NomiyaXlsxTpl) : ng(new Error("nomiya-xlsx-tpl.js"));
+        };
+        el.onerror = function () {
+          ng(new Error("nomiya-xlsx-tpl.js"));
+        };
+        document.head.appendChild(el);
+      });
+    })
+    .catch(function (e) {
+      _xlTplLib = null; // 失敗は次に押したとき取り直す
+      throw e;
+    });
+  return _xlTplLib;
+}
+
+/* ★お店のExcelの紙★
+   画面には「そのExcelの見た目」を表で出し、決めたマスにだけ値を入れて見せる。
+   紙(PDF)も印刷も、他のデザインと同じ道を通る（この中身は .sheet の中にある）。 */
+var _xlBookAsked = false;
+function ownXlsxSheetHtml(iv) {
+  var TL = window.NomiyaTpl;
+  var ready =
+    TL &&
+    window.NomiyaXlsxTpl &&
+    typeof xlGridHtml === "function" &&
+    typeof ownBookNow === "function";
+  if (!ready) {
+    loadTplLib();
+    loadOwnTplUi();
+    loadXlsxTplLib().then(function () {
+      if (typeof renderAll === "function") renderAll();
+    });
+    return '<div class="sheet iv-sheet iv-own"><div class="iv-own-none">読み込んでいます…</div></div>';
+  }
+  var book = ownBookNow();
+  if (!book) {
+    if (!_xlBookAsked) {
+      _xlBookAsked = true;
+      ownBook()
+        .then(function () {
+          _xlBookAsked = false;
+          renderAll();
+        })
+        .catch(function (e) {
+          toast("⚠️ Excelのテンプレを開けませんでした（" + ((e && e.message) || e) + "）");
+        });
+    }
+    return '<div class="sheet iv-sheet iv-own"><div class="iv-own-none">Excelを読んでいます…</div></div>';
+  }
+  var si = Math.min(SETTINGS.ownSheet || 0, book.sheets.length - 1);
+  var values = {};
+  var d = iv.sample ? null : ownXlsxData();
+  if (d) {
+    TL.planEdits(SETTINGS.ownCells, d).edits.forEach(function (e) {
+      values[e.ref] =
+        e.kind === "number"
+          ? C.comma(e.value)
+          : e.kind === "date"
+            ? e.text || e.value
+            : String(e.value);
+    });
+  }
+  var w = xlGridWidth(book, si);
+  var k = Math.min(1, 754 / w); // A4の幅794px − 左右の余白
+  return (
+    '<div class="sheet iv-sheet iv-xl">' +
+    '<div class="xl-fit" style="width:' +
+    w +
+    "px;transform:scale(" +
+    Math.round(k * 1000) / 1000 +
+    ')">' +
+    xlGridHtml(book, si, values, {}) +
+    "</div></div>"
+  );
+}
+
 function invoiceSheetHtml(iv) {
   var tpl = SETTINGS.tpl || "card";
+  if (tpl === "own" && SETTINGS.ownXlsx) return ownXlsxSheetHtml(iv);
   var q = ivParts(iv);
   /* ★自社テンプレ★（お店が持っている紙を敷いて、その上に部品を置く）
      ・敷く物は SETTINGS.ownTpl（絵。PDFは登録のときに絵にしてある）
@@ -1078,6 +1167,14 @@ var SHEET_CSS = [
   ".iv-own-none{position:absolute;left:0;top:46%;width:100%;text-align:center;color:#888888;font-size:13px;}",
   /* 置いた部品の中は、既定のデザインの余白（左右のはみ出し）を持ち込まない */
   ".iv-own-f .iv-grand,.iv-own-f .iv-sum,.iv-own-f .iv-tbl{margin:0;}",
+  /* ★お店のテンプレが Excel のとき★
+     紙にも同じ表を出す。★刷る窓は別の窓なので、画面のCSSは届かない★＝ここにも要る。
+     紙では目盛線を出さない（Excelの印刷と同じ）。実際の罫線はセルごとに直接付けている。 */
+  ".iv-xl{padding:20px;overflow:hidden;}",
+  ".xl-fit{transform-origin:top left;}",
+  ".xl-grid{border-collapse:collapse;table-layout:fixed;font-size:12px;color:#000000;}",
+  ".xl-grid td{height:20px;padding:1px 4px;overflow:hidden;white-space:nowrap;",
+  "text-overflow:ellipsis;vertical-align:middle;}",
   /* 共通部品 */
   // 請求日とNo.は右端を揃える（行ごとに文字数が違うので右揃えが必要）
   ".iv-meta{font-size:10.5px;line-height:1.9;color:#6a655e;text-align:right;}",

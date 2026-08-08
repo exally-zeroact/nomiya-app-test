@@ -448,19 +448,7 @@ function exportListXlsx() {
         var blob = new Blob([bytes], {
           type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement("a");
-        a.href = url;
-        a.download = name;
-        // ★ホーム画面アプリで同じ窓に開いて戻れなくなるのを防ぐ★
-        a.target = "_blank";
-        a.rel = "noopener";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(function () {
-          URL.revokeObjectURL(url);
-        }, 60000);
+        saveAsFile(blob, name);
         closeModal();
         toast("📊 " + name + " を書き出しました");
       })

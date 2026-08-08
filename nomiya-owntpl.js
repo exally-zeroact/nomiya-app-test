@@ -17,6 +17,13 @@
 var OWN_MAX_W = 1240; // 覚える絵の幅（A4・約150dpi）
 var OWN_JPEG_Q = 0.82; // 写真の圧縮。文字が潰れない範囲でいちばん軽い所
 
+/* ★お店のテンプレが Excel のとき★
+ *   お店が持っている請求書は、たいてい ★Excel★（PDFや写真ではない）。
+ *   そこで .xlsx はそのまま受け取り、★原本のバイト列を持っておいて、値だけ差し込む★。
+ *   こうすると 罫線・結合・列幅・判子の図形・グラフ・数式 が ★1つも消えない★。
+ *   （2026-08-08 に実物のExcelで測って決めた方式。作り直す方式では全部消える）
+ */
+
 /* ── 受け取る ────────────────────────────────────────────────── */
 
 /** PDFを読む部品を、押したときだけ読む。
@@ -90,10 +97,432 @@ async function ownTplFromFile(file) {
   return c2.toDataURL("image/jpeg", OWN_JPEG_Q);
 }
 
+/* ── Excel のテンプレ ────────────────────────────────────────── */
+
+function b64ToBytes(b64) {
+  var bin = atob(b64);
+  var u8 = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
+function bytesToB64(u8) {
+  var s = "";
+  for (var i = 0; i < u8.length; i += 8192)
+    s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192));
+  return btoa(s);
+}
+
+/** 読み込んだお店のExcel（開き直すたびに解かないよう、覚えておく） */
+var OWN_BOOK = null;
+var _bookFor = "";
+function ownBook() {
+  if (!SETTINGS.ownXlsx) return Promise.resolve(null);
+  if (OWN_BOOK && _bookFor === SETTINGS.ownXlsx) return Promise.resolve(OWN_BOOK);
+  return window.NomiyaXlsxTpl.open(b64ToBytes(SETTINGS.ownXlsx)).then(function (b) {
+    OWN_BOOK = b;
+    _bookFor = SETTINGS.ownXlsx;
+    return b;
+  });
+}
+
+/** もう解いてある物だけを、待たずに返す（画面を描く途中で待てないため） */
+function ownBookNow() {
+  return OWN_BOOK && _bookFor === SETTINGS.ownXlsx ? OWN_BOOK : null;
+}
+
+/* Excel の列幅は「標準の字が何文字ぶん入るか」。画面に出すには px に直す。
+   Excel 自身が使っている換算（1文字≒7px＋余白5px）に合わせてある。 */
+function xlColPx(w) {
+  return Math.max(18, Math.round((w || 8.43) * 7 + 5));
+}
+
+/** その表を画面に出したときの、横の長さ(px)。A4に収める倍率を決めるのに使う */
+function xlGridWidth(book, si) {
+  var s = book && book.sheets[si];
+  if (!s) return 1;
+  var maxC = Math.max(1, s.maxCol);
+  var wide = [];
+  for (var i = 0; i < maxC; i++) wide.push(8.43);
+  s.cols.forEach(function (cc) {
+    for (var j = cc.min; j <= Math.min(cc.max, maxC); j++) if (cc.width) wide[j - 1] = cc.width;
+  });
+  return wide.reduce(function (a, w) {
+    return a + xlColPx(w);
+  }, 0);
+}
+
+/**
+ * お店のExcelを、画面に出せる表(HTML)にする。
+ * @param {object} book
+ * @param {number} si 何枚目のシートか
+ * @param {object} values 上書きして見せたい値 {"B4":"山田商事"}
+ * @param {object} opt { pick:true=セルを押せるようにする, cells:割り当て }
+ */
+function xlGridHtml(book, si, values, opt) {
+  var T = window.NomiyaXlsxTpl;
+  var s = book && book.sheets[si];
+  if (!s) return '<div class="iv-own-none">シートが見つかりません</div>';
+  var o = opt || {};
+  var val = values || {};
+  var st = book.styles;
+
+  // 結合：親だけ出して、隠れる方は出さない
+  var span = {};
+  var hide = {};
+  s.merges.forEach(function (m) {
+    span[T.refOf(m.c1, m.r1)] = { cs: m.c2 - m.c1 + 1, rs: m.r2 - m.r1 + 1 };
+    for (var r = m.r1; r <= m.r2; r++)
+      for (var c = m.c1; c <= m.c2; c++) if (!(r === m.r1 && c === m.c1)) hide[T.refOf(c, r)] = 1;
+  });
+
+  var maxC = Math.max(1, s.maxCol);
+  var maxR = Math.max(1, s.maxRow);
+  var wide = [];
+  for (var c0 = 0; c0 < maxC; c0++) wide.push(8.43);
+  s.cols.forEach(function (cc) {
+    for (var i = cc.min; i <= Math.min(cc.max, maxC); i++) if (cc.width) wide[i - 1] = cc.width;
+  });
+
+  // どのセルに何を割り当てたか（画面に印を出す）
+  var mark = {};
+  if (o.cells)
+    Object.keys(o.cells).forEach(function (k) {
+      mark[o.cells[k]] = (mark[o.cells[k]] ? mark[o.cells[k]] + "・" : "") + (o.labels[k] || k);
+    });
+
+  var out = ['<table class="xl-grid"><colgroup>'];
+  wide.forEach(function (w) {
+    out.push('<col style="width:' + xlColPx(w) + 'px">');
+  });
+  out.push("</colgroup><tbody>");
+  for (var r = 0; r < maxR; r++) {
+    out.push("<tr>");
+    for (var c = 0; c < maxC; c++) {
+      var ref = T.refOf(c, r);
+      if (hide[ref]) continue;
+      var cell = s.cells[ref];
+      var text = Object.prototype.hasOwnProperty.call(val, ref)
+        ? val[ref]
+        : T.cellText(book, s, ref);
+      var xf = cell ? st.xf[+(cell.s || 0)] : null;
+      var css = [];
+      if (xf) {
+        var bd = st.border[xf.borderId];
+        if (bd) {
+          if (bd.l) css.push("border-left:1px solid #333");
+          if (bd.r) css.push("border-right:1px solid #333");
+          if (bd.t) css.push("border-top:1px solid #333");
+          if (bd.b) css.push("border-bottom:1px solid #333");
+        }
+        var fn = st.font[xf.fontId];
+        if (fn) {
+          if (fn.b) css.push("font-weight:700");
+          if (fn.sz && fn.sz !== 11) css.push("font-size:" + Math.round(fn.sz * 1.05) + "px");
+        }
+        var fl = st.fill[xf.fillId];
+        if (fl) css.push("background:" + fl);
+        if (xf.align === "center") css.push("text-align:center");
+        else if (xf.align === "right") css.push("text-align:right");
+        else if (!xf.align && cell && !cell.t && cell.v != null) css.push("text-align:right");
+      }
+      var sp = span[ref];
+      out.push(
+        "<td" +
+          (sp && sp.cs > 1 ? ' colspan="' + sp.cs + '"' : "") +
+          (sp && sp.rs > 1 ? ' rowspan="' + sp.rs + '"' : "") +
+          ' data-r="' +
+          ref +
+          '"' +
+          (mark[ref] ? ' class="xl-set"' : "") +
+          (css.length ? ' style="' + css.join(";") + '"' : "") +
+          ">" +
+          (mark[ref] ? '<span class="xl-tag">' + esc(mark[ref]) + "</span>" : "") +
+          esc(text) +
+          "</td>"
+      );
+    }
+    out.push("</tr>");
+  }
+  out.push("</tbody></table>");
+  return out.join("");
+}
+
+/** 割り当てる画面（項目を押す → セルを押す） */
+function openCellPlacer() {
+  Promise.all([loadTplLib(), ownBook()])
+    .then(function (a) {
+      var TL = a[0];
+      var book = a[1];
+      if (!book) throw new Error("先にExcelのテンプレを選んでください");
+      var cells = TL.normalizeCells(SETTINGS.ownCells);
+      var labels = {};
+      TL.CELL_FIELDS.forEach(function (f) {
+        labels[f.key] = f.label;
+      });
+      var si = Math.min(SETTINGS.ownSheet || 0, book.sheets.length - 1);
+
+      var chips = TL.CELL_FIELDS.map(function (f) {
+        return (
+          '<button class="chip chip-sm' +
+          (cells[f.key] ? " on" : "") +
+          '" type="button" data-cf="' +
+          f.key +
+          '">' +
+          esc(f.label) +
+          (cells[f.key] ? ' <b class="xl-ref">' + cells[f.key] + "</b>" : "") +
+          "</button>"
+        );
+      }).join("");
+
+      var sheetPick =
+        book.sheets.length > 1
+          ? '<div class="chips" id="xlSheets">' +
+            book.sheets
+              .map(function (sh, i) {
+                return (
+                  '<button class="chip chip-sm' +
+                  (i === si ? " on" : "") +
+                  '" type="button" data-sh="' +
+                  i +
+                  '">' +
+                  esc(sh.name) +
+                  "</button>"
+                );
+              })
+              .join("") +
+            "</div>"
+          : "";
+
+      openModal(
+        "どのマスに入れるか決める",
+        '<div class="hint">上の項目を押してから、下の表の ★入れたいマス★ を押します。' +
+          "明細は、1行目のマスを列ごとに選んでください（日付・内容・金額…）。</div>" +
+          '<div class="chips" id="xlFields">' +
+          chips +
+          "</div>" +
+          sheetPick +
+          '<div class="xl-wrap" id="xlWrap">' +
+          xlGridHtml(book, si, {}, { pick: true, cells: cells, labels: labels }) +
+          "</div>" +
+          '<div class="hint" id="xlNote"></div>' +
+          '<div class="btn-row" style="margin-top:12px">' +
+          '<button class="btn btn-primary" id="xlcOk">この割り当てで決める</button>' +
+          '<button class="btn btn-ghost" id="xlcClear">割り当てを全部消す</button>' +
+          "</div>"
+      );
+      wireCellPlacer(TL, book, cells, labels, si);
+    })
+    .catch(function (e) {
+      toast("⚠️ 開けませんでした（" + ((e && e.message) || e) + "）");
+    });
+}
+
+function wireCellPlacer(TL, book, cells, labels, si) {
+  var picked = null;
+  var note = $("xlNote");
+
+  var say = function () {
+    var start = TL.detailStart(cells);
+    var cap = TL.detailCapacity(cells);
+    var msgs = [];
+    if (picked) msgs.push("「" + labels[picked] + "」を入れるマスを押してください");
+    if (TL.detailCols(cells).length && !start)
+      msgs.push("★明細の列が別々の行を指しています（同じ行のマスを選んでください）★");
+    else if (start)
+      msgs.push("明細は " + start + " 行目から" + (cap ? "・" + cap + " 行ぶん" : ""));
+    note.innerHTML = esc(msgs.join(" / "));
+  };
+
+  var redraw = function () {
+    $("xlWrap").innerHTML = xlGridHtml(book, si, {}, { pick: true, cells: cells, labels: labels });
+    wireGrid();
+    $("xlFields")
+      .querySelectorAll("[data-cf]")
+      .forEach(function (b) {
+        var k = b.getAttribute("data-cf");
+        b.classList.toggle("on", !!cells[k]);
+        b.classList.toggle("sel", picked === k);
+        b.innerHTML = esc(labels[k]) + (cells[k] ? ' <b class="xl-ref">' + cells[k] + "</b>" : "");
+      });
+    say();
+  };
+
+  var wireGrid = function () {
+    $("xlWrap")
+      .querySelectorAll("td[data-r]")
+      .forEach(function (td) {
+        td.onclick = function () {
+          var ref = td.getAttribute("data-r");
+          if (!picked) {
+            // 押されたマスに割り当ててある物を外す
+            var hit = Object.keys(cells).filter(function (k) {
+              return cells[k] === ref;
+            });
+            if (!hit.length) {
+              toast("先に上の項目を押してください");
+              return;
+            }
+            hit.forEach(function (k) {
+              delete cells[k];
+            });
+            redraw();
+            return;
+          }
+          cells[picked] = ref;
+          picked = null;
+          redraw();
+        };
+      });
+  };
+
+  $("xlFields")
+    .querySelectorAll("[data-cf]")
+    .forEach(function (b) {
+      b.onclick = function () {
+        var k = b.getAttribute("data-cf");
+        picked = picked === k ? null : k;
+        redraw();
+      };
+    });
+
+  if ($("xlSheets"))
+    $("xlSheets")
+      .querySelectorAll("[data-sh]")
+      .forEach(function (b) {
+        b.onclick = function () {
+          si = +b.getAttribute("data-sh");
+          $("xlSheets")
+            .querySelectorAll("[data-sh]")
+            .forEach(function (x) {
+              x.classList.toggle("on", +x.getAttribute("data-sh") === si);
+            });
+          cells = {}; // シートが変われば番地の意味も変わる
+          picked = null;
+          redraw();
+        };
+      });
+
+  $("xlcClear").onclick = function () {
+    Object.keys(cells).forEach(function (k) {
+      delete cells[k];
+    });
+    picked = null;
+    redraw();
+    toast("割り当てを消しました");
+  };
+
+  $("xlcOk").onclick = function () {
+    SETTINGS.ownCells = TL.normalizeCells(cells);
+    SETTINGS.ownSheet = si;
+    saveSettings();
+    closeModal();
+    renderAll();
+    toast("✅ 割り当てを決めました");
+  };
+
+  wireGrid();
+  say();
+}
+
+/** いま画面に出している請求書の中身（Excelに入れる値） */
+function ownXlsxData() {
+  if (!UI.invName) return null;
+  var iv = currentInvoice();
+  if (!iv) return null;
+  var a = C.invoiceTo(PARTNERS, iv.name);
+  var day = invIssueDate(iv);
+  return {
+    date: day,
+    dateText: C.jpDate(day),
+    no: iv.no,
+    to: a.to + "　" + a.honor,
+    grand: iv.total,
+    net: iv.net,
+    tax: iv.tax,
+    total: iv.total,
+    store: SETTINGS.store || "",
+    bank: SETTINGS.bank || "",
+    name: iv.name,
+    ym: iv.to ? C.jpMonth(C.ymOf(iv.to)) : "",
+    rows: iv.rows.map(function (s) {
+      return {
+        date: s.date,
+        dateText: C.mdShort(s.date),
+        name: "ご飲食代",
+        people: s.people,
+        amount: s.amount,
+        memo: s.memo || "",
+      };
+    }),
+  };
+}
+
+/** 保存の名前の案（中身から作る）。例: Castally_請求書_山田商事_2026年8月.xlsx */
+function ownXlsxSuggestName(d) {
+  var parts = [];
+  if (SETTINGS.store) parts.push(SETTINGS.store);
+  parts.push("請求書");
+  if (d && d.name) parts.push(d.name);
+  if (d && d.ym) parts.push(d.ym);
+  return parts.join("_").replace(/[\\/:*?"<>|]/g, "-") + ".xlsx";
+}
+
+/** いまの請求書を、お店のExcelに差し込んで渡す */
+function exportOwnXlsx() {
+  Promise.all([loadTplLib(), ownBook()])
+    .then(function (a) {
+      var TL = a[0];
+      var book = a[1];
+      if (!book) throw new Error("先にExcelのテンプレを選んでください");
+      var d = ownXlsxData();
+      if (!d) throw new Error("先に請求先を選んでください");
+      var plan = TL.planEdits(SETTINGS.ownCells, d);
+      if (!plan.edits.length)
+        throw new Error("どのマスに入れるかが決まっていません（「どのマスに入れるか決める」から）");
+      var si = Math.min(SETTINGS.ownSheet || 0, book.sheets.length - 1);
+      var made = window.NomiyaXlsxTpl.fill(book, si, plan.edits);
+      var msgs = plan.warn.slice();
+      if (made.skipped.length)
+        msgs.push("計算式のマス（" + made.skipped.join("・") + "）には入れていません");
+      var suggest = ownXlsxSuggestName(d);
+      openModal(
+        "お店のExcelに入れて渡す",
+        '<div class="frow"><span class="flabel">ファイル名</span>' +
+          '<input class="finput" type="text" id="oxName" value="' +
+          esc(suggest) +
+          '"></div>' +
+          '<div class="hint">' +
+          esc(SETTINGS.ownXlsxName || "テンプレ") +
+          " に " +
+          made.wrote +
+          "マスぶん入れます。★元のファイルは変わりません★" +
+          (msgs.length ? "<br>★" + esc(msgs.join(" / ")) + "★" : "") +
+          "</div>" +
+          '<div style="margin-top:12px"><button class="btn btn-primary" id="oxOk">書き出す</button></div>'
+      );
+      $("oxOk").onclick = function () {
+        var name = ($("oxName").value || "").trim() || suggest;
+        if (!/\.xlsx$/i.test(name)) name += ".xlsx";
+        saveAsFile(
+          new Blob([made.bytes], {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          }),
+          name
+        );
+        closeModal();
+        toast("📊 " + name + " を書き出しました");
+      };
+    })
+    .catch(function (e) {
+      toast("⚠️ " + ((e && e.message) || e));
+    });
+}
+
 /* ── 置き場所を決める画面 ────────────────────────────────────── */
 
 /** いま置いている物を、A4のプレビューの上で指で動かせるようにする */
 function openOwnPlacer() {
+  if (SETTINGS.ownXlsx) return openCellPlacer();
   loadTplLib()
     .then(function (TL) {
       var placed = TL.normalize(SETTINGS.ownFields);
@@ -265,14 +694,67 @@ function renderOwnTplRow() {
   var on = (SETTINGS.tpl || "card") === "own";
   row.style.display = on ? "" : "none";
   if (!on) return;
+  var place = $("btnOwnPlace");
+  var xl = !!SETTINGS.ownXlsx;
+  if (place) place.textContent = xl ? "どのマスに入れるか決める" : "項目の置き場所を決める";
+  var out = $("btnOwnXlsx");
+  if (out) out.style.display = xl ? "" : "none";
   var note = $("ownTplNote");
   if (!note) return;
+  if (xl) {
+    var kb2 = Math.round((SETTINGS.ownXlsx.length * 0.75) / 1024);
+    var n = Object.keys(
+      window.NomiyaTpl ? window.NomiyaTpl.normalizeCells(SETTINGS.ownCells) : {}
+    ).length;
+    note.textContent =
+      "Excelが入っています：" +
+      (SETTINGS.ownXlsxName || "テンプレ") +
+      "（約" +
+      kb2 +
+      "KB・割り当て " +
+      n +
+      "件）。★元のファイルは変えません★";
+    return;
+  }
   if (!SETTINGS.ownTpl) {
-    note.textContent = "まだ紙が入っていません。PDFでも、紙を撮った写真でも構いません。";
+    note.textContent =
+      "まだテンプレが入っていません。Excel・PDF・紙を撮った写真のどれでも構いません。";
     return;
   }
   var kb = Math.round((SETTINGS.ownTpl.length * 0.75) / 1024);
   note.textContent = "紙が入っています（約" + kb + "KB）。押すと入れ直せます。";
+}
+
+/* 端末に覚えておける大きさの目安。これを超えると他の物まで保存できなくなる */
+var OWN_XLSX_MAX = 2 * 1024 * 1024;
+
+/** お店のExcelを受け取って覚える（★原本のバイト列のまま★） */
+function takeOwnXlsx(file) {
+  return file
+    .arrayBuffer()
+    .then(function (ab) {
+      var u8 = new Uint8Array(ab);
+      if (u8.length > OWN_XLSX_MAX)
+        throw new Error(
+          "このExcelは大きすぎます（" + Math.round(u8.length / 1024) + "KB）。2MBまでにしてください"
+        );
+      return window.NomiyaXlsxTpl.open(u8).then(function (book) {
+        SETTINGS.ownXlsx = bytesToB64(u8);
+        SETTINGS.ownXlsxName = file.name || "テンプレ.xlsx";
+        SETTINGS.ownSheet = 0;
+        SETTINGS.ownTpl = ""; // 紙(絵)のテンプレとは同時に持たない
+        SETTINGS.tpl = "own";
+        OWN_BOOK = book;
+        _bookFor = SETTINGS.ownXlsx;
+        saveSettings();
+        renderOwnTplRow();
+        renderAll();
+        toast("✅ Excelを入れました。次に「どのマスに入れるか決める」を押してください");
+      });
+    })
+    .catch(function (e) {
+      toast("⚠️ 読めませんでした（" + ((e && e.message) || e) + "）");
+    });
 }
 
 function wireOwnTpl() {
@@ -286,10 +768,19 @@ function wireOwnTpl() {
   file.onchange = function () {
     var f = file.files && file.files[0];
     if (!f) return;
+    if (/\.xlsx$/i.test(f.name || "") || /spreadsheetml/.test(f.type || "")) {
+      toast("📊 Excelを読んでいます…");
+      loadXlsxTplLib().then(function () {
+        takeOwnXlsx(f);
+      });
+      return;
+    }
     toast("📄 紙を読んでいます…");
     ownTplFromFile(f)
       .then(function (dataUrl) {
         SETTINGS.ownTpl = dataUrl;
+        SETTINGS.ownXlsx = ""; // Excelのテンプレとは同時に持たない
+        SETTINGS.ownXlsxName = "";
         SETTINGS.tpl = "own";
         if (!SETTINGS.ownFields || !Object.keys(SETTINGS.ownFields).length) {
           SETTINGS.ownFields = window.NomiyaTpl ? window.NomiyaTpl.defaults() : {};
@@ -305,4 +796,6 @@ function wireOwnTpl() {
   };
   var place = $("btnOwnPlace");
   if (place) place.onclick = openOwnPlacer;
+  var out = $("btnOwnXlsx");
+  if (out) out.onclick = exportOwnXlsx;
 }

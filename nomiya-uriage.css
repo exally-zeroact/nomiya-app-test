@@ -1277,3 +1277,66 @@ body {
   border-radius: 50%;
   cursor: ew-resize;
 }
+
+/* ===== お店のテンプレが Excel のとき =====
+   画面には「そのExcelの見た目」を表で出す。
+   罫線・結合・列幅・太字・塗りは、Excelの中から読んだ物をそのまま当てている。 */
+.xl-wrap {
+  margin-top: 10px;
+  max-height: 46vh;
+  overflow: auto;
+  border: 1px solid var(--c-line);
+  border-radius: 8px;
+  background: var(--c-card);
+  -webkit-overflow-scrolling: touch;
+}
+.xl-grid {
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: var(--c-card);
+  color: var(--c-text);
+  font-family: "Noto Sans JP", sans-serif;
+  font-size: 12px;
+}
+.xl-grid td {
+  height: 20px;
+  padding: 1px 4px;
+  border: 1px dotted var(--c-line); /* Excelの目盛線。実際の罫線は上から重ねて描く */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+/* 割り当て済みのマス */
+.xl-grid td.xl-set {
+  background: var(--c-tint) !important;
+  outline: 2px solid var(--c-accent);
+  outline-offset: -2px;
+}
+.xl-tag {
+  display: block;
+  font-size: 9px;
+  line-height: 1.1;
+  color: var(--c-accent);
+  font-weight: 700;
+}
+.xl-ref {
+  font-weight: 700;
+  opacity: 0.8;
+}
+.chip.sel {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 1px;
+}
+/* 紙(A4)の中に、Excelの表を縮めて収める */
+.iv-xl {
+  padding: 20px;
+  background: var(--c-card);
+  overflow: hidden;
+}
+.xl-fit {
+  transform-origin: top left;
+}
+.iv-xl .xl-grid td {
+  border-color: transparent; /* 紙では目盛線を出さない（Excelの印刷と同じ） */
+}

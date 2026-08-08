@@ -48,6 +48,13 @@ function defaultSettings() {
     //   置き場所は「A4に対する％」で持つ（端末が変わってもズレない。決まりは nomiya-tpl.js）
     ownTpl: "",
     ownFields: {},
+    // ★お店のテンプレが Excel のとき★
+    //   原本のバイト列をそのまま持っておき、値だけ差し込む（罫線も判子も消さないため）
+    //   ownCells は「どの項目を、どのマスに入れるか」（例 {to:"B4", cAmount:"E10"}）
+    ownXlsx: "",
+    ownXlsxName: "",
+    ownSheet: 0,
+    ownCells: {},
     logo: "",
     logoPos: "top",
     accent: "",
@@ -234,6 +241,24 @@ function saveSettings(keepAt) {
   }
   if (!keepAt) queuePush();
 }
+/** 作ったファイルを端末に渡す。
+ *  ★target=_blank は必ず付ける★（ホーム画面から開いたアプリだと、同じ窓でファイルが開いて
+ *  戻れなくなる。全アプリ共通の決まり） */
+function saveAsFile(blob, name) {
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.target = "_blank";
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function () {
+    URL.revokeObjectURL(url);
+  }, 60000);
+}
+
 function savePartners() {
   try {
     localStorage.setItem(K_PARTNER, JSON.stringify(PARTNERS));

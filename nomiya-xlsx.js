@@ -147,14 +147,19 @@
       .replace(/"/g, "&quot;");
   };
 
-  /** 日付(YYYY-MM-DD) → Excel の通し番号。おかしければ null */
+  /** 日付(YYYY-MM-DD) → Excel の通し番号。おかしければ null
+   *  ★端を実物のExcelで測った（2026-08-09）★
+   *    1→1900-01-01 ／ 59→1900-02-28 ／ 60→★1900-02-29（存在しない日）★ ／ 61→1900-03-01
+   *  Excel は 1900年をうるう年だと思い込んでいるので、
+   *  ★1900-03-01 より前だけ 1日ぶんズレる★。そこだけ数え方を変える。 */
   function serial(ymd) {
     var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || ""));
     if (!m) return null;
     var d = Date.UTC(+m[1], +m[2] - 1, +m[3]);
     if (isNaN(d)) return null;
-    // 1899-12-30 を 0 とする（Excel が 1900年をうるう年と誤っている分を含めた数え方）
-    return Math.round((d - Date.UTC(1899, 11, 30)) / 86400000);
+    var n = Math.round((d - Date.UTC(1899, 11, 30)) / 86400000);
+    if (n < 61) n = Math.round((d - Date.UTC(1899, 11, 31)) / 86400000);
+    return n > 0 ? n : null; // 1899-12-31 以前は Excel に無い
   }
 
   var COL = function (i) {
@@ -318,5 +323,13 @@
     ]);
   }
 
-  return { build: build, serial: serial, col: COL, _zip: zip, _crc32: crc32 };
+  return {
+    build: build,
+    serial: serial,
+    col: COL,
+    esc: esc,
+    _zip: zip,
+    _crc32: crc32,
+    _utf8: utf8,
+  };
 });

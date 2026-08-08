@@ -136,6 +136,7 @@ describe("配る js/css の版（?v=）", () => {
     expect(dyn, "押したときに読むファイルが変わった（キャッシュの決まりを見直すこと）").toEqual([
       "nomiya-owntpl.js", // 自社テンプレを登録して置く画面
       "nomiya-tpl.js", // 置き場所の計算
+      "nomiya-xlsx-tpl.js", // お店のExcelに値だけ差し込む
       "nomiya-xlsx.js", // Excel書き出し
     ]);
   });
@@ -150,6 +151,7 @@ describe("配る js/css の版（?v=）", () => {
     expect(dyn.sort(), "押して読むファイルの顔ぶれが変わった").toEqual([
       "nomiya-owntpl.js",
       "nomiya-tpl.js",
+      "nomiya-xlsx-tpl.js",
       "nomiya-xlsx.js",
     ]);
   });
