@@ -772,24 +772,31 @@ function loadTplLib() {
    ふだんの起動には足さない（読むのは、自社テンプレを選んだときだけ）。 */
 var _ownUi = null;
 function loadOwnTplUi() {
-  if (_ownUi) return _ownUi;
-  _ownUi = new Promise(function (ok, ng) {
-    if (typeof wireOwnTpl === "function") return ok();
-    var el = document.createElement("script");
-    el.src = "nomiya-owntpl.js";
-    el.onload = function () {
-      typeof wireOwnTpl === "function" ? ok() : ng(new Error("nomiya-owntpl.js"));
-    };
-    el.onerror = function () {
-      _ownUi = null;
-      ng(new Error("nomiya-owntpl.js"));
-    };
-    document.head.appendChild(el);
-  }).then(function () {
-    wireOwnTpl();
+  if (!_ownUi) {
+    _ownUi = new Promise(function (ok, ng) {
+      if (typeof wireOwnTpl === "function") return ok();
+      var el = document.createElement("script");
+      el.src = "nomiya-owntpl.js";
+      el.onload = function () {
+        typeof wireOwnTpl === "function" ? ok() : ng(new Error("nomiya-owntpl.js"));
+      };
+      el.onerror = function () {
+        _ownUi = null;
+        ng(new Error("nomiya-owntpl.js"));
+      };
+      document.head.appendChild(el);
+    }).then(function () {
+      wireOwnTpl();
+    });
+  }
+  /* ★行を出し直すのは「毎回」★
+     ここを 1回目だけにしていたので、デザインを カード に変えて（＝行を隠して）
+     もう一度 自社のテンプレ に戻したとき、★行が隠れたまま戻らなかった★。
+     ＝「テンプレを選ぶ」「マスを決める」に二度と辿り着けない（開き直すまで）。
+     2026-08-09、iPhoneの大きさで全ボタンを押していて見つけた。 */
+  return _ownUi.then(function () {
     renderOwnTplRow();
   });
-  return _ownUi;
 }
 
 /* お店のテンプレが Excel のときに要る部品。★使う店だけが読む★

@@ -219,6 +219,33 @@ test.describe("自社テンプレ（お店の紙に載せる）", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
+  /* ★2026-08-09 実物で踏んだ★
+     部品を1度読んだら次からは行を出し直していなかったので、
+     カード → 自社のテンプレ と戻したとき ★行が隠れたまま★ になり、
+     「テンプレを選ぶ」「マスを決める」に二度と辿り着けなかった（開き直すまで）。 */
+  test("★他のデザインに変えて、もう一度 自社のテンプレ に戻せる★", async ({ page }) => {
+    const errors = await open(page);
+    await openLook(page);
+    await page.locator("#invTpl [data-tpl='own']").click();
+    await expect(page.locator("#ownTplRow"), "1回目で出ていない").toBeVisible();
+    await page.locator("#invTpl [data-tpl='card']").click();
+    await expect(page.locator("#ownTplRow")).toBeHidden();
+    await page.locator("#invTpl [data-tpl='own']").click();
+    await expect(
+      page.locator("#ownTplRow"),
+      "★戻したのに自社テンプレの行が出てこない（もう選び直せない）★"
+    ).toBeVisible();
+    await expect(page.locator("#btnOwnPick")).toBeVisible();
+    await expect(page.locator("#btnOwnPlace")).toBeVisible();
+    // 3往復しても出る
+    for (let i = 0; i < 2; i++) {
+      await page.locator("#invTpl [data-tpl='tate']").click();
+      await page.locator("#invTpl [data-tpl='own']").click();
+    }
+    await expect(page.locator("#ownTplRow"), "何度か往復すると出なくなる").toBeVisible();
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
   test("★他のデザインに戻せる（自社テンプレに閉じ込めない）★", async ({ page }) => {
     const errors = await open(page);
     await openLook(page);
