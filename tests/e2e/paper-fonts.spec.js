@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { covering } from "../check-kit.mjs";
+import { covering } from "../lib/check-kit.mjs";
 
 /* ★紙が「ゴシックのまま」出ないことを縛る★
  * ------------------------------------------------------------------------------

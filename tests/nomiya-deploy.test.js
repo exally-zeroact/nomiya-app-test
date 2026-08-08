@@ -22,7 +22,7 @@ import path from "node:path";
    HTML の中でも、分割した nomiya-ui-*.js の中でも、同じ物が返る。 */
 import { ROOT, HTML, PAGE_JS, SCRIPT_SRCS } from "./app-source.mjs";
 /* ★元が空なら その場で赤になる部品（他アプリにもそのまま配れる）★ */
-import { expectNoneOf, expectCountOf } from "./check-kit.mjs";
+import { expectNoneOf, expectCountOf } from "./lib/check-kit.mjs";
 
 const R = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
 const CONF = R("js/supa-config.js");

@@ -1,9 +1,25 @@
 /* check-kit.mjs — 試験が「何も見ていないのに緑」になるのを、書き方で防ぐ小さな部品。
  * ==============================================================================
+ * ★★配る時の決まり（3行）★★
+ *   1) どこに置くか … 部品は ★tests/lib/check-kit.mjs★（`tests/*.mjs` の glob に入らない場所）／
+ *                     自己確認は ★tests/check-kit.selftest.mjs★（拾われて走ってほしい方）
+ *   2) どう回すか   … ★node tests/check-kit.selftest.mjs★（素の node だけ・落ちたら exit 1）。
+ *                     CIに1行足す（飲み屋は package.json の "selftest" と ci.yml に入れてある）
+ *   3) 入ったと言える条件 … ★selftest が「SELFTEST RESULT: OK（17/17 件）」を出す★ ＋
+ *                     ★配り元とのファイル一致を sha256 で確かめる（2ファイルとも）★
+ *
  * ★他のアプリにそのまま持っていける形にしてある★
  *   ・依存なし（vitest も @playwright/test も import しない）
  *   ・失敗は ただの Error を投げる＝どちらの試験でもそのまま赤になる
- *   ・置く場所は tests/check-kit.mjs。この1ファイルを配るだけで動く
+ *   ・配るのは ★この1ファイル＋ tests/check-kit.selftest.mjs の2つだけ★
+ *
+ * ★2026-08-08 アマかせで詰まった2つ（上の決まりは その反省）★
+ *   ① 自己確認を vitest で書いていた → ★vitest が無いアプリでは1回も走らない★
+ *      ＝走らない見張りが repo に居る（この部品が無くそうとしている形そのもの）
+ *      → 素の node で走る tests/check-kit.selftest.mjs に作り直した
+ *   ② 部品を tests/check-kit.mjs に置いていた → ★`tests/*.mjs` を回すCIが
+ *      「部品」を"テスト"として実行し、何も確かめずに exit 0★
+ *      → tests/lib/ へ移した
  *
  * ★なぜ要るか（2026-08-08 飲み屋で実際に起きたこと）★
  *   1) 「消す系SQLが1つも無い」という★最後の砦★が、

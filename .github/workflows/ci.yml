@@ -28,6 +28,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # ★見張りの見張り（素の node だけで走る／どのアプリでも同じ）★
+      #   check-kit は「何も見ていないのに緑」を防ぐ部品。部品が効いていなければ全部が嘘になる。
+      #   ここを飛ばすと ★走らない見張りが repo に居る★ ことになる（アマかせで実際に起きた）。
+      - name: check-kit の自己確認（依存ゼロ）
+        run: npm run selftest
+
       - name: Lint (eslint)
         run: npm run lint
 

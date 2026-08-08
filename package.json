@@ -15,10 +15,11 @@
     "db:apply": "node tests/apply-schema.mjs",
     "live": "node tests/live-nomiya.mjs",
     "live:ui": "node tests/live-nomiya-ui.mjs",
-    "check": "npm run lint && npm run test",
+    "check": "npm run selftest && npm run lint && npm run test",
     "stamp": "node scripts/stamp-assets.mjs",
     "compare": "node scripts/compare-repos.mjs",
-    "measure": "node scripts/measure-start.mjs"
+    "measure": "node scripts/measure-start.mjs",
+    "selftest": "node tests/check-kit.selftest.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.16.0",

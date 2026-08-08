@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 /* ★N個ぜんぶ見たかを、黙って飛ばせない形で数える部品（他アプリにも配れる）★ */
-import { covering } from "../check-kit.mjs";
+import { covering } from "../lib/check-kit.mjs";
 
 // 飲み屋の売上管理(nomiya-uriage.html)を実ブラウザで開き、
 // 「実際に指で押す操作」を全ボタン分たどって、値が正しく出るところまで確かめる。
