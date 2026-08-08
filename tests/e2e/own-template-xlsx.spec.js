@@ -108,6 +108,37 @@ test.describe("自社テンプレ（お店のExcel）", () => {
       };
     });
     expect(look.colspan, "結合が効いていない").toBe("6");
+    /* ★紙からはみ出さない★
+       表そのものの幅を書かないと table-layout:fixed が効かず、
+       ★中身に合わせて表が広がって右が切れる★（実測 626px→762px・2026-08-09）。
+       余白は「そのExcelが持っている値」を使う（勝手な値にすると別の紙に見える）。 */
+    const fit = await page.evaluate(() => {
+      const sheet = document.querySelector("#invSheets .iv-xl");
+      const t2 = sheet.querySelector(".xl-grid");
+      const cs = getComputedStyle(sheet);
+      return {
+        はみ出し: sheet.scrollWidth - sheet.clientWidth,
+        表の幅: t2.offsetWidth,
+        列幅の合計: [...t2.querySelectorAll("col")].reduce(
+          (a, c) => a + parseFloat(c.style.width),
+          0
+        ),
+        余白左: parseFloat(cs.paddingLeft),
+        余白右: parseFloat(cs.paddingRight),
+      };
+    });
+    expect(fit.はみ出し, "★紙から右へはみ出している★").toBe(0);
+    // 1px は画面の丸め（実測 622 と 623）。それ以上ズレたら列幅の指定が効いていない
+    expect(
+      Math.abs(fit.表の幅 - fit.列幅の合計),
+      "★表の幅が列幅の合計と違う＝列幅の指定が効いていない（表 " +
+        fit.表の幅 +
+        "px / 列幅の合計 " +
+        fit.列幅の合計 +
+        "px）★"
+    ).toBeLessThanOrEqual(1);
+    expect(fit.余白左, "余白がExcelの値になっていない").toBeGreaterThanOrEqual(40);
+    expect(fit.余白右, "余白がExcelの値になっていない").toBeGreaterThanOrEqual(40);
     expect(+look.bold, "太字が効いていない").toBeGreaterThanOrEqual(700);
     expect(look.border, "明細の枠の罫線が出ていない").toBe("solid");
     expect(look.cols[0], "A列の幅が効いていない").toBeGreaterThan(look.cols[1]);
@@ -268,6 +299,52 @@ test.describe("自社テンプレ（お店のExcel）", () => {
     expect(st.ownXlsx, "★Excelと紙を両方持ったままにしている★").toBe("");
     await expect(page.locator("#invSheets .iv-own-bg")).toBeVisible();
     await expect(page.locator("#btnOwnXlsx"), "Excelのボタンが残っている").toBeHidden();
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  /* ★中身が長いテンプレでも、紙からはみ出さない★
+     table-layout:fixed は「表そのものの幅」を書かないと効かない。
+     書かないと ★中身に合わせて表が広がって右が切れる★（司さんの実物で 626px→762px）。
+     ★短い見本では起きない★ので、長い文字の入った見本(tpl-real-like)で測る。 */
+  test("★中身が長いテンプレでも、紙から右へはみ出さない★", async ({ page }) => {
+    const errors = await open(page);
+    await openLook(page);
+    await page.locator("#invTpl [data-tpl='own']").click();
+    await expect(page.locator("#ownTplRow")).toBeVisible();
+    await page.locator("#ownTplFile").setInputFiles("tests/e2e/fixtures/tpl-real-like.xlsx");
+    await expect(page.locator("#ownTplNote")).toContainText("Excelが入っています", {
+      timeout: 30000,
+    });
+    const fit = await page.evaluate(() => {
+      const sheet = document.querySelector("#invSheets .iv-xl");
+      const t2 = sheet.querySelector(".xl-grid");
+      const cs = getComputedStyle(sheet);
+      const cols = [...t2.querySelectorAll("col")].reduce(
+        (a, c) => a + parseFloat(c.style.width),
+        0
+      );
+      // 中身が列幅より長いマスが本当にあるか（無ければ、この確認は何も見ていない）
+      const longer = [...t2.querySelectorAll("td")].filter(
+        (td) => td.scrollWidth > td.clientWidth
+      ).length;
+      return {
+        はみ出し: sheet.scrollWidth - sheet.clientWidth,
+        表の幅: t2.offsetWidth,
+        列幅の合計: cols,
+        余白左: parseFloat(cs.paddingLeft),
+        あふれるマス: longer,
+      };
+    });
+    expect(
+      fit.あふれるマス,
+      "★中身が列幅より長いマスが1つも無い＝この確認は何も見ていない★"
+    ).toBeGreaterThanOrEqual(1);
+    expect(fit.はみ出し, "★紙から右へはみ出している★").toBe(0);
+    expect(
+      Math.abs(fit.表の幅 - fit.列幅の合計),
+      "★表 " + fit.表の幅 + "px / 列幅の合計 " + fit.列幅の合計 + "px★"
+    ).toBeLessThanOrEqual(1);
+    expect(fit.余白左, "余白がExcelの値になっていない").toBeGreaterThanOrEqual(40);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });

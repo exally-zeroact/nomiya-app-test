@@ -231,7 +231,13 @@ function xlGridHtml(book, si, values, opt) {
       mark[o.cells[k]] = (mark[o.cells[k]] ? mark[o.cells[k]] + "・" : "") + (o.labels[k] || k);
     });
 
-  var out = ['<table class="xl-grid"><colgroup>'];
+  /* ★表そのものの幅を書く★
+     table-layout:fixed は「表の幅」が決まっていないと効かない。書かないと
+     ★中身に合わせて表が広がり、列幅の指定が無視されて右がはみ出す★（実測 626px→762px）。 */
+  var totalW = wide.reduce(function (a, x) {
+    return a + x;
+  }, 0);
+  var out = ['<table class="xl-grid" style="width:' + totalW + 'px"><colgroup>'];
   wide.forEach(function (w) {
     out.push('<col style="width:' + w + 'px">');
   });
