@@ -21,6 +21,8 @@ import path from "node:path";
 /* ★どこに書いてあるかは tests/app-source.mjs だけが知っている★
    HTML の中でも、分割した nomiya-ui-*.js の中でも、同じ物が返る。 */
 import { ROOT, HTML, PAGE_JS, SCRIPT_SRCS } from "./app-source.mjs";
+/* ★元が空なら その場で赤になる部品（他アプリにもそのまま配れる）★ */
+import { expectNoneOf, expectCountOf } from "./check-kit.mjs";
 
 const R = (p) => fs.readFileSync(path.join(ROOT, p), "utf8");
 const CONF = R("js/supa-config.js");
@@ -188,6 +190,11 @@ describe("飲み屋アプリ 倉庫の向き先（テストはテスト・本番
        ② ★本当に1文ずつに割れていること★（; を使わない書き方に変えられても気づく）
           ＝棚8つ・窓口8つが、それぞれ別の文として数えられること
      ★3つの確認は別々の it にしてある★＝ここが崩れたら3つとも赤になる。 */
+  /** SQLを1文ずつに割る。★割れていなければ ここで赤にする★
+      2026-08-08: ここは「push したら自動で当たる」仕組みの最後の砦なのに、
+      割った結果が空でも下の確認が素通りで緑になっていた。
+      いまは ★expectNoneOf が「元が空です」と言って落ちる★ ので、
+      うっかり空にしても気づける。ここでは「区切れているか」だけを見る。 */
   function statements() {
     const stmts = SQL.split(/\r?\n/)
       .filter((l) => !/^\s*--/.test(l))
@@ -195,11 +202,19 @@ describe("飲み屋アプリ 倉庫の向き先（テストはテスト・本番
       .split(";")
       .map((s) => s.trim().replace(/\s+/g, " "))
       .filter(Boolean);
-    expect(stmts.length, "★SQLが1文も取れていない＝下の確認は何も見ていない★").toBeGreaterThan(20);
-    const tables = stmts.filter((s) => /^create table if not exists castally\.nomiya_/i.test(s));
-    const views = stmts.filter((s) => /^create or replace view public\.nomiya_/i.test(s));
-    expect(tables.length, "★棚を作る文が1文ずつに割れていない（区切り方が変わった？）★").toBe(8);
-    expect(views.length, "★窓口を作る文が1文ずつに割れていない（区切り方が変わった？）★").toBe(8);
+    // ★1文ずつに割れているか（; を使わない書き方に変えられても気づく）★
+    expectCountOf(
+      stmts,
+      (s) => /^create table if not exists castally\.nomiya_/i.test(s),
+      8,
+      "棚を作る文が1文ずつに割れているか"
+    );
+    expectCountOf(
+      stmts,
+      (s) => /^create or replace view public\.nomiya_/i.test(s),
+      8,
+      "窓口を作る文が1文ずつに割れているか"
+    );
     return stmts;
   }
 
@@ -207,29 +222,38 @@ describe("飲み屋アプリ 倉庫の向き先（テストはテスト・本番
     // push したら自動で当たる仕組みにしたので、ここが最後の砦。
     // うっかり drop table を書いたら、当てる前にCIが落ちる。
     const stmts = statements();
-    const bad = stmts.filter((s) =>
-      /\b(drop\s+table|drop\s+schema|drop\s+database|drop\s+column|truncate|delete\s+from|update\s+\w+\s+set)\b/i.test(
-        s
-      )
+    expectNoneOf(
+      stmts,
+      (s) =>
+        /\b(drop\s+table|drop\s+schema|drop\s+database|drop\s+column|truncate|delete\s+from|update\s+\w+\s+set)\b/i.test(
+          s
+        ),
+      "棚のDDLに消す系のSQLが入っている",
+      { min: 20 }
     );
-    expect(bad, "消す系のSQLが入っている: " + bad.join(" / ")).toEqual([]);
   });
 
   it("★棚のDDLは、飲み屋の棚以外に触らない（他アプリと同じ倉庫に同居している）", () => {
     const stmts = statements();
-    const other = stmts.filter(
+    expectNoneOf(
+      stmts,
       (s) =>
         !/nomiya_/i.test(s) &&
         !/create extension/i.test(s) &&
-        !/^create schema if not exists castally$/i.test(s)
+        !/^create schema if not exists castally$/i.test(s),
+      "飲み屋以外の棚に触っている",
+      { min: 20 }
     );
-    expect(other, "飲み屋以外の棚に触っている: " + other.join(" / ")).toEqual([]);
   });
 
   it("★棚のDDLは、他のアプリの部屋(kyuyo/daikome/amakase/daikou/exally)に1文字も触らない", () => {
     const stmts = statements();
-    const room = stmts.filter((s) => /(kyuyo|daikome|amakase|daikou|exally)\./i.test(s));
-    expect(room, "他のアプリの部屋に触っている: " + room.join(" / ")).toEqual([]);
+    expectNoneOf(
+      stmts,
+      (s) => /(kyuyo|daikome|amakase|daikou|exally)\./i.test(s),
+      "他のアプリの部屋に触っている",
+      { min: 20 }
+    );
   });
 
   it("このrepoに、別のアプリのファイルが混ざっていない（飲み屋だけのrepo）", () => {

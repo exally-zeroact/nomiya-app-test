@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { covering } from "../check-kit.mjs";
 
 /* ★紙が「ゴシックのまま」出ないことを縛る★
  * ------------------------------------------------------------------------------
@@ -227,74 +228,72 @@ test.describe("紙の書体（明朝がそろってから写す）", () => {
       ["pay", null, "castSheets", "給与明細"],
     ];
     const done = [];
-    const empty = [];
-    for (const [scr, seg, id, name] of PAPERS) {
-      await page.locator(`.nav-item[data-scr='${scr}']`).click();
-      if (seg) await page.locator(`#listSeg [data-lseg='${seg}']`).click();
-      // 給与明細は「明細」を押さないと紙が組まれない（押す道順を実際になぞる）
-      if (id === "castSheets") {
-        const b = page.locator("#payDue button:has-text('明細')").first();
-        if (await b.count()) {
-          await b.click();
-          await page.waitForTimeout(600);
+    await covering("紙", PAPERS.length, async (cov) => {
+      for (const [scr, seg, id, name] of PAPERS) {
+        await page.locator(`.nav-item[data-scr='${scr}']`).click();
+        if (seg) await page.locator(`#listSeg [data-lseg='${seg}']`).click();
+        // 給与明細は「明細」を押さないと紙が組まれない（押す道順を実際になぞる）
+        if (id === "castSheets") {
+          const b = page.locator("#payDue button:has-text('明細')").first();
+          if (await b.count()) {
+            await b.click();
+            await page.waitForTimeout(600);
+          }
+        }
+        const has = await page.evaluate((id) => {
+          const el = document.getElementById(id);
+          return !!(el && el.querySelector(".sheet"));
+        }, id);
+        if (!has) {
+          cov.skip(name, "中身が無い");
+          continue;
+        }
+        const r = await page.evaluate(
+          async ([id, src]) => {
+            const serifLoaded = eval("(" + src + ")");
+            const inner = document.getElementById(id);
+            // ★その紙が実際に使う書体を、画面に聞く（クラス名では見分けない）★
+            const fams = new Set();
+            [inner, ...inner.querySelectorAll("*")].forEach((el) => {
+              (getComputedStyle(el).fontFamily || "").split(",").forEach((n) => {
+                n = n.trim().replace(/^["']|["']$/g, "");
+                if (n) fams.add(n);
+              });
+            });
+            const blob = await window.__NOMIYA.buildPdf(id);
+            const u8 = new Uint8Array(await blob.arrayBuffer());
+            let head = "";
+            for (let k = 0; k < 5; k++) head += String.fromCharCode(u8[k]);
+            const all = new TextDecoder("latin1").decode(u8);
+            const box = (all.match(/\/MediaBox\s*\[([^\]]+)\]/) || [])[1] || "0 0 0 0";
+            return {
+              head,
+              size: u8.length,
+              w: Math.round(parseFloat(box.split(" ")[2])),
+              h: Math.round(parseFloat(box.split(" ")[3])),
+              usesSerif: fams.has("Noto Serif JP"),
+              serif: serifLoaded(),
+            };
+          },
+          [id, serifLoadedExpr().toString()]
+        );
+        done.push({ id, ...r });
+        cov.seen(name);
+        expect(r.head, id + " がPDFでない").toBe("%PDF-");
+        expect(r.w, id + " がA4の幅でない").toBe(595);
+        expect(r.h, id + " がA4の高さでない").toBe(842);
+        expect(r.size, id + " が空っぽ").toBeGreaterThan(20000);
+        // ★明朝を使う紙だけ、明朝が届いた状態で写せていること★
+        if (r.usesSerif) {
+          expect(r.serif, "★" + id + " を明朝が届く前に写している★").toBe(true);
         }
       }
-      const has = await page.evaluate((id) => {
-        const el = document.getElementById(id);
-        return !!(el && el.querySelector(".sheet"));
-      }, id);
-      if (!has) {
-        empty.push(name); // ★黙って飛ばさない。何を見ていないかを最後に出す★
-        continue;
-      }
-      const r = await page.evaluate(
-        async ([id, src]) => {
-          const serifLoaded = eval("(" + src + ")");
-          const inner = document.getElementById(id);
-          // ★その紙が実際に使う書体を、画面に聞く（クラス名では見分けない）★
-          const fams = new Set();
-          [inner, ...inner.querySelectorAll("*")].forEach((el) => {
-            (getComputedStyle(el).fontFamily || "").split(",").forEach((n) => {
-              n = n.trim().replace(/^["']|["']$/g, "");
-              if (n) fams.add(n);
-            });
-          });
-          const blob = await window.__NOMIYA.buildPdf(id);
-          const u8 = new Uint8Array(await blob.arrayBuffer());
-          let head = "";
-          for (let k = 0; k < 5; k++) head += String.fromCharCode(u8[k]);
-          const all = new TextDecoder("latin1").decode(u8);
-          const box = (all.match(/\/MediaBox\s*\[([^\]]+)\]/) || [])[1] || "0 0 0 0";
-          return {
-            head,
-            size: u8.length,
-            w: Math.round(parseFloat(box.split(" ")[2])),
-            h: Math.round(parseFloat(box.split(" ")[3])),
-            usesSerif: fams.has("Noto Serif JP"),
-            serif: serifLoaded(),
-          };
-        },
-        [id, serifLoadedExpr().toString()]
-      );
-      done.push({ id, ...r });
-      expect(r.head, id + " がPDFでない").toBe("%PDF-");
-      expect(r.w, id + " がA4の幅でない").toBe(595);
-      expect(r.h, id + " がA4の高さでない").toBe(842);
-      expect(r.size, id + " が空っぽ").toBeGreaterThan(20000);
-      // ★明朝を使う紙だけ、明朝が届いた状態で写せていること★
-      if (r.usesSerif) {
-        expect(r.serif, "★" + id + " を明朝が届く前に写している★").toBe(true);
-      }
-    }
-    /* ★何枚を見て、何枚を見ていないかを必ず出す（黙って0件にしない）★ */
-    const covered = `見た紙 ${done.length}/${PAPERS.length}${empty.length ? "／中身が無くて見ていない: " + empty.join("・") : ""}`;
-    expect(done.length, "紙を1枚も作れていない。" + covered).toBeGreaterThanOrEqual(4);
+    });
     // ★明朝を使う紙が1枚も無い＝この試験が何も見ていない、を防ぐ★
     expect(
       done.filter((x) => x.usesSerif).length,
-      "明朝を使う紙が1枚も無い（この試験は何も確かめていない）。" + covered
+      "明朝を使う紙が1枚も無い（この試験は何も確かめていない）"
     ).toBeGreaterThanOrEqual(1);
-    console.log("  " + covered);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 

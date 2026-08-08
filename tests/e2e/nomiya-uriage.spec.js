@@ -1,4 +1,6 @@
 import { test, expect } from "@playwright/test";
+/* ★N個ぜんぶ見たかを、黙って飛ばせない形で数える部品（他アプリにも配れる）★ */
+import { covering } from "../check-kit.mjs";
 
 // 飲み屋の売上管理(nomiya-uriage.html)を実ブラウザで開き、
 // 「実際に指で押す操作」を全ボタン分たどって、値が正しく出るところまで確かめる。
@@ -5468,57 +5470,55 @@ test.describe("⑲ Castally", () => {
             band: head ? getComputedStyle(head).borderBottomColor : "",
           };
         });
-    const seen = [];
-    const check = async (name, sel) => {
+    const check = async (c, name, sel) => {
       const p = await paper(sel);
       expect(p.bg, name + " の紙が白でない").toBe("rgb(255, 255, 255)");
-      seen.push(name);
+      c.seen(name);
       return p;
     };
 
-    // 売上帳（字の色と見出しの帯まで見る代表）
-    await goto(page, "list");
-    const list = await check("売上帳", "#listSheets");
-    expect(list.color, "紙の字が黒でない").toBe("rgb(0, 0, 0)");
-    expect(list.band, "見出しの帯が濃紺でない").toBe("rgb(10, 17, 40)");
-    // 売上報告書（税理士の紙）
-    await goto(page, "tax");
-    await check("売上報告書", "#taxSheets");
-    // 請求書
-    await setInvMonth(page, "2026-07");
-    await check("請求書", "#invSheets");
-    // 日報（締め）
-    await goto(page, "close");
-    await check("日報", "#closeSheets");
-    // 給与一覧
-    await goto(page, "pay");
-    await check("給与一覧", "#paySheets");
-    /* ★渡した記録・給与明細★（前は見ていなかった2種）
+    await covering("A4の紙", 7, async (c) => {
+      // 売上帳（字の色と見出しの帯まで見る代表）
+      await goto(page, "list");
+      const list = await check(c, "売上帳", "#listSheets");
+      expect(list.color, "紙の字が黒でない").toBe("rgb(0, 0, 0)");
+      expect(list.band, "見出しの帯が濃紺でない").toBe("rgb(10, 17, 40)");
+      // 売上報告書（税理士の紙）
+      await goto(page, "tax");
+      await check(c, "売上報告書", "#taxSheets");
+      // 請求書
+      await setInvMonth(page, "2026-07");
+      await check(c, "請求書", "#invSheets");
+      // 日報（締め）
+      await goto(page, "close");
+      await check(c, "日報", "#closeSheets");
+      // 給与一覧
+      await goto(page, "pay");
+      await check(c, "給与一覧", "#paySheets");
+      /* ★渡した記録・給与明細★（前は見ていなかった2種）
        この2つは「スタッフ→出勤→渡した」を通さないと紙が組まれない。
        ⑫の試験と同じ道順をなぞる。 */
-    await gotoSet(page, "staff");
-    await page.locator("#btnStaffAdd").click();
-    await useAll(page);
-    await page.locator("#st_name").fill("あかり");
-    await page.locator("#st_hourly").fill("1000");
-    await page.locator("#st_ok").click();
-    await goto(page, "pay");
-    await page.locator("#btnWorkAdd").click();
-    await page.locator("#wk_staff").selectOption({ label: "あかり" });
-    await page.locator("#wk_in").fill("20:00");
-    await page.locator("#wk_out").fill("01:00");
-    await page.locator("#wk_ok").click();
-    // 給与明細（「明細」を押さないと紙が組まれない）
-    await page.locator("#payDue [data-slip]").first().click();
-    await expect(page.locator("#castBox")).toBeVisible();
-    await check("給与明細", "#castSheets");
-    // 渡した記録（「渡した」を押してから）
-    await page.locator("#payDue [data-due]").first().click();
-    await expect(page.locator("#logBox")).toBeVisible();
-    await check("渡した記録", "#logSheets");
-
-    // ★何種を見たかを必ず確かめる（黙って飛ばしたら赤）★
-    expect(seen.length, "見た紙 " + seen.length + "/7: " + seen.join("・")).toBe(7);
+      await gotoSet(page, "staff");
+      await page.locator("#btnStaffAdd").click();
+      await useAll(page);
+      await page.locator("#st_name").fill("あかり");
+      await page.locator("#st_hourly").fill("1000");
+      await page.locator("#st_ok").click();
+      await goto(page, "pay");
+      await page.locator("#btnWorkAdd").click();
+      await page.locator("#wk_staff").selectOption({ label: "あかり" });
+      await page.locator("#wk_in").fill("20:00");
+      await page.locator("#wk_out").fill("01:00");
+      await page.locator("#wk_ok").click();
+      // 給与明細（「明細」を押さないと紙が組まれない）
+      await page.locator("#payDue [data-slip]").first().click();
+      await expect(page.locator("#castBox")).toBeVisible();
+      await check(c, "給与明細", "#castSheets");
+      // 渡した記録（「渡した」を押してから）
+      await page.locator("#payDue [data-due]").first().click();
+      await expect(page.locator("#logBox")).toBeVisible();
+      await check(c, "渡した記録", "#logSheets");
+    });
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
