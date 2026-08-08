@@ -90,6 +90,54 @@ describe("配る js/css の版（?v=）", () => {
     expect([w, h], "ホーム画面のアイコンが512でない").toEqual([512, 512]);
   });
 
+  /* ★版が付いている物だけを、長く持たせてよい★（2026-08-08）
+     .js を丸ごと「1年間 持っていてよい(immutable)」にしていたが、
+     ★押したときにJSが読むファイル（nomiya-xlsx.js / vendor/*）には版が付かない★。
+     このままだと ★直しても1年間 古いまま★ になる。
+     だから「?v= が付いているときだけ長く持つ／付いていなければ毎回確かめる」に分けた。 */
+  it("★版が付いていないJS/CSSを、1年キャッシュにしていない★", () => {
+    const vc = JSON.parse(fs.readFileSync(path.join(ROOT, "vercel.json"), "utf8"));
+    const rules = vc.headers || [];
+    const immutable = rules.filter((r) =>
+      (r.headers || []).some((h) => /immutable/.test(String(h.value)))
+    );
+    expect(immutable.length, "長く持たせる決まりが1つも無い").toBeGreaterThan(0);
+    const bad = immutable.filter(
+      (r) => !(r.has || []).some((h) => h.type === "query" && h.key === "v")
+    );
+    expect(
+      bad.map((r) => r.source),
+      "★版が付いていなくても1年持たせる決まりがある（直しても古いままになる）★"
+    ).toEqual([]);
+    // 版が無いときは毎回確かめる決まりが在ること
+    const revalidate = rules.filter(
+      (r) =>
+        (r.missing || []).some((h) => h.type === "query" && h.key === "v") &&
+        (r.headers || []).some((h) => /must-revalidate/.test(String(h.value)))
+    );
+    expect(revalidate.map((r) => r.source).sort(), "版が無いときの決まりが足りない").toEqual([
+      "/(.*).css",
+      "/(.*).js",
+    ]);
+  });
+
+  /* ★押したときに読むファイルは、版が付かない＝1年キャッシュにしてはいけない★
+     どれがそれに当たるかを、コードから拾って一覧にしておく（増えたら気づく） */
+  it("押したときにJSが読むファイルの一覧（版が付かない物）", () => {
+    const src = [
+      "nomiya-ui-uriage.js",
+      "nomiya-ui-kami.js",
+      "nomiya-ui-base.js",
+      "nomiya-ui-boot.js",
+    ]
+      .map((f) => fs.readFileSync(path.join(ROOT, f), "utf8"))
+      .join("\n");
+    const dyn = [...src.matchAll(/\.src\s*=\s*"([^"]+\.js)"/g)].map((m) => m[1]).sort();
+    expect(dyn, "押したときに読むファイルが変わった（キャッシュの決まりを見直すこと）").toEqual([
+      "nomiya-xlsx.js",
+    ]);
+  });
+
   it("★画面のJS(nomiya-ui-*.js)は、起動(boot)を最後に読む★", () => {
     const ui = REFS.map((r) => r.file).filter((f) => f.startsWith("nomiya-ui-"));
     expect(ui.length, "画面のJSを1本も読んでいない").toBeGreaterThanOrEqual(2);
