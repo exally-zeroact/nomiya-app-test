@@ -130,33 +130,77 @@ function ownBookNow() {
   return OWN_BOOK && _bookFor === SETTINGS.ownXlsx ? OWN_BOOK : null;
 }
 
-/* Excel の列幅は「標準の字が何文字ぶん入るか」。画面に出すには px に直す。
-   Excel 自身が使っている換算（1文字≒7px＋余白5px）に合わせてある。 */
-function xlColPx(w) {
-  return Math.max(18, Math.round((w || 8.43) * 7 + 5));
+/* ★Excelの「列の幅」を画面の px に直す★
+   Excelの幅は「標準の字が何文字ぶん入るか」で、1文字ぶんの幅(MDW)は ★書体で変わる★。
+   ★2026-08-09 実測（司さんの実物 飲み屋(ZEROact.xlsx・既定の書体は游ゴシック11）★
+     ファイルの値 12.5039 → 本物のExcelで 100px ／ 8.578 → 69px ／ 7.355 → 59px
+     ＝ MDW=8 でぴったり。MDW=7 で計算すると ★7列で59pxもズレて、判子が左へ寄る★（実際に寄った）。
+   欧文の既定書体(Calibri など)は MDW=7。書体の名前で選ぶ。 */
+var XL_MDW_JP = 8;
+var XL_MDW_LATIN = 7;
+function xlMdw(book) {
+  var f0 = book && book.styles && book.styles.font && book.styles.font[0];
+  var name = (f0 && f0.name) || "";
+  return /^[\x20-\x7E]*$/.test(name) && name ? XL_MDW_LATIN : XL_MDW_JP;
+}
+function xlColPx(w, mdw) {
+  mdw = mdw || XL_MDW_JP;
+  if (!w) return mdw === XL_MDW_LATIN ? 64 : 72; // 幅の指定が無い列（既定 8.43文字）
+  return Math.trunc(((256 * w + Math.trunc(128 / mdw)) / 256) * mdw);
+}
+/** Excelの「行の高さ」(pt) を px に直す（1pt = 1/72インチ、画面は 96dpi） */
+function xlRowPx(pt) {
+  return Math.round((pt || 15) * (96 / 72));
+}
+
+/** 各列の px 幅（列の数ぶん） */
+function xlColWidths(s, mdw) {
+  var maxC = Math.max(1, s.maxCol);
+  var w = [];
+  for (var i = 0; i < maxC; i++) w.push(s.defaultColWidth || 0);
+  (s.cols || []).forEach(function (cc) {
+    for (var j = cc.min; j <= Math.min(cc.max, maxC); j++) if (cc.width) w[j - 1] = cc.width;
+  });
+  return w.map(function (x) {
+    return xlColPx(x, mdw);
+  });
+}
+
+/** そのマスに効いている書式（行や列に付いている物を拾う） */
+function styleAt(s, r, c) {
+  var rs = (s.rowStyle || {})[r + 1];
+  if (rs != null) return rs;
+  var cols = s.cols || [];
+  for (var i = 0; i < cols.length; i++)
+    if (cols[i].style != null && c + 1 >= cols[i].min && c + 1 <= cols[i].max) return cols[i].style;
+  return null;
+}
+
+/** 各行の px 高さ（行の数ぶん） */
+function xlRowHeights(s) {
+  var maxR = Math.max(1, s.maxRow);
+  var out = [];
+  for (var r = 1; r <= maxR; r++) out.push(xlRowPx((s.heights || {})[r] || s.defaultRowHeight));
+  return out;
 }
 
 /** その表を画面に出したときの、横の長さ(px)。A4に収める倍率を決めるのに使う */
 function xlGridWidth(book, si) {
   var s = book && book.sheets[si];
   if (!s) return 1;
-  var maxC = Math.max(1, s.maxCol);
-  var wide = [];
-  for (var i = 0; i < maxC; i++) wide.push(8.43);
-  s.cols.forEach(function (cc) {
-    for (var j = cc.min; j <= Math.min(cc.max, maxC); j++) if (cc.width) wide[j - 1] = cc.width;
-  });
-  return wide.reduce(function (a, w) {
-    return a + xlColPx(w);
+  return xlColWidths(s, xlMdw(book)).reduce(function (a, x) {
+    return a + x;
   }, 0);
 }
 
 /**
  * お店のExcelを、画面に出せる表(HTML)にする。
+ * ★お店の紙に見えることが目的★なので、Excelから読んだ物だけで組み立てる：
+ *   結合・列幅・行の高さ・罫線・太字・字の大きさ・塗り・寄せ・表示形式・貼ってある絵（判子）
  * @param {object} book
  * @param {number} si 何枚目のシートか
  * @param {object} values 上書きして見せたい値 {"B4":"山田商事"}
- * @param {object} opt { pick:true=セルを押せるようにする, cells:割り当て }
+ * @param {object} opt { pick:true=セルを押せるようにする, cells:割り当て, labels:項目名 }
  */
 function xlGridHtml(book, si, values, opt) {
   var T = window.NomiyaXlsxTpl;
@@ -165,6 +209,11 @@ function xlGridHtml(book, si, values, opt) {
   var o = opt || {};
   var val = values || {};
   var st = book.styles;
+  var wide = xlColWidths(s, xlMdw(book));
+  var high = xlRowHeights(s);
+  var maxC = wide.length;
+  var maxR = high.length;
+  var baseSz = (st.font[0] && st.font[0].sz) || 11;
 
   // 結合：親だけ出して、隠れる方は出さない
   var span = {};
@@ -173,14 +222,6 @@ function xlGridHtml(book, si, values, opt) {
     span[T.refOf(m.c1, m.r1)] = { cs: m.c2 - m.c1 + 1, rs: m.r2 - m.r1 + 1 };
     for (var r = m.r1; r <= m.r2; r++)
       for (var c = m.c1; c <= m.c2; c++) if (!(r === m.r1 && c === m.c1)) hide[T.refOf(c, r)] = 1;
-  });
-
-  var maxC = Math.max(1, s.maxCol);
-  var maxR = Math.max(1, s.maxRow);
-  var wide = [];
-  for (var c0 = 0; c0 < maxC; c0++) wide.push(8.43);
-  s.cols.forEach(function (cc) {
-    for (var i = cc.min; i <= Math.min(cc.max, maxC); i++) if (cc.width) wide[i - 1] = cc.width;
   });
 
   // どのセルに何を割り当てたか（画面に印を出す）
@@ -192,11 +233,11 @@ function xlGridHtml(book, si, values, opt) {
 
   var out = ['<table class="xl-grid"><colgroup>'];
   wide.forEach(function (w) {
-    out.push('<col style="width:' + xlColPx(w) + 'px">');
+    out.push('<col style="width:' + w + 'px">');
   });
   out.push("</colgroup><tbody>");
   for (var r = 0; r < maxR; r++) {
-    out.push("<tr>");
+    out.push('<tr style="height:' + high[r] + 'px">');
     for (var c = 0; c < maxC; c++) {
       var ref = T.refOf(c, r);
       if (hide[ref]) continue;
@@ -204,26 +245,37 @@ function xlGridHtml(book, si, values, opt) {
       var text = Object.prototype.hasOwnProperty.call(val, ref)
         ? val[ref]
         : T.cellText(book, s, ref);
-      var xf = cell ? st.xf[+(cell.s || 0)] : null;
+      /* ★書式は セル → 行 → 列 の順に探す★
+         中身の無いマスにも、行や列の書式で色や罫線が付いていることがある
+         （お店の紙の「明細の帯」がまさにこれ。見ないと縞が抜ける） */
+      var sIdx = cell && cell.s != null ? +cell.s : styleAt(s, r, c);
+      var xf = sIdx != null ? st.xf[sIdx] : null;
       var css = [];
       if (xf) {
         var bd = st.border[xf.borderId];
         if (bd) {
-          if (bd.l) css.push("border-left:1px solid #333");
-          if (bd.r) css.push("border-right:1px solid #333");
-          if (bd.t) css.push("border-top:1px solid #333");
-          if (bd.b) css.push("border-bottom:1px solid #333");
+          if (bd.l) css.push("border-left:1px solid #000");
+          if (bd.r) css.push("border-right:1px solid #000");
+          if (bd.t) css.push("border-top:1px solid #000");
+          if (bd.b) css.push("border-bottom:1px solid #000");
         }
         var fn = st.font[xf.fontId];
         if (fn) {
           if (fn.b) css.push("font-weight:700");
-          if (fn.sz && fn.sz !== 11) css.push("font-size:" + Math.round(fn.sz * 1.05) + "px");
+          // pt → px（1pt = 1/72インチ・画面は96dpi）。勘の係数を使わない
+          if (fn.sz && fn.sz !== baseSz)
+            css.push("font-size:" + Math.round(fn.sz * (96 / 72)) + "px");
         }
         var fl = st.fill[xf.fillId];
         if (fl) css.push("background:" + fl);
         if (xf.align === "center") css.push("text-align:center");
         else if (xf.align === "right") css.push("text-align:right");
         else if (!xf.align && cell && !cell.t && cell.v != null) css.push("text-align:right");
+        // ★Excelの既定は下揃え★
+        css.push(
+          "vertical-align:" +
+            (xf.valign === "center" ? "middle" : xf.valign === "top" ? "top" : "bottom")
+        );
       }
       var sp = span[ref];
       out.push(
@@ -244,7 +296,51 @@ function xlGridHtml(book, si, values, opt) {
     out.push("</tr>");
   }
   out.push("</tbody></table>");
-  return out.join("");
+
+  /* ★貼ってある絵（判子・ロゴ）★
+     これが無いと「請求書に見えない」。位置はマスの角からのズレで書いてあるので、
+     ここまでに数えた列幅・行の高さを足して置く。 */
+  var imgs = "";
+  (s.images || []).forEach(function (im) {
+    var left = 0;
+    for (var c2 = 0; c2 < im.col && c2 < wide.length; c2++) left += wide[c2];
+    var top = 0;
+    for (var r2 = 0; r2 < im.row && r2 < high.length; r2++) top += high[r2];
+    left += im.x;
+    top += im.y;
+    var w2 = im.w;
+    var h2 = im.h;
+    if (w2 == null) {
+      // 大きさが書いていなければ、挟んでいる2つのマスから出す
+      var l2 = 0;
+      for (var c3 = 0; c3 < im.toCol && c3 < wide.length; c3++) l2 += wide[c3];
+      var t2 = 0;
+      for (var r3 = 0; r3 < im.toRow && r3 < high.length; r3++) t2 += high[r3];
+      w2 = l2 + im.toColOff / 9525 - left;
+      h2 = t2 + im.toRowOff / 9525 - top;
+    }
+    imgs +=
+      '<img class="xl-img" src="' +
+      esc(im.src) +
+      '" alt="" style="left:' +
+      Math.round(left) +
+      "px;top:" +
+      Math.round(top) +
+      "px;width:" +
+      Math.round(w2) +
+      "px;height:" +
+      Math.round(h2) +
+      'px">';
+  });
+
+  return (
+    '<div class="xl-sheet" style="width:' +
+    xlGridWidth(book, si) +
+    'px">' +
+    out.join("") +
+    imgs +
+    "</div>"
+  );
 }
 
 /** 割り当てる画面（項目を押す → セルを押す） */

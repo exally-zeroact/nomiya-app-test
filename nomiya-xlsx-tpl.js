@@ -273,7 +273,11 @@
     var re = tagRe("si");
     var m;
     while ((m = re.exec(xml))) {
-      var inner = m[2] || "";
+      /* ★ふりがな(<rPh>)は本文ではない★
+         Excel は「請求書」と一緒に「セイキュウショ」を <rPh> に持っている。
+         中の <t> を素直に全部つなぐと ★「請求書セイキュウショ」★ と出る（司さんの実物で出た）。
+         先に <rPh> を丸ごと落としてから、残った <t> をつなぐ。 */
+      var inner = (m[2] || "").replace(/<rPh\b[\s\S]*?<\/rPh>/g, "");
       var t = "";
       var tre = tagRe("t");
       var tm;
@@ -283,8 +287,59 @@
     return out;
   }
 
+  /* ★色は「テーマの色」で書かれていることがある★
+     実物のお店のExcelでは、明細の縞が `<fgColor theme="2"/>` だった。
+     rgb しか見ないと ★縞が出ない★（実際に出なかった）。テーマの色表を読んで解く。
+     Excelのテーマ番号の並びは、theme1.xml の並び(dk1,lt1,dk2,lt2,accent1..6,…)とは違う。 */
+  var THEME_ORDER = [1, 0, 3, 2, 4, 5, 6, 7, 8, 9, 10, 11];
+
+  function readTheme(xml) {
+    if (!xml) return [];
+    var block = /<a:clrScheme\b[\s\S]*?<\/a:clrScheme>/.exec(xml);
+    if (!block) return [];
+    var raw = [];
+    var re = /<a:(?:srgbClr|sysClr)\b[^>]*\/?>/g;
+    var m;
+    while ((m = re.exec(block[0]))) {
+      var v = attr(m[0], "lastClr") || attr(m[0], "val") || "";
+      raw.push(/^[0-9A-Fa-f]{6}$/.test(v) ? "#" + v : "");
+    }
+    return THEME_ORDER.map(function (i) {
+      return raw[i] || "";
+    });
+  }
+
+  /** 明るく/暗くする指定(tint)を当てる */
+  function applyTint(hex, tint) {
+    if (!hex || !tint) return hex;
+    var n = parseInt(hex.slice(1), 16);
+    var ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(function (c) {
+      var v = tint < 0 ? c * (1 + tint) : c + (255 - c) * tint;
+      return Math.max(0, Math.min(255, Math.round(v)));
+    });
+    return (
+      "#" +
+      ch
+        .map(function (c) {
+          return (c < 16 ? "0" : "") + c.toString(16);
+        })
+        .join("")
+    );
+  }
+
+  /** 色の指定タグ（rgb / theme+tint）を "#rrggbb" にする */
+  function colorOf(theme, tag) {
+    var rgb = attr(tag, "rgb");
+    if (rgb && /^[0-9A-Fa-f]{8}$/.test(rgb)) return "#" + rgb.slice(2);
+    if (rgb && /^[0-9A-Fa-f]{6}$/.test(rgb)) return "#" + rgb;
+    var th = attr(tag, "theme");
+    if (th != null && theme && theme[+th])
+      return applyTint(theme[+th], parseFloat(attr(tag, "tint") || "0"));
+    return "";
+  }
+
   /** 見た目に要る所だけ読む（表示形式・罫線・太字・塗り・寄せ） */
-  function readStyles(xml) {
+  function readStyles(xml, theme) {
     var st = { numFmt: {}, xf: [], border: [], font: [], fill: [] };
     if (!xml) return st;
     var m;
@@ -299,6 +354,7 @@
         st.font.push({
           b: /<b\b[^>]*\/?>/.test(inner),
           sz: parseFloat((/<sz\b[^>]*val="([^"]+)"/.exec(inner) || [])[1] || "11"),
+          name: (/<name\b[^>]*val="([^"]*)"/.exec(inner) || [])[1] || "",
         });
       }
     }
@@ -306,8 +362,13 @@
     if (fi) {
       var ire = tagRe("fill");
       while ((m = ire.exec(fi[0]))) {
-        var g = /patternType="solid"[\s\S]*?<fgColor\b[^>]*rgb="([0-9A-Fa-f]{8})"/.exec(m[2] || "");
-        st.fill.push(g ? "#" + g[1].slice(2) : "");
+        var body = m[2] || "";
+        if (!/patternType="solid"/.test(body)) {
+          st.fill.push("");
+          continue;
+        }
+        var fg = /<fgColor\b[^>]*\/?>/.exec(body);
+        st.fill.push(fg ? colorOf(theme, fg[0]) : "");
       }
     }
     var bo = /<borders\b[\s\S]*?<\/borders>/.exec(xml);
@@ -334,6 +395,8 @@
           fillId: +(attr(tag, "fillId") || 0),
           borderId: +(attr(tag, "borderId") || 0),
           align: al ? attr(al[0], "horizontal") : null,
+          // ★Excelの既定は「下揃え」★。真ん中にすると行の高い所で位置が変わる
+          valign: al ? attr(al[0], "vertical") : null,
         });
       }
     }
@@ -389,9 +452,197 @@
         min: +(attr(om[0], "min") || 1),
         max: +(attr(om[0], "max") || 1),
         width: parseFloat(attr(om[0], "width") || "0"),
+        // 列そのものに付いている書式（セルにも行にも書式が無いときの受け皿）
+        style: attr(om[0], "style") != null ? +attr(om[0], "style") : null,
       });
     }
-    return { cells: cells, merges: merges, cols: cols, maxRow: maxRow, maxCol: maxCol };
+    /* ★行の高さ★ 見ないと縦が全部ズレる（お店の紙は行ごとに高さを決めてある）。
+       ht は pt（1pt = 1/72インチ）。画面の px は 96/72 倍。 */
+    var heights = {};
+    /* ★行そのものに付いている書式★
+       お店の紙は「明細の帯」を ★行ごと★ に塗ってあることが多い。
+       セルの s= しか見ないと ★中身の無い行だけ縞が抜ける★（実物で1行おきに抜けた）。 */
+    var rowStyle = {};
+    var hre = /<row\b[^>]*>/g;
+    var hm;
+    while ((hm = hre.exec(xml))) {
+      var rn = +(attr(hm[0], "r") || 0);
+      if (!rn) continue;
+      var ht = parseFloat(attr(hm[0], "ht") || "0");
+      if (ht) heights[rn] = ht;
+      if (attr(hm[0], "customFormat") === "1" && attr(hm[0], "s") != null)
+        rowStyle[rn] = +attr(hm[0], "s");
+    }
+    var fmt = /<sheetFormatPr\b[^>]*\/?>/.exec(xml);
+    var view = /<sheetView\b[^>]*>/.exec(xml);
+    return {
+      cells: cells,
+      merges: merges,
+      cols: cols,
+      maxRow: maxRow,
+      maxCol: maxCol,
+      heights: heights,
+      rowStyle: rowStyle,
+      defaultRowHeight: fmt ? parseFloat(attr(fmt[0], "defaultRowHeight") || "15") : 15,
+      defaultColWidth: fmt ? parseFloat(attr(fmt[0], "defaultColWidth") || "0") || 0 : 0,
+      /* ★Excelの「ゼロ値を表示しない」★ 見ないと、空の明細に 0 が並ぶ（実物で出た） */
+      showZeros: view ? attr(view[0], "showZeros") !== "0" : true,
+    };
+  }
+
+  /* ── 貼ってある絵（判子・ロゴ）────────────────────────────────────
+     ★お店の紙で「これが無いと請求書に見えない」物★。実物は判子が右上に貼ってあった。
+     場所は EMU（1px = 9525EMU）で、どのマスの角から何ぶんズラすかで書いてある。 */
+
+  /** 中の1ファイルを、バイト列のまま取り出す */
+  function bytesOf(zip, name) {
+    var e = null;
+    for (var i = 0; i < zip.entries.length; i++)
+      if (zip.entries[i].name === name) {
+        e = zip.entries[i];
+        break;
+      }
+    if (!e) return Promise.resolve(null);
+    var raw = rawOf(zip, e);
+    if (e.method === 0) return Promise.resolve(raw.slice());
+    if (e.method !== 8) return Promise.resolve(null);
+    return inflate(raw);
+  }
+
+  var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  /** バイト列 → base64（端末の道具に頼らない。古い端末でも同じに動く） */
+  function toBase64(u8) {
+    var s = "";
+    var i;
+    for (i = 0; i + 2 < u8.length; i += 3) {
+      var n = (u8[i] << 16) | (u8[i + 1] << 8) | u8[i + 2];
+      s += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + B64[(n >> 6) & 63] + B64[n & 63];
+    }
+    var rest = u8.length - i;
+    if (rest === 1) {
+      var a = u8[i] << 16;
+      s += B64[(a >> 18) & 63] + B64[(a >> 12) & 63] + "==";
+    } else if (rest === 2) {
+      var b = (u8[i] << 16) | (u8[i + 1] << 8);
+      s += B64[(b >> 18) & 63] + B64[(b >> 12) & 63] + B64[(b >> 6) & 63] + "=";
+    }
+    return s;
+  }
+
+  var EMU = 9525; // 1px
+
+  /** そのシートに貼ってある絵を、位置つきで返す */
+  function readImages(zip, sheet) {
+    var rid = attr(/<drawing\b[^>]*\/>/.exec(sheet.xml) || [""], "r:id");
+    if (!rid) return Promise.resolve([]);
+    var dir = sheet.path.replace(/\/[^/]+$/, "");
+    var base = sheet.path.replace(/^.*\//, "");
+    return textOf(zip, dir + "/_rels/" + base + ".rels")
+      .then(function (rels) {
+        var target = null;
+        var re = /<Relationship\b[^>]*\/>/g;
+        var m;
+        while ((m = re.exec(rels || ""))) {
+          if (attr(m[0], "Id") === rid) target = attr(m[0], "Target");
+        }
+        if (!target) return [];
+        var dpath = norm(dir + "/" + target);
+        return textOf(zip, dpath).then(function (dxml) {
+          if (!dxml) return [];
+          var ddir = dpath.replace(/\/[^/]+$/, "");
+          var dbase = dpath.replace(/^.*\//, "");
+          return textOf(zip, ddir + "/_rels/" + dbase + ".rels").then(function (drels) {
+            var media = {};
+            var rre = /<Relationship\b[^>]*\/>/g;
+            var rm;
+            while ((rm = rre.exec(drels || "")))
+              media[attr(rm[0], "Id")] = norm(ddir + "/" + attr(rm[0], "Target"));
+            return placeImages(zip, dxml, media);
+          });
+        });
+      })
+      .catch(function () {
+        return []; // 絵が読めなくても、紙の中身は出す
+      });
+  }
+
+  /** "xl/drawings/../media/a.png" → "xl/media/a.png" */
+  function norm(p) {
+    var out = [];
+    String(p)
+      .split("/")
+      .forEach(function (x) {
+        if (x === "..") out.pop();
+        else if (x && x !== ".") out.push(x);
+      });
+    return out.join("/");
+  }
+
+  function placeImages(zip, dxml, media) {
+    var list = [];
+    var re = /<xdr:(oneCellAnchor|twoCellAnchor)\b[\s\S]*?<\/xdr:\1>/g;
+    var m;
+    while ((m = re.exec(dxml))) {
+      var a = m[0];
+      var pick = function (tag, from) {
+        var block = new RegExp("<xdr:" + from + ">([\\s\\S]*?)</xdr:" + from + ">").exec(a);
+        if (!block) return 0;
+        var v = new RegExp("<xdr:" + tag + ">(-?\\d+)</xdr:" + tag + ">").exec(block[1]);
+        return v ? +v[1] : 0;
+      };
+      var rid = attr(/<a:blip\b[^>]*\/?>/.exec(a) || [""], "r:embed");
+      if (!rid || !media[rid]) continue;
+      var item = {
+        file: media[rid],
+        col: pick("col", "from"),
+        colOff: pick("colOff", "from"),
+        row: pick("row", "from"),
+        rowOff: pick("rowOff", "from"),
+        toCol: pick("col", "to"),
+        toColOff: pick("colOff", "to"),
+        toRow: pick("row", "to"),
+        toRowOff: pick("rowOff", "to"),
+      };
+      /* 大きさは、書いてある所を上から順に探す。
+         ★Excelは「1マスに貼る形(oneCellAnchor)」では <xdr:ext>、
+           「2マスで挟む形(twoCellAnchor)」では <a:ext> に書く★
+         （挟む形で <a:ext> を見ないと、大きさが決まらず絵が出ない） */
+      var ext =
+        /<xdr:ext\b[^>]*cx="(\d+)"[^>]*cy="(\d+)"/.exec(a) ||
+        /<a:ext\b[^>]*cx="(\d+)"[^>]*cy="(\d+)"/.exec(a);
+      if (ext) {
+        item.w = +ext[1] / EMU;
+        item.h = +ext[2] / EMU;
+      }
+      /* Excel自身が計算した「紙の左上からの位置」。あればこれが一番正しい */
+      var off = /<a:off\b[^>]*x="(-?\d+)"[^>]*y="(-?\d+)"/.exec(a);
+      if (off) {
+        item.absX = +off[1] / EMU;
+        item.absY = +off[2] / EMU;
+      }
+      item.x = item.colOff / EMU;
+      item.y = item.rowOff / EMU;
+      list.push(item);
+    }
+    // 絵の中身（data URL）を順に読む
+    var i = 0;
+    var next = function () {
+      if (i >= list.length) return Promise.resolve(list);
+      var it = list[i++];
+      return bytesOf(zip, it.file).then(function (u8) {
+        if (u8) {
+          var ext = ((it.file.match(/\.(\w+)$/) || [])[1] || "png").toLowerCase();
+          var mime = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/" + ext;
+          it.src = "data:" + mime + ";base64," + toBase64(u8);
+        }
+        return next();
+      });
+    };
+    return next().then(function () {
+      return list.filter(function (x) {
+        return x.src;
+      });
+    });
   }
 
   /**
@@ -430,10 +681,14 @@
       })
       .then(function (ss) {
         book.shared = readShared(ss);
+        return textOf(zip, "xl/theme/theme1.xml");
+      })
+      .then(function (th) {
+        book.theme = readTheme(th);
         return textOf(zip, "xl/styles.xml");
       })
       .then(function (sty) {
-        book.styles = readStyles(sty);
+        book.styles = readStyles(sty, book.theme);
         // シートは順番に読む（同時に走らせても速くならず、順番が崩れる）
         var i = 0;
         var next = function () {
@@ -447,7 +702,15 @@
             s.cols = d.cols;
             s.maxRow = d.maxRow;
             s.maxCol = d.maxCol;
-            return next();
+            s.heights = d.heights;
+            s.rowStyle = d.rowStyle;
+            s.defaultRowHeight = d.defaultRowHeight;
+            s.defaultColWidth = d.defaultColWidth;
+            s.showZeros = d.showZeros;
+            return readImages(zip, s).then(function (imgs) {
+              s.images = imgs;
+              return next();
+            });
           });
         };
         return next();
@@ -496,6 +759,157 @@
     return !!code && /[ymd]/.test(code.replace(/\[[^\]]*\]/g, "").replace(/"[^"]*"/g, ""));
   }
 
+  /* ── 表示形式（Excelの「セルの書式設定」）を、見えている形に直す ──────────
+     ★数字をそのまま出すと、お店の紙と違う物が出る★
+       実物で出た例: 30909.090909… を素で出すと「30,909.09」。
+       Excelの表示形式は `#,##0_ ` なので ★30,909★ が正しい。
+       日付も 46235 のままでは駄目で、`yyyy/m/d` なら ★2026/8/1★。
+     ここは「見せる」ためだけの物。ファイルに書く値は触らない。 */
+
+  /** 組み込みの表示形式（よく使う物だけ。Excelが番号だけで持っている分） */
+  var BUILTIN_FMT = {
+    0: "General",
+    1: "0",
+    2: "0.00",
+    3: "#,##0",
+    4: "#,##0.00",
+    9: "0%",
+    10: "0.00%",
+    11: "0.00E+00",
+    /* ★14番と22番は「その国の短い日付」＝国によって見え方が変わる★
+       日本のExcelで実測すると 46243 → ★2026/8/9★（2026-08-09・COMで表示を読んだ）。
+       米国式の m/d/yyyy にすると「8/9/2026」と出る＝お店の紙と違う物が出る。 */
+    14: "yyyy/m/d",
+    15: "d-mmm-yy",
+    16: "d-mmm",
+    17: "mmm-yy",
+    18: "h:mm AM/PM",
+    19: "h:mm:ss AM/PM",
+    20: "h:mm",
+    21: "h:mm:ss",
+    22: "yyyy/m/d h:mm",
+    37: "#,##0;(#,##0)",
+    38: "#,##0;[Red](#,##0)",
+    39: "#,##0.00;(#,##0.00)",
+    40: "#,##0.00;[Red](#,##0.00)",
+    45: "mm:ss",
+    46: "[h]:mm:ss",
+    47: "mm:ss.0",
+    48: "##0.0E+0",
+    49: "@",
+  };
+
+  /** そのセルの表示形式の文字列（無ければ "General"） */
+  function formatOf(book, s) {
+    var xf = book.styles.xf[+(s || 0)];
+    if (!xf) return "General";
+    return book.styles.numFmt[xf.numFmtId] || BUILTIN_FMT[+xf.numFmtId] || "General";
+  }
+
+  /** 色や条件の指定([Red]など)と、飾りだけの指定(_x や *x)を落とす */
+  function stripDeco(sec) {
+    return String(sec)
+      .replace(/\[[^\]]*\]/g, "")
+      .replace(/_./g, "") // _ の次の1文字ぶんの空きを取る指定
+      .replace(/\*./g, "");
+  }
+
+  /** 表示形式が日付かどうか（引用符の中と [] は数えない） */
+  function isDateCode(code) {
+    var s = String(code)
+      .replace(/\[[^\]]*\]/g, "")
+      .replace(/"[^"]*"/g, "")
+      .replace(/\\./g, "");
+    return /[ymdhs]/i.test(s) && !/[#0?]/.test(s.replace(/[ymdhs]/gi, ""));
+  }
+
+  function comma(intStr) {
+    return intStr.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  /* 組み立ての途中で使う目印。表示形式の中に出てこない字を選んである */
+  var LIT = String.fromCharCode(1);
+  var NUM = String.fromCharCode(2);
+
+  /** 数を、その表示形式のとおりに文字にする */
+  /** 数を、その表示形式のとおりに文字にする */
+  function fmtNumber(n, code) {
+    if (!code || code === "General") {
+      // Excelの「標準」は、桁区切りを付けない
+      return String(Math.round(n * 1e10) / 1e10);
+    }
+    // 正 ; 負 ; ゼロ ; 文字 の順。無い所は正の形を使う
+    var parts = code.split(";");
+    var sec = n < 0 && parts[1] ? parts[1] : n === 0 && parts[2] ? parts[2] : parts[0];
+    var isPct = /%/.test(stripDeco(sec));
+    var v = Math.abs(n) * (isPct ? 100 : 1);
+    var body = stripDeco(sec);
+    // 飾り文字（"¥" や \- など）は、いったん目印に置き換えて、最後に元の場所へ戻す
+    var lit = [];
+    body = body.replace(/"([^"]*)"/g, function (_, x) {
+      lit.push(x);
+      return LIT;
+    });
+    body = body.replace(/\\(.)/g, function (_, x) {
+      lit.push(x);
+      return LIT;
+    });
+    var numPart = (body.match(/[#0,.?]+/) || [""])[0];
+    var dot = numPart.indexOf(".");
+    var dec = dot < 0 ? 0 : (numPart.slice(dot + 1).match(/[0#?]/g) || []).length;
+    var useComma = /,/.test(numPart.split(".")[0]);
+    var fixed = v.toFixed(dec);
+    var ip = fixed.split(".")[0];
+    var fp = fixed.split(".")[1] || "";
+    var num = (useComma ? comma(ip) : ip) + (dec ? "." + fp : "");
+    var i = 0;
+    var shown = body
+      .replace(/[#0,.?]+/, NUM)
+      .split(LIT)
+      .reduce(function (acc, piece, k) {
+        return k === 0 ? piece : acc + lit[i++] + piece;
+      }, "");
+    var minus = n < 0 && !parts[1] ? "-" : "";
+    return minus + shown.replace(NUM, num);
+  }
+
+  /** 通し番号を、その表示形式のとおりの日付にする */
+  function fmtDate(n, code) {
+    var ymd = fromSerial(n);
+    if (!ymd) return "";
+    var y = +ymd.slice(0, 4);
+    var mo = +ymd.slice(5, 7);
+    var d = +ymd.slice(8, 10);
+    var body = stripDeco(String(code).split(";")[0]);
+    var lit = [];
+    body = body.replace(/"([^"]*)"/g, function (_, x) {
+      lit.push(x);
+      return LIT;
+    });
+    body = body.replace(/\\(.)/g, function (_, x) {
+      lit.push(x);
+      return LIT;
+    });
+    var p2 = function (x) {
+      return (x < 10 ? "0" : "") + x;
+    };
+    // 長い物から先に置き換える（mm を先に m で潰さない）
+    var out = body
+      .replace(/yyyy/gi, String(y))
+      .replace(/yy/gi, String(y).slice(2))
+      .replace(/mmmm|mmm/gi, String(mo))
+      .replace(/dddd|ddd/gi, String(d))
+      .replace(/mm/g, p2(mo))
+      .replace(/dd/g, p2(d))
+      .replace(/m/g, String(mo))
+      .replace(/d/g, String(d))
+      .replace(/[hs:]/gi, "")
+      .replace(/@/g, "");
+    var i = 0;
+    return out.split(LIT).reduce(function (acc, piece, k) {
+      return k === 0 ? piece : acc + lit[i++] + piece;
+    }, "");
+  }
   /** 画面に出す文字（数式セルはExcelが覚えている結果を出す） */
   function cellText(book, sheet, ref) {
     var c = sheet.cells[ref];
@@ -508,19 +922,12 @@
     if (c.t === "str") return c.v;
     var n = parseFloat(c.v);
     if (isNaN(n)) return c.v;
-    if (isDateStyle(book, c.s)) return fromSerial(n);
-    var xf = book.styles.xf[+(c.s || 0)];
-    var code = xf ? book.styles.numFmt[xf.numFmtId] || "" : "";
-    if (/#,##|¥|\\/.test(code) || Math.abs(n) >= 1000) {
-      var neg = n < 0;
-      var a = Math.abs(n);
-      var i = Math.floor(a);
-      var f = a - i;
-      var s = String(i).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-      if (f > 0) s += String(Math.round(f * 100) / 100).slice(1);
-      return (neg ? "-" : "") + s;
-    }
-    return String(n);
+    /* ★Excelの「ゼロ値を表示しない」を守る★
+       これを見ないと、お店の紙で空いているはずの明細に ★0 が20個並ぶ★（実物で出た）。 */
+    if (n === 0 && sheet.showZeros === false) return "";
+    var code = formatOf(book, c.s);
+    if (isDateCode(code)) return fmtDate(n, code);
+    return fmtNumber(n, code);
   }
 
   /* ── 値を差し込む ──────────────────────────────────────────────── */
@@ -727,5 +1134,11 @@
     _readShared: readShared,
     _readStyles: readStyles,
     _readSheet: readSheet,
+    formatOf: formatOf,
+    fmtNumber: fmtNumber,
+    fmtDate: fmtDate,
+    isDateCode: isDateCode,
+    _bytesOf: bytesOf,
+    _toBase64: toBase64,
   };
 });

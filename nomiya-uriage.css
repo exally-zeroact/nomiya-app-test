@@ -1281,6 +1281,10 @@ body {
 /* ===== お店のテンプレが Excel のとき =====
    画面には「そのExcelの見た目」を表で出す。
    罫線・結合・列幅・太字・塗りは、Excelの中から読んだ物をそのまま当てている。 */
+.xl-wrap .xl-grid td {
+  outline: 1px dotted var(--c-line); /* 割り当ての画面だけ、マスの境が分かるように薄い目盛線 */
+  outline-offset: -1px;
+}
 .xl-wrap {
   margin-top: 10px;
   max-height: 46vh;
@@ -1289,6 +1293,15 @@ body {
   border-radius: 8px;
   background: var(--c-card);
   -webkit-overflow-scrolling: touch;
+}
+/* 表そのもの（Excelの見た目を、読んだ値だけで組み立てる） */
+.xl-sheet {
+  position: relative;
+}
+/* 貼ってある絵（判子・ロゴ）。表の上に、Excelと同じ場所へ重ねる */
+.xl-img {
+  position: absolute;
+  pointer-events: none;
 }
 .xl-grid {
   border-collapse: collapse;
@@ -1301,7 +1314,7 @@ body {
 .xl-grid td {
   height: 20px;
   padding: 1px 4px;
-  border: 1px dotted var(--c-line); /* Excelの目盛線。実際の罫線は上から重ねて描く */
+  border: 0; /* 罫線はExcelから読んだ物だけを付ける（勝手な線を足さない） */
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;

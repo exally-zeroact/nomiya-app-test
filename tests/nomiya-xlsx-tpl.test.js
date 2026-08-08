@@ -110,7 +110,8 @@ describe("値を差し込む", () => {
     const s = back.sheets[0];
     expect(T.cellText(back, s, "B4")).toBe("山田商事");
     expect(T.cellText(back, s, "C10")).toBe("ご飲食代");
-    expect(T.cellText(back, s, "E10")).toBe("44,000");
+    // ★E10には表示形式が付いていない＝本物のExcelでも「44000」と出る（COMで確認）★
+    expect(T.cellText(back, s, "E10")).toBe("44000");
     expect(T.cellText(back, s, "E33")).toBe("132,000");
     // 触っていない所
     expect(T.cellText(back, s, "A1")).toBe("御 請 求 書");
@@ -173,7 +174,8 @@ describe("値を差し込む", () => {
     const back = await T.open(out.bytes);
     const s = back.sheets[0];
     expect(s.cells.E3.v, "日付のセルに通し番号が入っていない").toBe("46243");
-    expect(T.cellText(back, s, "E3")).toBe("2026-08-09");
+    // ★14番の書式は「その国の短い日付」。日本のExcelは 2026/8/9 と出す（実測）★
+    expect(T.cellText(back, s, "E3")).toBe("2026/8/9");
     // 飾りの無いセルに通し番号を入れると「46235」と出てしまうので、文字で入れる
     expect(s.cells.A10.t, "飾りの無いセルに通し番号を入れている").toBe("inlineStr");
     expect(T.cellText(back, s, "A10")).toBe("8/1");
@@ -226,6 +228,146 @@ describe("読めないファイルは、分かる言葉で断る", () => {
     expectNoneOf(msgs, (m) => /EOCD|ZIP|undefined|null|Cannot|TypeError/.test(m), "断り文句", {
       min: 2,
     });
+  });
+});
+
+/* ★本物のExcelが出す文字と、1マスずつ突き合わせる★
+   ------------------------------------------------------------------------------
+   司さんの実物（飲み屋(ZEROact.xlsx）を読ませたら、画面が別物になった（2026-08-09）:
+     ・「請求書セイキュウショ」… ★ふりがな(rPh)を本文に混ぜていた★
+     ・「30,909.09」          … ★表示形式(#,##0_)を当てていなかった★
+     ・空の明細に「0」が並ぶ  … ★ゼロを表示しない設定を見ていなかった★
+     ・日付が「2026-08-01」   … ★yyyy/m/d を当てていなかった★
+   実物はrepoに入れられない（会社の住所・口座・判子が入っている）ので、
+   ★同じ罠を持つ見本を本物のExcelで作り直し★、その表示を excel-truth.json に記録した。
+   ★実物では 50/50 マス一致まで確認済み★ */
+describe("本物のExcelと、1マスずつ突き合わせる", () => {
+  const TRUTH = JSON.parse(
+    fs.readFileSync(path.join(ROOT, "tests/e2e/fixtures/excel-truth.json"), "utf8")
+  );
+  const openFix = (name) =>
+    T.open(new Uint8Array(fs.readFileSync(path.join(ROOT, "tests/e2e/fixtures/" + name))));
+
+  it("★記録そのものが空でない（空なら、この確認は何も見ていない）★", () => {
+    expect(Object.keys(TRUTH).sort()).toEqual(["tpl-invoice.xlsx", "tpl-real-like.xlsx"]);
+    Object.keys(TRUTH).forEach((n) => {
+      expect(Object.keys(TRUTH[n].cells).length, n + " の記録が空").toBeGreaterThanOrEqual(15);
+    });
+  });
+
+  for (const name of ["tpl-invoice.xlsx", "tpl-real-like.xlsx"]) {
+    it(name + "：出す文字が、本物のExcelと同じ", async () => {
+      const book = await openFix(name);
+      const s = book.sheets[0];
+      const truth = TRUTH[name].cells;
+      const ng = [];
+      Object.keys(truth).forEach((ref) => {
+        const got = T.cellText(book, s, ref);
+        if (got.trim() !== String(truth[ref]).trim())
+          ng.push(ref + ": Excel=[" + truth[ref] + "] こちら=[" + got + "]");
+      });
+      expect(ng, ng.join(" / ")).toEqual([]);
+    });
+  }
+
+  it("★ふりがなを本文に混ぜない（請求書セイキュウショ にしない）★", async () => {
+    const bytes2 = new Uint8Array(
+      fs.readFileSync(path.join(ROOT, "tests/e2e/fixtures/tpl-real-like.xlsx"))
+    );
+    const ss = await T._textOf(T._readZip(bytes2), "xl/sharedStrings.xml");
+    expect(
+      (ss.match(/<rPh\b/g) || []).length,
+      "★見本にふりがなが入っていない＝この確認は何も見ていない★"
+    ).toBeGreaterThanOrEqual(3);
+    /* ★「読みが混ざっているか」は、読みの字面で探しても分からない★
+       読みが本文の一部と同じことがある（エスプリ／エアコン）。実際に誤検知した。
+       そこで ★「中の <t> を全部つないだ物（＝混ざった姿）」と突き合わせる★。
+       ふりがなを落としていれば、必ず違う物になる。 */
+    const sis = [...ss.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)].map((m) => m[1]);
+    const naive = sis.map((x) =>
+      [...x.matchAll(/<t[^>]*>([^<]*)<\/t>/g)].map((y) => y[1]).join("")
+    );
+    const withRuby = sis.map((x, i) => (/<rPh\b/.test(x) ? i : -1)).filter((i) => i >= 0);
+    expect(
+      withRuby.length,
+      "★見本にふりがな付きの文字が無い＝この確認は何も見ていない★"
+    ).toBeGreaterThanOrEqual(3);
+    const book = await T.open(bytes2);
+    expectNoneOf(withRuby, (i) => book.shared[i] === naive[i], "ふりがなが混ざったままの文字", {
+      min: 3,
+    });
+    expect(T.cellText(book, book.sheets[0], "A1")).toBe("請求書");
+  });
+
+  it("★ゼロを表示しない設定を守る（空の明細に 0 を並べない）★", async () => {
+    const book = await openFix("tpl-real-like.xlsx");
+    const s = book.sheets[0];
+    expect(s.showZeros, "★見本が「ゼロを表示しない」になっていない＝この確認は無効★").toBe(false);
+    /* ★見本に「値が0のマス」が本当にあること★
+       これが無いと、ただの空のマスを見て「0を出していない」と言っているだけになる
+       （2026-08-09、実際にそうなっていた。壊しても赤にならず気づいた）。
+       本物のExcelで .Value2=0 かつ .Text="" を確かめて excel-truth.json に記録してある。 */
+    const zeros = TRUTH["tpl-real-like.xlsx"].zeroCells || [];
+    expect(
+      zeros.length,
+      "★見本に 値が0のマス が無い＝この確認は何も見ていない★"
+    ).toBeGreaterThanOrEqual(3);
+    zeros.forEach((z) => {
+      expect(s.cells[z.ref], z.ref + " のマスが無い").toBeTruthy();
+      expect(s.cells[z.ref].v, z.ref + " の値が0でない").toBe("0");
+      expect(T.cellText(book, s, z.ref), z.ref + " に 0 を出している").toBe(z.text);
+    });
+  });
+
+  it("★テーマ色の塗り・行そのものの書式を読む（縞が消えない）★", async () => {
+    const book = await openFix("tpl-real-like.xlsx");
+    const s = book.sheets[0];
+    expect(book.theme.length, "テーマの色表が読めていない").toBeGreaterThanOrEqual(10);
+    const filled = book.styles.fill.filter((x) => x);
+    expect(
+      filled.length,
+      "★塗りが1つも読めていない（テーマ色を解けていない）★"
+    ).toBeGreaterThanOrEqual(1);
+    expect(filled[0]).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(Object.keys(s.rowStyle).length, "行そのものの書式が読めていない").toBeGreaterThanOrEqual(
+      1
+    );
+  });
+
+  it("★貼ってある絵（判子）を、大きさごと読む★", async () => {
+    const book = await openFix("tpl-real-like.xlsx");
+    const im = (book.sheets[0].images || [])[0];
+    expect(im, "★絵が1枚も読めていない★").toBeTruthy();
+    expect(im.src.slice(0, 15)).toBe("data:image/png;");
+    const want = TRUTH["tpl-real-like.xlsx"].shape;
+    expect(
+      Math.abs(Math.round(im.w) - want.w),
+      "絵の幅 Excel=" + want.w + " こちら=" + Math.round(im.w)
+    ).toBeLessThanOrEqual(2);
+    expect(
+      Math.abs(Math.round(im.h) - want.h),
+      "絵の高さ Excel=" + want.h + " こちら=" + Math.round(im.h)
+    ).toBeLessThanOrEqual(2);
+  });
+
+  /* ★列幅の換算がズレると、判子や合計欄が横へ寄る（実物で59pxズレた）★ */
+  it("★列の幅の換算が、本物のExcelと合っている★", async () => {
+    const book = await openFix("tpl-real-like.xlsx");
+    const s = book.sheets[0];
+    const mdw = 8; // 游ゴシック11の1文字ぶん（実測）
+    const px = (w) => Math.trunc(((256 * w + Math.trunc(128 / mdw)) / 256) * mdw);
+    const wide = new Array(9).fill(0);
+    s.cols.forEach((cc) => {
+      for (let j = cc.min; j <= Math.min(cc.max, 9); j++) if (cc.width) wide[j - 1] = cc.width;
+    });
+    const want = TRUTH["tpl-real-like.xlsx"].colPx;
+    const ng = [];
+    "ABCDEFGHI".split("").forEach((L, i) => {
+      const got = px(wide[i]);
+      if (Math.abs(got - want[L]) > 1)
+        ng.push(L + "列: Excel=" + want[L] + "px こちら=" + got + "px");
+    });
+    expect(ng, ng.join(" / ")).toEqual([]);
   });
 });
 

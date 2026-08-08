@@ -1180,8 +1180,10 @@ var SHEET_CSS = [
   ".iv-xl{padding:20px;overflow:hidden;}",
   ".xl-fit{transform-origin:top left;}",
   ".xl-grid{border-collapse:collapse;table-layout:fixed;font-size:12px;color:#000000;}",
-  ".xl-grid td{height:20px;padding:1px 4px;overflow:hidden;white-space:nowrap;",
-  "text-overflow:ellipsis;vertical-align:middle;}",
+  ".xl-grid td{padding:1px 3px;overflow:hidden;white-space:nowrap;",
+  "text-overflow:ellipsis;vertical-align:bottom;}",
+  ".xl-sheet{position:relative;}",
+  ".xl-img{position:absolute;}",
   /* 共通部品 */
   // 請求日とNo.は右端を揃える（行ごとに文字数が違うので右揃えが必要）
   ".iv-meta{font-size:10.5px;line-height:1.9;color:#6a655e;text-align:right;}",
