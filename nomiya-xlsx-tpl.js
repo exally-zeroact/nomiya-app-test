@@ -485,6 +485,13 @@
     }
     var fmt = /<sheetFormatPr\b[^>]*\/?>/.exec(xml);
     var view = /<sheetView\b[^>]*>/.exec(xml);
+    /* ★紙の余白★ Excelが持っている値（インチ）をそのまま使う。
+       ここを勝手な値にすると ★両端が詰まりすぎて別の紙に見える★（司さんの指摘 2026-08-09）。 */
+    var pm = /<pageMargins\b[^>]*\/?>/.exec(xml);
+    var mg = function (k, d) {
+      var v = pm ? parseFloat(attr(pm[0], k) || "") : NaN;
+      return isNaN(v) ? d : v;
+    };
     return {
       cells: cells,
       merges: merges,
@@ -497,6 +504,13 @@
       defaultColWidth: fmt ? parseFloat(attr(fmt[0], "defaultColWidth") || "0") || 0 : 0,
       /* ★Excelの「ゼロ値を表示しない」★ 見ないと、空の明細に 0 が並ぶ（実物で出た） */
       showZeros: view ? attr(view[0], "showZeros") !== "0" : true,
+      // 余白（インチ）。既定は Excel の標準
+      margins: {
+        left: mg("left", 0.7),
+        right: mg("right", 0.7),
+        top: mg("top", 0.75),
+        bottom: mg("bottom", 0.75),
+      },
     };
   }
 
@@ -557,8 +571,10 @@
         }
         if (!target) return [];
         var dpath = norm(dir + "/" + target);
+        sheet.drawingPath = dpath; // 判子などを動かすときに、ここを書き換える
         return textOf(zip, dpath).then(function (dxml) {
           if (!dxml) return [];
+          sheet.drawingXml = dxml;
           var ddir = dpath.replace(/\/[^/]+$/, "");
           var dbase = dpath.replace(/^.*\//, "");
           return textOf(zip, ddir + "/_rels/" + dbase + ".rels").then(function (drels) {
@@ -722,6 +738,7 @@
             s.defaultRowHeight = d.defaultRowHeight;
             s.defaultColWidth = d.defaultColWidth;
             s.showZeros = d.showZeros;
+            s.margins = d.margins;
             return readImages(zip, s).then(function (imgs) {
               s.images = imgs;
               return next();
@@ -1166,6 +1183,84 @@
   }
 
   /** workbook.xml に「開いたら全部計算し直す」印を立てる */
+  /* ★貼ってある絵（判子）を動かす★
+     お店の紙の判子は、Excelの中に「どのマスの角から何ぶんズラすか」で書いてある。
+     ここを書き換えれば ★お店のExcelの中の判子そのものが動く★（別の絵を重ねない）。
+     動かすのは ★お店が動かしたいと言ったときだけ★。何も言われなければ1バイトも触らない。 */
+
+  /** 紙の左からの px を、「何列目の、そこから何EMUずれた所か」に直す */
+  function toAnchor(px, sizes) {
+    var i = 0;
+    var acc = 0;
+    while (i < sizes.length - 1 && acc + sizes[i] <= px) {
+      acc += sizes[i];
+      i++;
+    }
+    return { idx: i, off: Math.max(0, Math.round((px - acc) * EMU)) };
+  }
+  /** 「何列目＋ずれ」を、紙の左からの px に戻す */
+  function fromAnchor(idx, off, sizes) {
+    var acc = 0;
+    for (var i = 0; i < idx && i < sizes.length; i++) acc += sizes[i];
+    return acc + off / EMU;
+  }
+
+  /**
+   * ★ズレ(colOff/rowOff)にそのまま足してはいけない★
+   *   Excelは「そのマスの中でのズレ」として持っているので、行の高さより大きいズレを入れると
+   *   ★Excelが勝手に丸めて、狙った所に行かない★
+   *   （実測 2026-08-09：縦に25px動かしたつもりが 8px しか動かなかった）。
+   *   だから ★紙の左上からの px を出して、そこから 行・列・ズレ を計算し直す★。
+   * @param {number[]} cols 各列の幅(px) / @param {number[]} rows 各行の高さ(px)
+   */
+  function moveImages(dxml, shifts, cols, rows) {
+    var n = -1;
+    return String(dxml).replace(
+      /<xdr:(oneCellAnchor|twoCellAnchor)\b[\s\S]*?<\/xdr:\1>/g,
+      function (block) {
+        n++;
+        var sh = shifts[n];
+        if (!sh || (!sh.dx && !sh.dy)) return block;
+        var out = block;
+        ["from", "to"].forEach(function (name) {
+          var b = new RegExp("<xdr:" + name + ">([\\s\\S]*?)</xdr:" + name + ">").exec(block);
+          if (!b) return;
+          var g = function (tag) {
+            var v = new RegExp("<xdr:" + tag + ">(-?\\d+)</xdr:" + tag + ">").exec(b[1]);
+            return v ? +v[1] : 0;
+          };
+          var x = fromAnchor(g("col"), g("colOff"), cols) + sh.dx;
+          var y = fromAnchor(g("row"), g("rowOff"), rows) + sh.dy;
+          var cx = toAnchor(Math.max(0, x), cols);
+          var cy = toAnchor(Math.max(0, y), rows);
+          out = out.replace(
+            b[0],
+            "<xdr:" +
+              name +
+              "><xdr:col>" +
+              cx.idx +
+              "</xdr:col><xdr:colOff>" +
+              cx.off +
+              "</xdr:colOff><xdr:row>" +
+              cy.idx +
+              "</xdr:row><xdr:rowOff>" +
+              cy.off +
+              "</xdr:rowOff></xdr:" +
+              name +
+              ">"
+          );
+        });
+        // Excelが覚えている「紙の左上からの位置」も合わせる
+        out = out.replace(/<a:off\b([^>]*)\/>/, function (all, at2) {
+          var x2 = +(attr("<a:off" + at2 + ">", "x") || 0) + Math.round(sh.dx * EMU);
+          var y2 = +(attr("<a:off" + at2 + ">", "y") || 0) + Math.round(sh.dy * EMU);
+          return '<a:off x="' + Math.max(0, x2) + '" y="' + Math.max(0, y2) + '"/>';
+        });
+        return out;
+      }
+    );
+  }
+
   function withFullCalc(xml) {
     if (/<calcPr\b/.test(xml)) {
       return xml.replace(/<calcPr\b([^>]*?)\s*\/?>/, function (all, a) {
@@ -1183,7 +1278,10 @@
    * @param {Array} edits [{ref, kind:"text"|"number"|"date", value}]
    * @returns {{bytes:Uint8Array, skipped:string[], wrote:number}}
    */
-  function fill(book, sheetIndex, edits) {
+  /**
+   * @param {object} opt { imageShift: [{dx,dy}] 判子などを動かす量(px) }
+   */
+  function fill(book, sheetIndex, edits, opt) {
     var s = book.sheets[sheetIndex];
     if (!s) throw new Error("そのシートがありません");
     /* ★日付は「日付として飾られているセル」にだけ通し番号で入れる★
@@ -1203,6 +1301,21 @@
        こちらが元の値だけ入れ替えると、その書き置きは嘘になる（合計が0のまま出る＝実際に踏んだ）。
        ★開いたとき全部計算し直す★という印を立てておく。 */
     if (book.workbookXml) rep["xl/workbook.xml"] = withFullCalc(book.workbookXml);
+    /* ★判子などを動かす（言われたときだけ）★ */
+    var shifts = (opt && opt.imageShift) || null;
+    if (
+      shifts &&
+      s.drawingXml &&
+      shifts.some(function (x) {
+        return x && (x.dx || x.dy);
+      })
+    )
+      rep[s.drawingPath] = moveImages(
+        s.drawingXml,
+        shifts,
+        (opt && opt.colPx) || [],
+        (opt && opt.rowPx) || []
+      );
     /* ★計算式を消したら「計算の順番表」も外す★
        Excel は「どのマスに式があるか」を xl/calcChain.xml に別に持っている。
        式を消したのに、そこに名前が残っていると ★Excelが『壊れている』と言って開けない★
@@ -1242,6 +1355,7 @@
     fromSerial: fromSerial,
     _readZip: readZip,
     _shiftFormula: shiftFormula,
+    _moveImages: moveImages,
     _expandShared: expandShared,
     _rawOf: rawOf,
     _rebuild: rebuild,

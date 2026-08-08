@@ -419,6 +419,81 @@ describe("本物のExcelと、1マスずつ突き合わせる", () => {
     expect(T._shiftFormula("A1", -5, 0), "紙の外へ出たら #REF!").toBe("#REF!");
   });
 
+  /* ★判子（貼ってある絵）を動かす★
+     司さん「これはハンコの位置変えれるんやろが？」(2026-08-09)。
+     ★ズレ(colOff/rowOff)にそのまま足すと駄目★＝Excelは「そのマスの中でのズレ」として持つので、
+     行の高さより大きい値を入れると勝手に丸められる
+     （実測：縦に25px動かしたつもりが ★8pxしか動かなかった★）。
+     紙の左上からの px を出して、行・列・ズレを計算し直すこと。 */
+  it("★判子を、頼んだぶんきっかり動かす★", async () => {
+    const book = await openFix("tpl-real-like.xlsx");
+    const s = book.sheets[0];
+    const im0 = (s.images || [])[0];
+    expect(im0, "★見本に絵が無い＝この確認は何も見ていない★").toBeTruthy();
+
+    const px = (w) => Math.trunc(((256 * (w || 8.43) + Math.trunc(128 / 8)) / 256) * 8);
+    const cw = new Array(s.maxCol).fill(0);
+    s.cols.forEach((c) => {
+      for (let j = c.min; j <= Math.min(c.max, s.maxCol); j++) if (c.width) cw[j - 1] = c.width;
+    });
+    const colPx = cw.map(px);
+    const rowPx = [];
+    for (let r = 1; r <= s.maxRow; r++)
+      rowPx.push(Math.round((s.heights[r] || s.defaultRowHeight) * (96 / 72)));
+
+    const out = T.fill(book, 0, [], { imageShift: [{ dx: -40, dy: 25 }], colPx, rowPx });
+    const back = await T.open(out.bytes);
+    const im1 = back.sheets[0].images[0];
+    /* ★Excelが見るのは「錨(col/colOff/row/rowOff)」であって、控えの <a:off> ではない★
+       控えの方だけ見ていると、錨がズレていても気づけない
+       （2026-08-09、実際に控えだけ見ていて、Excelでは 8px しか動いていなかった）。 */
+    const at = (im, sizes, idx, off) => {
+      let acc = 0;
+      for (let i = 0; i < im[idx]; i++) acc += sizes[i] || 0;
+      return acc + im[off] / 9525;
+    };
+    const x0 = at(im0, colPx, "col", "colOff");
+    const y0 = at(im0, rowPx, "row", "rowOff");
+    const x1 = at(im1, colPx, "col", "colOff");
+    const y1 = at(im1, rowPx, "row", "rowOff");
+    expect(Math.round(x1 - x0), "★錨で見た横の動きが違う（Excelはここを見る）★").toBe(-40);
+    expect(Math.round(y1 - y0), "★錨で見た縦の動きが違う（Excelはここを見る）★").toBe(25);
+    // 控えの位置も合わせてある
+    expect(Math.round(im1.absX - im0.absX), "控えの横が合っていない").toBe(-40);
+    expect(Math.round(im1.absY - im0.absY), "控えの縦が合っていない").toBe(25);
+    /* ★ズレは「そのマスの中」に収まっていないといけない★
+       はみ出した値を書くと ★Excelが勝手に丸めて、狙った所に行かない★。
+       ここが Excel と自分の計算の唯一の分かれ目なので、必ず測る。 */
+    expect(im1.colOff / 9525, "★横のズレが列の幅からはみ出している（Excelが丸める）★").toBeLessThan(
+      colPx[im1.col]
+    );
+    expect(
+      im1.rowOff / 9525,
+      "★縦のズレが行の高さからはみ出している（Excelが丸める）★"
+    ).toBeLessThan(rowPx[im1.row]);
+    // 大きさは変えない
+    expect(Math.round(im1.w), "大きさが変わった").toBe(Math.round(im0.w));
+    expect(Math.round(im1.h), "大きさが変わった").toBe(Math.round(im0.h));
+  });
+
+  it("★動かせと言われなければ、絵には1バイトも触らない★", async () => {
+    const src = new Uint8Array(
+      fs.readFileSync(path.join(ROOT, "tests/e2e/fixtures/tpl-real-like.xlsx"))
+    );
+    const book = await T.open(src);
+    const out = T.fill(book, 0, [{ ref: "A3", kind: "text", value: "山田商事" }], {
+      imageShift: [{ dx: 0, dy: 0 }],
+    });
+    const a = T._readZip(src);
+    const b = T._readZip(out.bytes);
+    const raw = (z, name) => {
+      const e = z.entries.filter((x) => x.name === name)[0];
+      return e ? Buffer.from(T._rawOf(z, e)).toString("base64") : null;
+    };
+    expect(raw(b, "xl/drawings/drawing1.xml"), "頼んでいないのに絵を書き換えている").toBe(
+      raw(a, "xl/drawings/drawing1.xml")
+    );
+  });
   /* ★列幅の換算がズレると、判子や合計欄が横へ寄る（実物で59pxズレた）★ */
   it("★列の幅の換算が、本物のExcelと合っている★", async () => {
     const book = await openFix("tpl-real-like.xlsx");

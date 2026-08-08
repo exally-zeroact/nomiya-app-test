@@ -873,10 +873,28 @@ function ownXlsxSheetHtml(iv) {
             : String(e.value);
     });
   }
+  /* ★余白は、そのExcelが持っている値をそのまま使う★
+     ここを勝手な値（20px）にしていたので ★両端が詰まりすぎて別の紙に見えた★
+     （司さんの指摘 2026-08-09）。Excelの余白はインチなので 96 を掛けて px にする。 */
+  var mg = (book.sheets[si] && book.sheets[si].margins) || {
+    left: 0.7,
+    right: 0.7,
+    top: 0.75,
+    bottom: 0.75,
+  };
+  var ml = Math.round(mg.left * 96);
+  var mr = Math.round(mg.right * 96);
+  var mt = Math.round(mg.top * 96);
   var w = xlGridWidth(book, si);
-  var k = Math.min(1, 754 / w); // A4の幅794px − 左右の余白
+  var k = Math.min(1, (794 - ml - mr) / w); // A4の幅から、紙の余白を引いた中身の幅に収める
   return (
-    '<div class="sheet iv-sheet iv-xl">' +
+    '<div class="sheet iv-sheet iv-xl" style="padding:' +
+    mt +
+    "px " +
+    mr +
+    "px 0 " +
+    ml +
+    'px">' +
     '<div class="xl-fit" style="width:' +
     w +
     "px;transform:scale(" +

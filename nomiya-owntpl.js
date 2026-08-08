@@ -301,13 +301,17 @@ function xlGridHtml(book, si, values, opt) {
      これが無いと「請求書に見えない」。位置はマスの角からのズレで書いてあるので、
      ここまでに数えた列幅・行の高さを足して置く。 */
   var imgs = "";
-  (s.images || []).forEach(function (im) {
+  (s.images || []).forEach(function (im, i) {
     var left = 0;
     for (var c2 = 0; c2 < im.col && c2 < wide.length; c2++) left += wide[c2];
     var top = 0;
     for (var r2 = 0; r2 < im.row && r2 < high.length; r2++) top += high[r2];
     left += im.x;
     top += im.y;
+    /* ★判子を動かした量★（お店が指で動かした分。触っていなければ 0） */
+    var st = SETTINGS.ownStamp || {};
+    left += +st.dx || 0;
+    top += +st.dy || 0;
     var w2 = im.w;
     var h2 = im.h;
     if (w2 == null) {
@@ -320,7 +324,9 @@ function xlGridHtml(book, si, values, opt) {
       h2 = t2 + im.toRowOff / 9525 - top;
     }
     imgs +=
-      '<img class="xl-img" src="' +
+      '<img class="xl-img" data-img="' +
+      i +
+      '" src="' +
       esc(im.src) +
       '" alt="" style="left:' +
       Math.round(left) +
@@ -392,7 +398,8 @@ function openCellPlacer() {
       openModal(
         "どのマスに入れるか決める",
         '<div class="hint">上の項目を押してから、下の表の ★入れたいマス★ を押します。' +
-          "明細は、1行目のマスを列ごとに選んでください（日付・内容・金額…）。</div>" +
+          "明細は、1行目のマスを列ごとに選んでください（日付・内容・金額…）。<br>" +
+          "判子は ★指でつまんで動かせます★（動かした分は、出すExcelにも入ります）。</div>" +
           '<div class="chips" id="xlFields">' +
           chips +
           "</div>" +
@@ -536,8 +543,58 @@ function wireCellPlacer(TL, book, cells, labels, si) {
     toast("✅ 割り当てを決めました");
   };
 
+  wireStamp();
   wireGrid();
   say();
+
+  /* ★判子を指で動かす★
+     お店の紙の判子は、Excelの中に位置が書いてある。ここで動かした分は
+     ★書き出すときに、その Excel の中の判子そのものを動かす★（別の絵を重ねない）。 */
+  function wireStamp() {
+    var img = $("xlWrap").querySelector(".xl-img");
+    if (!img) return;
+    img.style.pointerEvents = "auto";
+    img.style.cursor = "move";
+    var drag = null;
+    var pt = function (ev) {
+      var t = ev.touches && ev.touches[0] ? ev.touches[0] : ev;
+      return { x: t.clientX, y: t.clientY };
+    };
+    var start = function (ev) {
+      var p = pt(ev);
+      var st = SETTINGS.ownStamp || { dx: 0, dy: 0 };
+      drag = {
+        x: p.x,
+        y: p.y,
+        dx: +st.dx || 0,
+        dy: +st.dy || 0,
+        l: parseFloat(img.style.left),
+        t: parseFloat(img.style.top),
+      };
+      ev.preventDefault();
+      ev.stopPropagation();
+    };
+    var move = function (ev) {
+      if (!drag) return;
+      var p = pt(ev);
+      img.style.left = drag.l + (p.x - drag.x) + "px";
+      img.style.top = drag.t + (p.y - drag.y) + "px";
+      SETTINGS.ownStamp = {
+        dx: Math.round(drag.dx + (p.x - drag.x)),
+        dy: Math.round(drag.dy + (p.y - drag.y)),
+      };
+      ev.preventDefault();
+    };
+    var end = function () {
+      drag = null;
+    };
+    img.addEventListener("mousedown", start);
+    img.addEventListener("touchstart", start, { passive: false });
+    document.addEventListener("mousemove", move);
+    document.addEventListener("touchmove", move, { passive: false });
+    document.addEventListener("mouseup", end);
+    document.addEventListener("touchend", end);
+  }
 }
 
 /** いま画面に出している請求書の中身（Excelに入れる値） */
@@ -601,8 +658,16 @@ function exportOwnXlsx() {
       if (!plan.edits.length)
         throw new Error("どのマスに入れるかが決まっていません（「どのマスに入れるか決める」から）");
       var si = Math.min(SETTINGS.ownSheet || 0, book.sheets.length - 1);
-      var made = window.NomiyaXlsxTpl.fill(book, si, plan.edits);
+      var st = SETTINGS.ownStamp || { dx: 0, dy: 0 };
+      var made = window.NomiyaXlsxTpl.fill(book, si, plan.edits, {
+        imageShift: [{ dx: +st.dx || 0, dy: +st.dy || 0 }],
+        // ★行と列の大きさを渡す★（渡さないと判子の置き場所を計算し直せない）
+        colPx: xlColWidths(book.sheets[si], xlMdw(book)),
+        rowPx: xlRowHeights(book.sheets[si]),
+      });
       var msgs = plan.warn.slice();
+      if (+(SETTINGS.ownStamp || {}).dx || 0 || +(SETTINGS.ownStamp || {}).dy || 0)
+        msgs.push("判子の位置も動かします");
       if (made.overwritten.length)
         msgs.push("★計算式を消して値を入れます：" + made.overwritten.join("・") + "★");
       if (made.skipped.length)
