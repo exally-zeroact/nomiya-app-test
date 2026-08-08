@@ -176,23 +176,47 @@ describe("飲み屋アプリ 倉庫の向き先（テストはテスト・本番
     );
   });
 
-  it("★棚のDDLに「消す系」が1つも無い（自動で当てても、データが消えない）", () => {
-    // push したら自動で当たる仕組みにしたので、ここが最後の砦。
-    // うっかり drop table を書いたら、当てる前にCIが落ちる。
+  /* ★SQLを1文ずつに割る。割れていなければ その場で赤にする★
+     ------------------------------------------------------------------------------
+     2026-08-08 に見つけた自分の穴:
+     ここは「push したら自動で当たる」仕組みの ★最後の砦★ なのに、
+     割った結果が空でないことを1度も確かめていなかった。
+     stmts が [] になると、下の3つの確認は ★全部 素通りで緑★ になる。
+     「いま空にならないのは、ファイルが無ければ読み込みで落ちるから」という
+     ★偶然に頼っていた★。だから ここで自分の足元を確かめる:
+       ① 文の数が現実的にあること（実測 76文）
+       ② ★本当に1文ずつに割れていること★（; を使わない書き方に変えられても気づく）
+          ＝棚8つ・窓口8つが、それぞれ別の文として数えられること
+     ★3つの確認は別々の it にしてある★＝ここが崩れたら3つとも赤になる。 */
+  function statements() {
     const stmts = SQL.split(/\r?\n/)
       .filter((l) => !/^\s*--/.test(l))
       .join("\n")
       .split(";")
       .map((s) => s.trim().replace(/\s+/g, " "))
       .filter(Boolean);
+    expect(stmts.length, "★SQLが1文も取れていない＝下の確認は何も見ていない★").toBeGreaterThan(20);
+    const tables = stmts.filter((s) => /^create table if not exists castally\.nomiya_/i.test(s));
+    const views = stmts.filter((s) => /^create or replace view public\.nomiya_/i.test(s));
+    expect(tables.length, "★棚を作る文が1文ずつに割れていない（区切り方が変わった？）★").toBe(8);
+    expect(views.length, "★窓口を作る文が1文ずつに割れていない（区切り方が変わった？）★").toBe(8);
+    return stmts;
+  }
+
+  it("★棚のDDLに「消す系」が1つも無い（自動で当てても、データが消えない）", () => {
+    // push したら自動で当たる仕組みにしたので、ここが最後の砦。
+    // うっかり drop table を書いたら、当てる前にCIが落ちる。
+    const stmts = statements();
     const bad = stmts.filter((s) =>
       /\b(drop\s+table|drop\s+schema|drop\s+database|drop\s+column|truncate|delete\s+from|update\s+\w+\s+set)\b/i.test(
         s
       )
     );
     expect(bad, "消す系のSQLが入っている: " + bad.join(" / ")).toEqual([]);
+  });
 
-    // 飲み屋の棚以外に触らない（他アプリと同じ倉庫に同居しているため）
+  it("★棚のDDLは、飲み屋の棚以外に触らない（他アプリと同じ倉庫に同居している）", () => {
+    const stmts = statements();
     const other = stmts.filter(
       (s) =>
         !/nomiya_/i.test(s) &&
@@ -200,8 +224,11 @@ describe("飲み屋アプリ 倉庫の向き先（テストはテスト・本番
         !/^create schema if not exists castally$/i.test(s)
     );
     expect(other, "飲み屋以外の棚に触っている: " + other.join(" / ")).toEqual([]);
-    // ★他のアプリの部屋(kyuyo/daikome/amakase/daikou/exally)には1文字も触らない
-    const room = stmts.filter((s) => /(kyuyo|daikome|amakase|daikou|exally)\./i.test(s));
+  });
+
+  it("★棚のDDLは、他のアプリの部屋(kyuyo/daikome/amakase/daikou/exally)に1文字も触らない", () => {
+    const stmts = statements();
+    const room = stmts.filter((s) => /(kyuyo|daikome|amakase|daikou|exally)\./i.test(s));
     expect(room, "他のアプリの部屋に触っている: " + room.join(" / ")).toEqual([]);
   });
 
