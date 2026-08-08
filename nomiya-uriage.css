@@ -1295,6 +1295,29 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 /* 表そのもの（Excelの見た目を、読んだ値だけで組み立てる） */
+/* ★マスに収まらない文字は、隣が空ならはみ出して見える（Excelと同じ）★
+   CSSは「幅を超えた文字は右へこぼれる」ので、右寄せの文字を左へ伸ばすには
+   文字を包んで、その右端をマスの右端に留める。 */
+.xl-grid td.xl-sp {
+  position: relative;
+  overflow: visible;
+  z-index: 1;
+}
+.xl-grid td.xl-sp > span {
+  position: absolute;
+  bottom: 1px;
+  white-space: nowrap;
+}
+.xl-grid td.xl-sp.r > span {
+  right: 3px;
+}
+.xl-grid td.xl-sp.l > span {
+  left: 3px;
+}
+.xl-grid td.xl-sp.c > span {
+  left: 50%;
+  transform: translateX(-50%);
+}
 .xl-sheet {
   position: relative;
 }
@@ -1317,7 +1340,7 @@ body {
   border: 0; /* 罫線はExcelから読んだ物だけを付ける（勝手な線を足さない） */
   overflow: hidden;
   white-space: nowrap;
-  text-overflow: ellipsis;
+  text-overflow: clip; /* Excelは「…」を出さない。隣が空なら はみ出して見える */
   vertical-align: middle;
 }
 /* 割り当て済みのマス */

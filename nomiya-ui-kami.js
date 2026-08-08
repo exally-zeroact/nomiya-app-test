@@ -1199,8 +1199,14 @@ var SHEET_CSS = [
   ".xl-fit{transform-origin:top left;}",
   ".xl-grid{border-collapse:collapse;table-layout:fixed;font-size:12px;color:#000000;}",
   ".xl-grid td{padding:1px 3px;overflow:hidden;white-space:nowrap;",
-  "text-overflow:ellipsis;vertical-align:bottom;}",
+  "text-overflow:clip;vertical-align:bottom;}",
   ".xl-sheet{position:relative;}",
+  // マスに収まらない文字は、隣が空ならはみ出して見せる（Excelと同じ）
+  ".xl-grid td.xl-sp{position:relative;overflow:visible;z-index:1;}",
+  ".xl-grid td.xl-sp>span{position:absolute;bottom:1px;white-space:nowrap;}",
+  ".xl-grid td.xl-sp.r>span{right:3px;}",
+  ".xl-grid td.xl-sp.l>span{left:3px;}",
+  ".xl-grid td.xl-sp.c>span{left:50%;transform:translateX(-50%);}",
   ".xl-img{position:absolute;}",
   /* 共通部品 */
   // 請求日とNo.は右端を揃える（行ごとに文字数が違うので右揃えが必要）

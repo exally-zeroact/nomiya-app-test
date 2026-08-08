@@ -345,6 +345,37 @@ test.describe("自社テンプレ（お店のExcel）", () => {
       "★表 " + fit.表の幅 + "px / 列幅の合計 " + fit.列幅の合計 + "px★"
     ).toBeLessThanOrEqual(1);
     expect(fit.余白左, "余白がExcelの値になっていない").toBeGreaterThanOrEqual(40);
+
+    /* ★はみ出す向き★
+       CSSは「幅を超えた文字は右へこぼれる」ので、右寄せの文字も右へ出てしまう
+       （実測：右寄せの住所が紙の外まで出た）。Excelと同じく ★左へ伸びる★ こと。 */
+    const over = await page.evaluate(() => {
+      const sheet = document.querySelector("#invSheets .iv-xl");
+      const cs = getComputedStyle(sheet);
+      const box = sheet.getBoundingClientRect();
+      const rightEdge = box.right - parseFloat(cs.paddingRight);
+      const bad = [];
+      let spilled = 0;
+      sheet.querySelectorAll("td").forEach((td) => {
+        if (!(td.textContent || "").trim()) return;
+        const range = document.createRange();
+        range.selectNodeContents(td);
+        const tr = range.getBoundingClientRect();
+        const cell = td.getBoundingClientRect();
+        if (tr.width > cell.width + 1) spilled++;
+        if (tr.right > rightEdge + 1)
+          bad.push(td.getAttribute("data-r") + "(" + Math.round(tr.right - rightEdge) + "px)");
+      });
+      return { bad, spilled };
+    });
+    expect(
+      over.spilled,
+      "★マスからはみ出している文字が1つも無い＝この確認は何も見ていない★"
+    ).toBeGreaterThanOrEqual(1);
+    expect(over.bad, "★文字が紙の右の余白より外へ出ている: " + over.bad.join(" ") + "★").toEqual(
+      []
+    );
+
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });

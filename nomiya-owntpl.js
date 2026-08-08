@@ -237,6 +237,20 @@ function xlGridHtml(book, si, values, opt) {
   var totalW = wide.reduce(function (a, x) {
     return a + x;
   }, 0);
+  /* ★Excelは「隣のマスが空なら、文字がはみ出して見える」★
+     （合同会社ZEROact／今治市本町… は1マスに収まっていないが、隣が空なので全部見える）
+     ここを切ると ★「合同会社…」と省略されて別の紙に見える★（司さんの実物で出た）。
+     先に全部の文字を出して、隣が空かどうかで「はみ出してよいか」を決める。 */
+  var txt = [];
+  for (var rr = 0; rr < maxR; rr++) {
+    txt.push([]);
+    for (var cc = 0; cc < maxC; cc++) {
+      var rf = T.refOf(cc, rr);
+      txt[rr].push(
+        Object.prototype.hasOwnProperty.call(val, rf) ? val[rf] : T.cellText(book, s, rf)
+      );
+    }
+  }
   var out = ['<table class="xl-grid" style="width:' + totalW + 'px"><colgroup>'];
   wide.forEach(function (w) {
     out.push('<col style="width:' + w + 'px">');
@@ -248,15 +262,15 @@ function xlGridHtml(book, si, values, opt) {
       var ref = T.refOf(c, r);
       if (hide[ref]) continue;
       var cell = s.cells[ref];
-      var text = Object.prototype.hasOwnProperty.call(val, ref)
-        ? val[ref]
-        : T.cellText(book, s, ref);
+      var text = txt[r][c];
       /* ★書式は セル → 行 → 列 の順に探す★
          中身の無いマスにも、行や列の書式で色や罫線が付いていることがある
          （お店の紙の「明細の帯」がまさにこれ。見ないと縞が抜ける） */
       var sIdx = cell && cell.s != null ? +cell.s : styleAt(s, r, c);
       var xf = sIdx != null ? st.xf[sIdx] : null;
       var css = [];
+      var spill = "";
+      var isNum = false;
       if (xf) {
         var bd = st.border[xf.borderId];
         if (bd) {
@@ -277,6 +291,15 @@ function xlGridHtml(book, si, values, opt) {
         if (xf.align === "center") css.push("text-align:center");
         else if (xf.align === "right") css.push("text-align:right");
         else if (!xf.align && cell && !cell.t && cell.v != null) css.push("text-align:right");
+        // 数字はマスに収まらないと Excel では ### になる＝はみ出さない
+        isNum = !!(cell && !cell.t && cell.v != null);
+        var right = xf.align === "right" || (!xf.align && isNum);
+        var nextEmpty = right ? c === 0 || !txt[r][c - 1] : c + 1 >= maxC || !txt[r][c + 1];
+        /* ★はみ出す向き★
+           CSSは「幅を超えた文字は右へこぼれる」ので、text-align:right だけでは左へ伸びない
+           （実測：右寄せなのに右へはみ出して紙から出た）。
+           文字を包んで ★右端をマスの右端に留める★ と、Excelと同じに左へ伸びる。 */
+        if (text && !isNum && nextEmpty) spill = xf.align === "center" ? "c" : right ? "r" : "l";
         // ★Excelの既定は下揃え★
         css.push(
           "vertical-align:" +
@@ -291,11 +314,13 @@ function xlGridHtml(book, si, values, opt) {
           ' data-r="' +
           ref +
           '"' +
-          (mark[ref] ? ' class="xl-set"' : "") +
+          (mark[ref] || spill
+            ? ' class="' + (mark[ref] ? "xl-set " : "") + (spill ? "xl-sp " + spill : "") + '"'
+            : "") +
           (css.length ? ' style="' + css.join(";") + '"' : "") +
           ">" +
           (mark[ref] ? '<span class="xl-tag">' + esc(mark[ref]) + "</span>" : "") +
-          esc(text) +
+          (spill ? "<span>" + esc(text) + "</span>" : esc(text)) +
           "</td>"
       );
     }
