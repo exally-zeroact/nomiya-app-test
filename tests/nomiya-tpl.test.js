@@ -174,7 +174,7 @@ describe("自社テンプレ：Excelのどのマスに入れるか", () => {
   };
 
   it("入れられる項目がそろっている", async () => {
-    await covering("Excelに入れる項目", 15, async (c) => {
+    await covering("Excelに入れる項目", 16, async (c) => {
       T.CELL_FIELDS.forEach((f) => c.seen(f.key));
     });
   });

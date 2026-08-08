@@ -125,7 +125,7 @@ test.describe("自社テンプレ（お店のExcel）", () => {
     await page.locator("#btnOwnPlace").click();
     await expect(page.locator("#xlWrap")).toBeVisible();
 
-    await covering("入れられる項目", 15, async (c) => {
+    await covering("入れられる項目", 16, async (c) => {
       const chips = page.locator("#xlFields [data-cf]");
       const n = await chips.count();
       for (let i = 0; i < n; i++) c.seen(await chips.nth(i).getAttribute("data-cf"));

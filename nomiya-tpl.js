@@ -111,7 +111,9 @@
   var CELL_FIELDS = [
     { key: "date", label: "請求日", kind: "date" },
     { key: "no", label: "請求番号", kind: "text" },
-    { key: "to", label: "宛名", kind: "text" },
+    { key: "to", label: "宛名（御中つき）", kind: "text" },
+    // ★テンプレに「御中」がもう刷ってあることが多い★。二重に出さないための別口
+    { key: "toName", label: "宛名（御中なし）", kind: "text" },
     { key: "grand", label: "ご請求金額（税込）", kind: "number" },
     { key: "net", label: "小計（税抜）", kind: "number" },
     { key: "tax", label: "消費税", kind: "number" },
@@ -193,6 +195,7 @@
       date: { v: d.date, t: d.dateText },
       no: { v: d.no },
       to: { v: d.to },
+      toName: { v: d.toName },
       grand: { v: d.grand },
       net: { v: d.net },
       tax: { v: d.tax },

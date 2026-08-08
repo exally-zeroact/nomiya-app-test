@@ -436,6 +436,7 @@ function ownXlsxData() {
     dateText: C.jpDate(day),
     no: iv.no,
     to: a.to + "　" + a.honor,
+    toName: a.to,
     grand: iv.total,
     net: iv.net,
     tax: iv.tax,
