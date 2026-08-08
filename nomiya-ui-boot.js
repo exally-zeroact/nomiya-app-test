@@ -53,13 +53,15 @@ function showScreen(name) {
     b.classList.toggle("active", b.getAttribute("data-scr") === name);
   });
   $("btnGear").classList.toggle("on", name === "set");
-  /* ★紙が出る画面に来たら、明朝(Noto Serif JP)を読み始める★
-     明朝は 紙・請求書でしか使わないので、起動の <link> からは外してある
-     （起動の受け取りが 61KB 減る。実測 2026-08-08）。
-     ここで先に読み始めておけば、印刷/PDFを押したときには もう届いている。
-     押した時点でまだ届いていなくても、buildPaperPdf が届くまで待つので
+  /* ★請求書の画面に来たら、明朝(Noto Serif JP)を読み始める★
+     明朝を使うのは ★請求書の紙だけ★（2026-08-08、computed font-family で実測）。
+     売上帳・集計・税理士の紙・締め・給与の紙は明朝を1文字も使わないので、
+     ここで読むと ★使いもしない 61KB＋487KB を取ることになる★。だから請求書だけ。
+     起動の <link> から外してあるぶん（-61KB）は、ここで先に読み始めて取り返す
+     ＝押したときには もう届いている。
+     押した時点でまだ届いていなくても buildPaperPdf が届くまで待つので、
      ★紙がゴシックのまま出ることはない★。 */
-  if ((name === "list" || name === "inv") && typeof addSerifCss === "function") addSerifCss();
+  if (name === "inv" && typeof addSerifCss === "function") addSerifCss();
   syncPanes();
   renderAll();
   fitAll();

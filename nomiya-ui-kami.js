@@ -1350,26 +1350,64 @@ function dropSerifCss() {
    目録が永久に返ってこない回線（圏外に近い・入口で足止めされる Wi-Fi など）では
    ★紙が一生出ない★状態になっていた。指示役の指摘で気づき、内側に入れた。 */
 var PAPER_FONT_WAIT_MS = 12000;
-var PAPER_FONTS = [
-  '400 16px "Noto Serif JP"',
-  '600 16px "Noto Serif JP"',
-  '400 16px "Noto Sans JP"',
-  '500 16px "Noto Sans JP"',
-  '700 16px "Noto Sans JP"',
-  '400 16px "DM Mono"',
-  '500 16px "DM Mono"',
-];
+/* その書体を待つときに、どの太さを取りに行くか */
+var PAPER_FONT_WEIGHTS = {
+  "Noto Serif JP": ["400", "600"],
+  "Noto Sans JP": ["400", "500", "700"],
+  "DM Mono": ["400", "500"],
+};
+
+/* ★その紙が「実際にどの書体で描かれるか」を、クラス名ではなく computed font-family で拾う★
+   ------------------------------------------------------------------------------
+   クラス名(.iv-*)で見分けると、CSSを直したときに ここだけ取り残される。
+   ブラウザが実際に何を当てているかを聞けば、そのズレが起きない。 */
+function fontsUsedIn(inner) {
+  var used = {};
+  if (!inner || !window.getComputedStyle) return used;
+  var els = [inner].concat(Array.prototype.slice.call(inner.querySelectorAll("*")));
+  for (var i = 0; i < els.length; i++) {
+    var ff = "";
+    try {
+      ff = window.getComputedStyle(els[i]).fontFamily || "";
+    } catch (e) {
+      ff = "";
+    }
+    var parts = ff.split(",");
+    for (var k = 0; k < parts.length; k++) {
+      var n = parts[k].trim().replace(/^["']|["']$/g, "");
+      if (n) used[n] = true;
+    }
+  }
+  return used;
+}
+
 async function ensurePaperFonts(inner) {
   var d = document;
-  var asked = addSerifCss(); // 読み始めるだけ。★ここでは待たない★
+  /* ★その紙が使う書体だけを待つ★（2026-08-08）
+     最初は どの紙でも明朝を待つ作りにしていた。ところが明朝を使うのは請求書の紙だけで、
+     売上帳のPDFを出すだけでも ★明朝の61KB＋実体487KBを取り終えるまで待たせていた★。
+     見た目には出ないが、店の人を待たせ、通信も使う。CIでも1件 flaky になった。 */
+  var used = fontsUsedIn(inner);
+  var needSerif = !!used["Noto Serif JP"];
+  var asked = needSerif ? addSerifCss() : Promise.resolve(true); // 要る紙だけ読む
   if (!d.fonts || !d.fonts.load) return true; // 対応していない端末は今までどおり
+
+  var specs = [];
+  for (var fam in PAPER_FONT_WEIGHTS) {
+    if (!used[fam]) continue; // ★その紙が使っていない書体は待たない★
+    PAPER_FONT_WEIGHTS[fam].forEach(function (w) {
+      specs.push(w + ' 16px "' + fam + '"');
+    });
+  }
+  if (!specs.length) return true; // Webフォントを1つも使わない紙
+
   var text = String((inner && inner.textContent) || "").slice(0, 4000);
 
   // ★待つ物ぜんぶ（目録の読み込み → その紙の文字ぶんの実体 → 反映）
   var all = (async function () {
     await asked; // 目録が読み込まれるまで（これを飛ばすと「該当なし」で素通りする）
     await Promise.all(
-      PAPER_FONTS.map(function (f) {
+      specs.map(function (f) {
         return d.fonts.load(f, text).catch(function () {});
       })
     );
@@ -1389,7 +1427,7 @@ async function ensurePaperFonts(inner) {
   if (timer) clearTimeout(timer);
   if (!inTime) {
     // ★写す前に、返ってこない目録を外す（外さないと複製が読み終わらず紙が出ない）★
-    dropSerifCss();
+    if (needSerif) dropSerifCss();
     toast("⚠️ 書体が届かないまま紙を作りました（電波の良い所で作り直せます）");
   }
   return inTime;
