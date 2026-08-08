@@ -285,6 +285,7 @@ function init() {
   $("btnPrintList").onclick = function () {
     printSheets("listSheets", "売上帳");
   };
+  $("btnXlsxList").onclick = exportListXlsx;
   $("sumRecTabs")
     .querySelectorAll("[data-srec]")
     .forEach(function (b) {

@@ -352,6 +352,125 @@ function listRows() {
   );
 }
 
+/* ===== Excelに書き出す（売上帳） =====
+   ★出すのは「いま画面に出している行」そのまま★（期間・支払い方法・領収書の絞り込み込み）。
+   紙と同じ物を、Excelで並べ替え・足し算できる形で渡すためのもの。
+   ・金額と人数は ★数字★、日付は ★日付★ で入れる（文字で入れると足せない）
+   ・保存の名前は ★中身から作った案を先に出して、直せるようにする★（全アプリ共通の決まり）
+   ・部品(nomiya-xlsx.js)は ★押したときだけ読む★＝ふだんの起動には1バイトも足さない */
+var _xlsxLib = null;
+function loadXlsxLib() {
+  if (_xlsxLib) return _xlsxLib;
+  _xlsxLib = new Promise(function (ok, ng) {
+    if (window.NomiyaXlsx) return ok(window.NomiyaXlsx);
+    var el = document.createElement("script");
+    el.src = "nomiya-xlsx.js";
+    el.onload = function () {
+      window.NomiyaXlsx ? ok(window.NomiyaXlsx) : ng(new Error("nomiya-xlsx.js"));
+    };
+    el.onerror = function () {
+      _xlsxLib = null; // 失敗は次に押したとき取り直す
+      ng(new Error("nomiya-xlsx.js"));
+    };
+    document.head.appendChild(el);
+  });
+  return _xlsxLib;
+}
+
+/** 保存の名前の案（中身から作る）。例: Castally_売上帳_2026年8月.xlsx */
+function xlsxSuggestName() {
+  var shop = (SETTINGS && SETTINGS.store) || "";
+  var parts = [];
+  if (shop) parts.push(shop);
+  parts.push("売上帳");
+  parts.push(periodLabel());
+  if (UI.filPay && UI.filPay !== "all") parts.push(C.payLabel(UI.filPay));
+  if (UI.filRec && UI.filRec !== "all") parts.push(recFilterLabel(UI.filRec));
+  return parts.join("_").replace(/[\\/:*?"<>|]/g, "-") + ".xlsx";
+}
+function recFilterLabel(k) {
+  return k === "yes" ? "領収書あり" : k === "no" ? "領収書なし" : k === "adj" ? "調整" : "";
+}
+
+function exportListXlsx() {
+  var rows = listRows();
+  if (!rows.length) {
+    toast("⚠️ この期間に売上がありません");
+    return;
+  }
+  openModal(
+    "Excelに書き出す",
+    '<div class="frow"><span class="flabel">ファイル名</span>' +
+      '<input class="finput" type="text" id="xlName" value="' +
+      esc(xlsxSuggestName()) +
+      '"></div>' +
+      '<div class="hint">' +
+      rows.length +
+      "件（" +
+      esc(periodLabel()) +
+      "）。いま画面に出している分をそのまま出します。</div>" +
+      '<div style="margin-top:12px"><button class="btn btn-primary" id="xlOk">書き出す</button></div>'
+  );
+  $("xlOk").onclick = function () {
+    var name = ($("xlName").value || "").trim() || xlsxSuggestName();
+    if (!/\.xlsx$/i.test(name)) name += ".xlsx";
+    $("xlOk").disabled = true;
+    toast("📊 作っています…");
+    loadXlsxLib()
+      .then(function (X) {
+        var bytes = X.build({
+          sheet: "売上帳",
+          columns: [
+            { key: "ymd", label: "日付", type: "date", width: 12 },
+            { key: "name", label: "名前", width: 18 },
+            { key: "people", label: "人数", type: "number", width: 6 },
+            { key: "amount", label: "金額", type: "number", width: 12 },
+            { key: "pay", label: "支払い方法", width: 14 },
+            { key: "rec", label: "領収書", width: 9 },
+            { key: "staff", label: "担当", width: 12 },
+            { key: "memo", label: "備考", width: 28 },
+          ],
+          rows: rows.map(function (s) {
+            return {
+              // ★画面の売上は s.date（ymd はクラウドの棚の側の名前。取り違えると日付が空になる）
+              ymd: s.date,
+              name: s.name,
+              people: s.people,
+              amount: s.amount,
+              pay: C.payLabel(s.pay),
+              // ★紙と同じ2区分★（紙の印が ○ の物が「あり」。判断の元は core が唯一の正）
+              rec: C.receiptMark(s.receipt) === "○" ? "あり" : "なし",
+              staff: s.staff || "",
+              memo: s.memo || "",
+            };
+          }),
+        });
+        var blob = new Blob([bytes], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = name;
+        // ★ホーム画面アプリで同じ窓に開いて戻れなくなるのを防ぐ★
+        a.target = "_blank";
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () {
+          URL.revokeObjectURL(url);
+        }, 60000);
+        closeModal();
+        toast("📊 " + name + " を書き出しました");
+      })
+      .catch(function (e) {
+        $("xlOk").disabled = false;
+        toast("⚠️ 書き出せませんでした（" + ((e && e.message) || e) + "）");
+      });
+  };
+}
+
 function renderList() {
   $("filPay")
     .querySelectorAll("[data-fp]")
