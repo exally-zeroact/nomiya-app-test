@@ -132,8 +132,24 @@ describe("配る js/css の版（?v=）", () => {
     ]
       .map((f) => fs.readFileSync(path.join(ROOT, f), "utf8"))
       .join("\n");
-    const dyn = [...src.matchAll(/\.src\s*=\s*"([^"]+\.js)"/g)].map((m) => m[1]).sort();
+    const dyn = [...src.matchAll(/\.src\s*=\s*"([^"]+\.(?:js|mjs))"/g)].map((m) => m[1]).sort();
     expect(dyn, "押したときに読むファイルが変わった（キャッシュの決まりを見直すこと）").toEqual([
+      "nomiya-owntpl.js", // 自社テンプレを登録して置く画面
+      "nomiya-tpl.js", // 置き場所の計算
+      "nomiya-xlsx.js", // Excel書き出し
+    ]);
+  });
+
+  /* ★押したときに読むファイルは、分割ファイル(nomiya-ui-*.js)と名前を分ける★
+     nomiya-ui-* は「HTMLが必ず読む物」の印。ここに混ぜると
+     tests/app-source.mjs が「HTMLが読んでいないのに置いてある」と赤にする（実際に踏んだ）。 */
+  it("押したときに読むファイルに nomiya-ui-* を使っていない", () => {
+    const dyn = fs
+      .readdirSync(ROOT)
+      .filter((f) => /^nomiya-(?!ui-)[\w-]+\.js$/.test(f) && f !== "nomiya-core.js");
+    expect(dyn.sort(), "押して読むファイルの顔ぶれが変わった").toEqual([
+      "nomiya-owntpl.js",
+      "nomiya-tpl.js",
       "nomiya-xlsx.js",
     ]);
   });

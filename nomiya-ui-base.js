@@ -44,6 +44,10 @@ function defaultSettings() {
     tpl: "card",
     hanko: "",
     hankoSize: "m", // 請求書に載る判子の大きさ s=小 / m=中(角印16mm相当) / l=大
+    // ★自社テンプレ★ お店が持っている紙（PDF/写真を A4の絵に直した物）と、項目の置き場所
+    //   置き場所は「A4に対する％」で持つ（端末が変わってもズレない。決まりは nomiya-tpl.js）
+    ownTpl: "",
+    ownFields: {},
     logo: "",
     logoPos: "top",
     accent: "",

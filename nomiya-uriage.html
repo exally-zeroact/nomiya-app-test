@@ -42,7 +42,7 @@
       href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="nomiya-uriage.css?v=e6ec89fa" />
+    <link rel="stylesheet" href="nomiya-uriage.css?v=4ff91ae8" />
     <!-- A4用紙のスタイル（画面プレビューと印刷用の新しい窓で同じものを使う＝見た目のズレを作らない） -->
     <style id="sheetCss"></style>
     <!-- 店の色・書体の上書き（設定で選んだときだけ中身が入る） -->
@@ -287,7 +287,28 @@
               <button class="chip chip-sm" type="button" data-tpl="card">カード</button>
               <button class="chip chip-sm" type="button" data-tpl="band">帯</button>
               <button class="chip chip-sm" type="button" data-tpl="tate">縦組み</button>
+              <!-- お店が持っている紙を敷いて、その上に項目を置く -->
+              <button class="chip chip-sm" type="button" data-tpl="own">自社のテンプレ</button>
             </div>
+          </div>
+          <!-- 「自社のテンプレ」を選んだときだけ出る -->
+          <div class="frow" id="ownTplRow" style="display: none">
+            <span class="flabel">自社のテンプレ</span>
+            <div class="btn-row">
+              <button class="btn btn-ghost btn-sm" type="button" id="btnOwnPick">
+                紙を選ぶ（PDF・写真）
+              </button>
+              <button class="btn btn-ghost btn-sm" type="button" id="btnOwnPlace">
+                項目の置き場所を決める
+              </button>
+            </div>
+            <input
+              type="file"
+              id="ownTplFile"
+              accept="application/pdf,image/*"
+              style="display: none"
+            />
+            <span class="hint" id="ownTplNote"></span>
           </div>
           <div class="frow">
             <span class="flabel">色</span>
@@ -858,10 +879,10 @@
     <script defer src="hanko.js?v=d1d32621"></script>
     <script defer src="nomiya-core.js?v=f0399771"></script>
     <!-- ★画面のJS。読み込む順番が命（起動は最後）。tests/app-source.mjs が食い違いを見張る -->
-    <script defer src="nomiya-ui-base.js?v=b1f08c2b"></script>
+    <script defer src="nomiya-ui-base.js?v=0c18e38f"></script>
     <script defer src="nomiya-ui-uriage.js?v=bea0a105"></script>
     <script defer src="nomiya-ui-kaishu.js?v=53cff47e"></script>
-    <script defer src="nomiya-ui-kami.js?v=b2a06aae"></script>
+    <script defer src="nomiya-ui-kami.js?v=2b796509"></script>
     <script defer src="nomiya-ui-settei.js?v=bdb8d67a"></script>
     <script defer src="nomiya-ui-kyuryo.js?v=1b52a0dd"></script>
     <script defer src="nomiya-ui-boot.js?v=9d7617e4"></script>

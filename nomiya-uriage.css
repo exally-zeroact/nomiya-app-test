@@ -1206,3 +1206,74 @@ body {
     page-break-after: auto;
   }
 }
+
+/* ★自社テンプレ：項目の置き場所を決める画面★
+   ・A4の紙をそのままの形（794:1123）で見せて、その上で項目を指で動かす
+   ・位置は％で持つので、画面が小さくても大きくても同じ場所に決まる
+   ・色は :root の変数だけを使う（生の色コードは書かない） */
+.op-wrap {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.op-paper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 794 / 1123;
+  background: var(--c-card);
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+  overflow: hidden;
+  touch-action: none; /* 指で動かす間、画面が一緒に動かないように */
+  user-select: none;
+}
+.op-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.op-none {
+  position: absolute;
+  top: 46%;
+  width: 100%;
+  text-align: center;
+  color: var(--c-label);
+  font-size: 12px;
+}
+.op-f {
+  position: absolute;
+  min-height: 22px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--c-btn-line);
+  background: var(--c-chip);
+  border-radius: 3px;
+  cursor: move;
+}
+.op-f.off {
+  opacity: 0.35;
+  border-style: dashed;
+}
+.op-lb {
+  display: block;
+  padding: 3px 5px;
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--c-chip-t);
+  pointer-events: none;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* 右下の角＝幅を変えるつまみ。指で掴める大きさにする */
+.op-grip {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid var(--c-btn-line);
+  background: var(--c-card);
+  border-radius: 50%;
+  cursor: ew-resize;
+}

@@ -229,6 +229,9 @@ function renderInvLook() {
     .forEach(function (b) {
       b.classList.toggle("on", b.getAttribute("data-tpl") === (SETTINGS.tpl || "card"));
     });
+  // 自社テンプレを選んでいるときだけ、その行と部品を用意する
+  if ((SETTINGS.tpl || "card") === "own") loadOwnTplUi();
+  else if ($("ownTplRow")) $("ownTplRow").style.display = "none";
   $("invFont")
     .querySelectorAll("[data-font]")
     .forEach(function (b) {
@@ -742,9 +745,86 @@ function ivParts(iv) {
   };
 }
 
+/* 自社テンプレの「置き方」を決める部品は、★使う店だけが読む★（数KB）。
+   ふだんの起動には足さない。届いたら1回だけ描き直す。 */
+var _tplLib = null;
+function loadTplLib() {
+  if (_tplLib) return _tplLib;
+  _tplLib = new Promise(function (ok, ng) {
+    if (window.NomiyaTpl) return ok(window.NomiyaTpl);
+    var el = document.createElement("script");
+    el.src = "nomiya-tpl.js";
+    el.onload = function () {
+      if (!window.NomiyaTpl) return ng(new Error("nomiya-tpl.js"));
+      ok(window.NomiyaTpl);
+      if (typeof renderAll === "function") renderAll();
+    };
+    el.onerror = function () {
+      _tplLib = null;
+      ng(new Error("nomiya-tpl.js"));
+    };
+    document.head.appendChild(el);
+  });
+  return _tplLib;
+}
+
+/* 自社テンプレを「登録して置く」画面も、★使う店だけが読む★。
+   ふだんの起動には足さない（読むのは、自社テンプレを選んだときだけ）。 */
+var _ownUi = null;
+function loadOwnTplUi() {
+  if (_ownUi) return _ownUi;
+  _ownUi = new Promise(function (ok, ng) {
+    if (typeof wireOwnTpl === "function") return ok();
+    var el = document.createElement("script");
+    el.src = "nomiya-owntpl.js";
+    el.onload = function () {
+      typeof wireOwnTpl === "function" ? ok() : ng(new Error("nomiya-owntpl.js"));
+    };
+    el.onerror = function () {
+      _ownUi = null;
+      ng(new Error("nomiya-owntpl.js"));
+    };
+    document.head.appendChild(el);
+  }).then(function () {
+    wireOwnTpl();
+    renderOwnTplRow();
+  });
+  return _ownUi;
+}
+
 function invoiceSheetHtml(iv) {
   var tpl = SETTINGS.tpl || "card";
   var q = ivParts(iv);
+  /* ★自社テンプレ★（お店が持っている紙を敷いて、その上に部品を置く）
+     ・敷く物は SETTINGS.ownTpl（絵。PDFは登録のときに絵にしてある）
+     ・置き場所は SETTINGS.ownFields（★A4に対する％★＝画面でも紙でも同じ場所に出る）
+     ・テンプレにもう印刷されている項目は show:false で出さない
+     計算も部品(ivParts)も他のデザインと同じ物を使う＝紙の中身がズレない */
+  if (tpl === "own") {
+    var TL = window.NomiyaTpl;
+    if (!TL) {
+      // 置き方を決める部品がまだ届いていない。届いたら描き直す（数KBなのですぐ来る）
+      loadTplLib();
+      return '<div class="sheet iv-sheet iv-own"><div class="iv-own-none">読み込んでいます…</div></div>';
+    }
+    var placed = TL.normalize(SETTINGS.ownFields);
+    var bg = SETTINGS.ownTpl
+      ? '<img class="iv-own-bg" src="' + esc(SETTINGS.ownTpl) + '" alt="">'
+      : '<div class="iv-own-none">自社のテンプレがまだありません（設定 → 請求書の見た目 で選べます）</div>';
+    var body = "";
+    TL.visible(placed).forEach(function (f) {
+      if (!q[f.key]) return;
+      body +=
+        '<div class="iv-own-f" data-f="' +
+        f.key +
+        '" style="' +
+        TL.styleOf(placed[f.key]) +
+        '">' +
+        q[f.key] +
+        "</div>";
+    });
+    return '<div class="sheet iv-sheet iv-own">' + bg + body + "</div>";
+  }
   if (tpl === "band") {
     // 上に濃色の帯（表題を白抜き）／本文は白地／最下部に振込先
     return (
@@ -988,6 +1068,16 @@ var SHEET_CSS = [
            (uto-room.com / tenantkoubou.com)。塗りは帯と見出しだけ＝印刷でインクを食わない。 */
   ".iv-sheet{display:flex;flex-direction:column;padding:0;color:#33302c;}",
   ".iv-pad{flex:1;display:flex;flex-direction:column;}",
+  /* ★自社テンプレ★ お店の紙を敷いて、その上に部品を置く。
+     ・敷く絵は A4 いっぱい（794x1123）。紙は白地のままで、絵はその上に乗るだけ
+     ・部品は position:absolute。位置は nomiya-tpl.js が ★％★ で出す
+       （px にすると画面の縮小表示と紙でズレる） */
+  ".iv-own{position:relative;display:block;padding:0;}",
+  ".iv-own-bg{position:absolute;left:0;top:0;width:794px;height:1123px;object-fit:contain;}",
+  ".iv-own-f{position:absolute;z-index:1;}",
+  ".iv-own-none{position:absolute;left:0;top:46%;width:100%;text-align:center;color:#888888;font-size:13px;}",
+  /* 置いた部品の中は、既定のデザインの余白（左右のはみ出し）を持ち込まない */
+  ".iv-own-f .iv-grand,.iv-own-f .iv-sum,.iv-own-f .iv-tbl{margin:0;}",
   /* 共通部品 */
   // 請求日とNo.は右端を揃える（行ごとに文字数が違うので右揃えが必要）
   ".iv-meta{font-size:10.5px;line-height:1.9;color:#6a655e;text-align:right;}",

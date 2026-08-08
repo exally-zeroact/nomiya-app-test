@@ -12,7 +12,13 @@ const js = require("@eslint/js");
 
 module.exports = [
   {
-    ignores: ["node_modules/**", ".vercel/**", "**/*.min.js", "hyperformula.full.min.js"],
+    ignores: [
+      "node_modules/**",
+      ".vercel/**",
+      "**/*.min.js",
+      "**/*.min.mjs",
+      "hyperformula.full.min.js",
+    ],
   },
   js.configs.recommended,
   {
