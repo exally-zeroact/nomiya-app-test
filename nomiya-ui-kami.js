@@ -1507,7 +1507,8 @@ function printSheetsFallback(innerId, title) {
     toast("⚠️ 印刷するものがありません");
     return;
   }
-  var html = printableHtml(inner.innerHTML, title);
+  // ★その紙が実際に使う書体だけを、新しい窓にも頼む（クラス名では見分けない）★
+  var html = printableHtml(inner.innerHTML, title, fontsUsedIn(inner));
   var pw = null;
   try {
     pw = window.open("", "_blank");
@@ -1532,7 +1533,34 @@ function printSheetsFallback(innerId, title) {
 
 /* 印刷用の1枚もの。紙のCSS（SHEET_CSS）と紙のHTMLだけを入れる。
          画面用のCSSは1行も入れない＝画面の都合で真っ白になることがない。 */
-function printableHtml(sheets, title) {
+/* ★その窓が使う書体だけ頼む★（2026-08-08 実測して直した）
+   ------------------------------------------------------------------------------
+   前は どの紙でも3家族ぜんぶ頼んでいた（目録だけで 151,983バイト）。
+   実際に使う書体を computed font-family で聞くと:
+     売上帳／税理士の紙／レジ締め／給与一覧 … Noto Sans JP + DM Mono  → 91,282（★-60,701★）
+     請求書                                  … Noto Sans JP + Noto Serif JP → 151,732（-251）
+   ★この窓が開くのは「PDFが作れなかった端末」だけ★＝古くて遅い機種。
+   そこで6万バイト余計に取っていた。 */
+var FONT_QUERY = {
+  "Noto Sans JP": "family=Noto+Sans+JP:wght@400;500;700",
+  "Noto Serif JP": "family=Noto+Serif+JP:wght@400;600",
+  "DM Mono": "family=DM+Mono:wght@400;500",
+};
+function fontLinkFor(used) {
+  var q = [];
+  // 並びは固定（同じ紙なら毎回同じURL＝端末の控えが効く）
+  ["Noto Sans JP", "Noto Serif JP", "DM Mono"].forEach(function (f) {
+    if (used && used[f]) q.push(FONT_QUERY[f]);
+  });
+  if (!q.length) return "";
+  return (
+    '<link href="https://fonts.googleapis.com/css2?' +
+    q.join("&") +
+    '&display=swap" rel="stylesheet">'
+  );
+}
+
+function printableHtml(sheets, title, used) {
   return (
     '<!doctype html><html lang="ja"><head><meta charset="UTF-8">' +
     // 紙は794px＝A4の幅。スマホでも縮めずにこの幅で組ませる。
@@ -1540,8 +1568,7 @@ function printableHtml(sheets, title) {
     "<title>" +
     esc(title || "印刷") +
     "</title>" +
-    '<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700' +
-    '&family=Noto+Serif+JP:wght@400;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">' +
+    fontLinkFor(used) +
     "<style>" +
     "*{box-sizing:border-box;margin:0;padding:0;}" +
     "@page{size:A4 portrait;margin:0;}" +

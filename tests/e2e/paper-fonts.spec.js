@@ -250,6 +250,82 @@ test.describe("紙の書体（明朝がそろってから写す）", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
+  /* ★印刷の「紙だけの窓」も、その紙が使う書体だけ頼む★（2026-08-08）
+     この窓が開くのは ★PDFが作れなかった端末だけ★（古くて遅い機種）。
+     前は どの紙でも3家族ぜんぶ頼んでいた（目録だけで 151,983バイト）。
+     実測: 売上帳/税理士の紙/レジ締め/給与一覧 は Noto Sans JP + DM Mono で足りる
+           → 91,282バイト（★-60,701★）。請求書だけ明朝が要る。 */
+  test("★印刷の窓は、その紙が使う書体だけ頼む", async ({ page, context }) => {
+    const errors = await install(page);
+    await page.goto(PAGE, { waitUntil: "load" });
+    await page.evaluate(() => localStorage.clear());
+    await page.reload({ waitUntil: "load" });
+    await expect(page.locator("#scr-input")).toBeVisible();
+
+    // PDFを作れない端末のふり（＝紙だけの窓に落ちる道）
+    await page.route(/vendor\/(html2canvas|jspdf)/, (r) => r.abort());
+
+    const openPrint = async (scr, seg) => {
+      await page.locator(`.nav-item[data-scr='${scr}']`).click();
+      if (seg) await page.locator(`#listSeg [data-lseg='${seg}']`).click();
+      const [w] = await Promise.all([
+        context.waitForEvent("page"),
+        page
+          .locator("#scr-" + scr + " button:has-text('印刷')")
+          .first()
+          .click(),
+      ]);
+      await w.waitForLoadState("domcontentloaded");
+      // ★紙が組まれるのを待ってから聞く（待たずに聞くと、まだ何も無くて嘘の答えになる）
+      await w.locator(".sheet").first().waitFor({ state: "attached", timeout: 20000 });
+      await w.waitForTimeout(600);
+      const r = await w.evaluate(() => {
+        const l = [...document.querySelectorAll("link[rel=stylesheet]")].map((x) => x.href);
+        const fams = new Set();
+        document.querySelectorAll("*").forEach((el) => {
+          (getComputedStyle(el).fontFamily || "").split(",").forEach((n) => {
+            n = n.trim().replace(/^["']|["']$/g, "");
+            if (/^(Noto Sans JP|Noto Serif JP|DM Mono)$/.test(n)) fams.add(n);
+          });
+        });
+        return {
+          links: l,
+          使う書体: [...fams].sort(),
+          紙の数: document.querySelectorAll(".sheet").length,
+        };
+      });
+      await w.close();
+      return r;
+    };
+
+    // 売上帳＝明朝を使わない紙
+    const list = await openPrint("list", null);
+    expect(list.紙の数, "紙が入っていない").toBeGreaterThan(0);
+    expect(list.使う書体, "売上帳が明朝を使うようになった＝この試験を見直すこと").not.toContain(
+      "Noto Serif JP"
+    );
+    expect(
+      list.links.some((h) => /Noto\+Serif\+JP/.test(h)),
+      "★売上帳の窓なのに明朝を頼んでいる（6万バイトの無駄）★"
+    ).toBe(false);
+    expect(
+      list.links.some((h) => /Noto\+Sans\+JP/.test(h)),
+      "ゴシックを頼んでいない＝紙の字が変わる"
+    ).toBe(true);
+
+    // 請求書＝明朝を使う紙
+    const inv = await openPrint("inv", null);
+    expect(inv.使う書体, "請求書が明朝を使わなくなった＝この試験を見直すこと").toContain(
+      "Noto Serif JP"
+    );
+    expect(
+      inv.links.some((h) => /Noto\+Serif\+JP/.test(h)),
+      "★請求書の窓が明朝を頼んでいない＝紙がゴシックで刷られる★"
+    ).toBe(true);
+
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
   /* ★紙が出ないのが一番まずい★
      店は電波の細い所でも紙を出す。書体が来ないなら
      ★ゴシックで出てでも、紙は出さないといけない★。
