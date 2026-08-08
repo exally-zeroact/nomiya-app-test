@@ -184,24 +184,69 @@ test.describe("紙の書体（明朝がそろってから写す）", () => {
     await page.reload({ waitUntil: "load" });
     await expect(page.locator("#scr-input")).toBeVisible();
 
-    /* 7種の紙＝一覧(売上帳)/集計/税理士の紙/請求書/レジ締め/給与一覧/明細 */
+    /* ★7種ぜんぶ見るために、足りない紙のもとを作る★
+       「給与明細」「渡した記録」は スタッフ・出勤・渡した記録が無いと紙が出ない。
+       ここを作らずに飛ばすと ★7種と言いながら5種しか見ていない★ ことになる。 */
+    // 売上を1件（売上帳・売上報告書・日報のもと）
+    await page.locator("#inName").fill("書体しらべ");
+    await page.locator("#inPeople").fill("2");
+    await page.locator("#inAmount").fill("12345");
+    await page.locator('button[data-pay="cash"]').click();
+    await page.locator("#btnSave").click();
+    await page.waitForTimeout(400);
+    // スタッフを1人（給与一覧・給与明細のもと）
+    await page.locator("#btnGear").click();
+    await page.locator("#setSeg [data-sseg='staff']").click();
+    await page.locator("#btnStaffAdd").click();
+    await page.locator("#st_name").fill("書体テスト子");
+    await page.locator("#st_daily").fill("30000");
+    await page.locator("#st_ok").click();
+    await page.waitForTimeout(400);
+    // 出勤を1件＋渡した（渡した記録のもと）
+    await page.locator(".nav-item[data-scr='pay']").click();
+    await page.locator("button:has-text('出勤を入れる')").click();
+    await page.locator("#wk_ok").click();
+    await page.waitForTimeout(600);
+    const paid = page.locator("#payDue button:has-text('渡した')").first();
+    if (await paid.count()) {
+      await paid.click();
+      await page.waitForTimeout(600);
+    }
+
+    /* ★紙は7種（printSheets を呼んでいる所が正）★
+       2026-08-08 実測して直した。前はここに sumSheets（集計）を入れていたが
+       ★集計に紙は無い★（printSheets を呼んでいない）。そのぶん実際には
+       「渡した記録」と「給与明細」を見ていなかった＝★7種と言いながら5種しか見ていなかった★。 */
     const PAPERS = [
-      ["list", null, "listSheets"],
-      ["list", "sum", "sumSheets"],
-      ["list", "tax", "taxSheets"],
-      ["inv", null, "invSheets"],
-      ["close", null, "closeSheets"],
-      ["pay", null, "paySheets"],
+      ["list", null, "listSheets", "売上帳"],
+      ["list", "tax", "taxSheets", "売上報告書"],
+      ["inv", null, "invSheets", "請求書"],
+      ["close", null, "closeSheets", "日報"],
+      ["pay", null, "paySheets", "給与一覧"],
+      ["pay", null, "logSheets", "渡した記録"],
+      ["pay", null, "castSheets", "給与明細"],
     ];
     const done = [];
-    for (const [scr, seg, id] of PAPERS) {
+    const empty = [];
+    for (const [scr, seg, id, name] of PAPERS) {
       await page.locator(`.nav-item[data-scr='${scr}']`).click();
       if (seg) await page.locator(`#listSeg [data-lseg='${seg}']`).click();
+      // 給与明細は「明細」を押さないと紙が組まれない（押す道順を実際になぞる）
+      if (id === "castSheets") {
+        const b = page.locator("#payDue button:has-text('明細')").first();
+        if (await b.count()) {
+          await b.click();
+          await page.waitForTimeout(600);
+        }
+      }
       const has = await page.evaluate((id) => {
         const el = document.getElementById(id);
         return !!(el && el.querySelector(".sheet"));
       }, id);
-      if (!has) continue; // 中身が無い紙は対象外（その日のデータが無いだけ）
+      if (!has) {
+        empty.push(name); // ★黙って飛ばさない。何を見ていないかを最後に出す★
+        continue;
+      }
       const r = await page.evaluate(
         async ([id, src]) => {
           const serifLoaded = eval("(" + src + ")");
@@ -241,12 +286,15 @@ test.describe("紙の書体（明朝がそろってから写す）", () => {
         expect(r.serif, "★" + id + " を明朝が届く前に写している★").toBe(true);
       }
     }
-    expect(done.length, "紙を1枚も作れていない").toBeGreaterThanOrEqual(3);
+    /* ★何枚を見て、何枚を見ていないかを必ず出す（黙って0件にしない）★ */
+    const covered = `見た紙 ${done.length}/${PAPERS.length}${empty.length ? "／中身が無くて見ていない: " + empty.join("・") : ""}`;
+    expect(done.length, "紙を1枚も作れていない。" + covered).toBeGreaterThanOrEqual(4);
     // ★明朝を使う紙が1枚も無い＝この試験が何も見ていない、を防ぐ★
     expect(
       done.filter((x) => x.usesSerif).length,
-      "明朝を使う紙が1枚も無い（この試験は何も確かめていない）"
+      "明朝を使う紙が1枚も無い（この試験は何も確かめていない）。" + covered
     ).toBeGreaterThanOrEqual(1);
+    console.log("  " + covered);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
