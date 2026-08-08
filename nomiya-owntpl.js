@@ -333,6 +333,9 @@ function wireCellPlacer(TL, book, cells, labels, si) {
     note.innerHTML = esc(msgs.join(" / "));
   };
 
+  /* 1つ選ぶたびに表を描き直す。
+     ※「描き直すと見ている場所が先頭へ戻るのでは」と疑って、位置を覚えて戻す処理を足したが、
+       ★Chrome も WebKit も戻らない★（消しても試験が緑のまま＝何も直していなかった）ので外した。 */
   var redraw = function () {
     $("xlWrap").innerHTML = xlGridHtml(book, si, {}, { pick: true, cells: cells, labels: labels });
     wireGrid();
