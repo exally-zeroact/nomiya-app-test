@@ -1325,6 +1325,9 @@ body {
 .xl-img {
   position: absolute;
   pointer-events: none;
+  /* ★判子は文字より上★ Excelでも図形は上に載る。
+     下にすると、はみ出した文字(z-index:1)に隠れて ★指で掴めない★（実測） */
+  z-index: 2;
 }
 .xl-grid {
   border-collapse: collapse;

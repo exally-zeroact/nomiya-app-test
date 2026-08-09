@@ -1207,7 +1207,7 @@ var SHEET_CSS = [
   ".xl-grid td.xl-sp.r>span{right:3px;}",
   ".xl-grid td.xl-sp.l>span{left:3px;}",
   ".xl-grid td.xl-sp.c>span{left:50%;transform:translateX(-50%);}",
-  ".xl-img{position:absolute;}",
+  ".xl-img{position:absolute;z-index:2;}",
   /* 共通部品 */
   // 請求日とNo.は右端を揃える（行ごとに文字数が違うので右揃えが必要）
   ".iv-meta{font-size:10.5px;line-height:1.9;color:#6a655e;text-align:right;}",

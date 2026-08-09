@@ -123,6 +123,8 @@ $ws.Range("I27:I29").NumberFormat = '#,##0_ '
 $xl.ActiveWindow.DisplayZeros = $false
 
 # 貼った絵（判子の代わり。実物の判子は入れない）
+# ★実物と同じ場所（右上・住所などの文字と重なる所）に置く★
+#   重ならない場所に置くと「判子が文字の下に潜って掴めない」の確認が、何も見ていない緑になる。
 $null = $ws.Shapes.AddPicture([System.IO.Path]::GetFullPath($Png), $false, $true, 375.0, 36.4, 45.4, 43.6)
 
 $ws.PageSetup.PaperSize = 9

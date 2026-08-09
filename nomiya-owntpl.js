@@ -491,6 +491,10 @@ function wireCellPlacer(TL, book, cells, labels, si) {
   var redraw = function () {
     $("xlWrap").innerHTML = xlGridHtml(book, si, {}, { pick: true, cells: cells, labels: labels });
     wireGrid();
+    /* ★描き直したら、判子の配線も付け直す★
+       付け直さないと、マスを1つ割り当てた時点で ★判子が動かなくなる★
+       （2026-08-09、実物で動かなかった。手元の試験は「割り当てる前」に動かしていて気づけなかった） */
+    wireStamp();
     $("xlFields")
       .querySelectorAll("[data-cf]")
       .forEach(function (b) {

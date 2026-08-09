@@ -378,4 +378,45 @@ test.describe("自社テンプレ（お店のExcel）", () => {
 
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
+
+  /* ★判子は「マスを割り当てたあと」でも動かせる★
+     割り当てるたびに表を描き直すので、判子の配線を付け直さないと
+     ★1つ割り当てた時点で動かなくなる★（2026-08-09、配信された実物で動かなかった）。
+     手元の試験は「割り当てる前」に動かしていたので気づけなかった。 */
+  test("★マスを割り当てたあとでも、判子を指で動かせる★", async ({ page }) => {
+    const errors = await open(page);
+    await openLook(page);
+    await page.locator("#invTpl [data-tpl='own']").click();
+    await expect(page.locator("#ownTplRow")).toBeVisible();
+    await page.locator("#ownTplFile").setInputFiles("tests/e2e/fixtures/tpl-real-like.xlsx");
+    await expect(page.locator("#ownTplNote")).toContainText("Excelが入っています", {
+      timeout: 30000,
+    });
+    await page.locator("#btnOwnPlace").click();
+    await expect(page.locator("#xlWrap")).toBeVisible();
+
+    // ★先にマスを割り当てる（実際の順番）★
+    await assign(page, "to", "A3");
+    await assign(page, "cName", "A11");
+
+    const img = page.locator("#xlWrap .xl-img");
+    await expect(img, "★見本に判子が無い＝この確認は何も見ていない★").toBeVisible();
+    await img.scrollIntoViewIfNeeded();
+    const b0 = await img.boundingBox();
+    await page.mouse.move(b0.x + b0.width / 2, b0.y + b0.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b0.x + b0.width / 2 - 40, b0.y + b0.height / 2 + 25, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+
+    /* ★「判子が文字の下に潜って掴めない」は、この見本では再現できなかった★
+       司さんの実物では起きたので z-index で直したが、見本では
+       ★壊しても赤にならない＝落ちようのない確認★だったので、その確認は置かない。
+       （落ちようのない試験は、あるだけ害）。実物での確認だけが根拠。 */ const st =
+      await page.evaluate(() => window.__NOMIYA.settings.ownStamp);
+    expect(st, "★判子の動かし量が保存されていない（設定に無い）★").toBeTruthy();
+    expect(st.dx, "★割り当てたあと、判子が動かない★").toBe(-40);
+    expect(st.dy, "★割り当てたあと、判子が動かない★").toBe(25);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
 });
