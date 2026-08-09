@@ -271,3 +271,28 @@ describe("自社テンプレ：Excelのどのマスに入れるか", () => {
     expectNoneOf(p.edits, (e) => e.ref === "A37" || e.ref === "D36", "空の項目", { min: 3 });
   });
 });
+
+/* ★画面が使う設定は、必ず defaultSettings() に在ること★
+   足し忘れると、その項目は ★開き直すたびに消える★（load() が拾わない）。
+   2026-08-09、判子の動かし量(ownStamp)を足し忘れて、
+   ★配信された物では判子が動かせなかった★（手元では動いていた）。 */
+import fs2 from "node:fs";
+describe("設定の足し忘れ", () => {
+  const base = fs2.readFileSync(path.join(ROOT, "nomiya-ui-base.js"), "utf8");
+  const ui = ["nomiya-owntpl.js", "nomiya-ui-kami.js", "nomiya-ui-uriage.js"]
+    .map((f) => fs2.readFileSync(path.join(ROOT, f), "utf8"))
+    .join("\n");
+  const defs = /function defaultSettings\(\)[\s\S]*?\n}/.exec(base)[0];
+
+  it("★画面が読み書きする SETTINGS の項目が、全部 既定値に在る★", () => {
+    const used = [...ui.matchAll(/SETTINGS\.([A-Za-z_][\w]*)/g)].map((m) => m[1]);
+    expect(used.length, "★SETTINGS を1つも使っていない＝この確認は何も見ていない★").toBeGreaterThan(
+      20
+    );
+    const missing = [...new Set(used)].filter((k) => !new RegExp("\\b" + k + ":").test(defs));
+    expect(
+      missing,
+      "★既定値に無い項目がある（開き直すと消える）: " + missing.join(" ") + "★"
+    ).toEqual([]);
+  });
+});

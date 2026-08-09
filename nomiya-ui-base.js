@@ -55,6 +55,8 @@ function defaultSettings() {
     ownXlsxName: "",
     ownSheet: 0,
     ownCells: {},
+    // ★お店のExcelに貼ってある判子を動かした量（px）★ 触らなければ 0＝Excelのまま
+    ownStamp: { dx: 0, dy: 0 },
     logo: "",
     logoPos: "top",
     accent: "",
