@@ -194,7 +194,9 @@ test.describe("自社テンプレ（お店のExcel）", () => {
     expect(seen.total, "合計が出ていない").toContain("44,000");
     expect(seen.d1, "明細の日付が出ていない").toBe("8/1");
     expect(seen.n1).toBe("ご飲食代");
-    expect(seen.a1).toBe("44,000");
+    /* ★E10には表示形式が付いていない＝本物のExcelでも「44000」と出る（COMで確認）★
+       画面はそのマスの書式どおりに出すので、ここも 44000。E33 は #,##0 なので 44,000。 */
+    expect(seen.a1, "書式の無いマスに勝手な桁区切りを付けている").toBe("44000");
 
     // ★紙（PDF）にも出る＝Excelのテンプレでも今までの刷り方がそのまま使える★
     const pdf = await page.evaluate(async () => {
@@ -417,6 +419,45 @@ test.describe("自社テンプレ（お店のExcel）", () => {
     expect(st, "★判子の動かし量が保存されていない（設定に無い）★").toBeTruthy();
     expect(st.dx, "★割り当てたあと、判子が動かない★").toBe(-40);
     expect(st.dy, "★割り当てたあと、判子が動かない★").toBe(25);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  /* ★画面に出す文字は、そのマスの書式で出す★
+     アプリ側の文字（例「2026年8月9日」）をそのまま出すと、
+     ★画面では見切れるのに、Excelでは 2026/8/9 で収まる★ という食い違いが出る
+     （司さんの指摘「見切れとる」2026-08-09）。
+     書体も ★そのExcelの書体★ を使う（決め打ちだと字の形も幅も違う紙になる）。 */
+  test("★画面の文字が、そのマスの書式どおり（Excelと同じ）★", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, { date: "2026-08-01", name: "山田商事", amount: 44000 });
+    await pickCompany(page, "山田商事");
+    await openLook(page);
+    await page.locator("#invTpl [data-tpl='own']").click();
+    await expect(page.locator("#ownTplRow")).toBeVisible();
+    await page.locator("#ownTplFile").setInputFiles("tests/e2e/fixtures/tpl-real-like.xlsx");
+    await expect(page.locator("#ownTplNote")).toContainText("Excelが入っています", {
+      timeout: 30000,
+    });
+    await page.locator("#btnOwnPlace").click();
+    await expect(page.locator("#xlWrap")).toBeVisible();
+    await assign(page, "date", "I2"); // I2 の書式は yyyy/m/d
+    await assign(page, "cNet", "E11"); // E11 の書式は #,##0_
+    await page.locator("#xlcOk").click();
+    await page.waitForTimeout(500);
+
+    const seen = await page.evaluate(() => {
+      const t = document.querySelector("#invSheets .xl-grid");
+      const g = (r) => ((t.querySelector(`td[data-r="${r}"]`) || {}).textContent || "").trim();
+      return { date: g("I2"), net: g("E11"), font: getComputedStyle(t).fontFamily };
+    });
+    // ★yyyy/m/d の書式なので「2026年8月9日」ではなく「2026/8/9」の形★
+    expect(seen.date, "★日付が、そのマスの書式で出ていない★").toMatch(/^\d{4}\/\d{1,2}\/\d{1,2}$/);
+    // ★#,##0_ なので小数を出さない★
+    expect(seen.net, "★金額が、そのマスの書式で出ていない★").toBe("40,000");
+    // ★そのExcelの書体（游ゴシック）を先頭に使う★
+    expect(seen.font, "★Excelの書体を使っていない: " + seen.font + "★").toMatch(
+      /游ゴシック|Yu Gothic/
+    );
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });

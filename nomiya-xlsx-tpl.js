@@ -942,6 +942,31 @@
       return k === 0 ? piece : acc + lit[i++] + piece;
     }, "");
   }
+  /**
+   * ★これから入れる値が、そのマスでどう見えるかを返す★
+   * 画面と、書き出したExcelで ★同じ文字★ にするための物。
+   * ここを使わずにアプリ側の文字（例「2026年8月9日」）を出すと、
+   * ★画面では見切れるのに、Excelでは 2026/8/9 で収まる★ という食い違いが出る（実物で出た）。
+   */
+  function previewText(book, sheet, ref, kind, value, text) {
+    var c = sheet.cells[ref];
+    var code = formatOf(book, c && c.s);
+    if (kind === "date") {
+      if (c && isDateStyle(book, c.s)) {
+        var n = X.serial(value);
+        return n == null ? "" : fmtDate(n, code);
+      }
+      return text != null ? String(text) : String(value);
+    }
+    if (kind === "number") {
+      var v = typeof value === "number" ? value : parseFloat(value);
+      if (isNaN(v)) return "";
+      if (v === 0 && sheet.showZeros === false) return "";
+      return fmtNumber(v, code);
+    }
+    return value == null ? "" : String(value);
+  }
+
   /** 画面に出す文字（数式セルはExcelが覚えている結果を出す） */
   function cellText(book, sheet, ref) {
     var c = sheet.cells[ref];
@@ -1349,6 +1374,7 @@
     fill: fill,
     setCells: setCells,
     cellText: cellText,
+    previewText: previewText,
     isDateStyle: isDateStyle,
     parseRef: parseRef,
     refOf: refOf,

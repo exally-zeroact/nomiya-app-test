@@ -215,6 +215,17 @@ function xlGridHtml(book, si, values, opt) {
   var maxC = wide.length;
   var maxR = high.length;
   var baseSz = (st.font[0] && st.font[0].sz) || 11;
+  /* ★書体は、そのExcelの書体を使う★
+     決め打ちの書体にすると ★字の形も幅も違う紙★ になる（司さんの指摘 2026-08-09）。
+     端末にその書体が無いときのために、同じ系統を後ろに並べる。 */
+  var baseFont = (st.font[0] && st.font[0].name) || "";
+  var fontStack = function (n) {
+    var f = n || baseFont;
+    return (
+      (f ? '"' + f + '", ' : "") +
+      '"Yu Gothic", "游ゴシック", "Hiragino Sans", "Noto Sans JP", sans-serif'
+    );
+  };
 
   // 結合：親だけ出して、隠れる方は出さない
   var span = {};
@@ -252,7 +263,13 @@ function xlGridHtml(book, si, values, opt) {
       );
     }
   }
-  var out = ['<table class="xl-grid" style="width:' + totalW + 'px"><colgroup>'];
+  var out = [
+    "<table class='xl-grid' style='width:" +
+      totalW +
+      "px;font-family:" +
+      fontStack() +
+      "'><colgroup>",
+  ];
   wide.forEach(function (w) {
     out.push('<col style="width:' + w + 'px">');
   });
@@ -284,6 +301,7 @@ function xlGridHtml(book, si, values, opt) {
         if (fn) {
           if (fn.b) css.push("font-weight:700");
           // pt → px（1pt = 1/72インチ・画面は96dpi）。勘の係数を使わない
+          if (fn.name && fn.name !== baseFont) css.push("font-family:" + fontStack(fn.name));
           if (fn.sz && fn.sz !== baseSz)
             css.push("font-size:" + Math.round(fn.sz * (96 / 72)) + "px");
         }

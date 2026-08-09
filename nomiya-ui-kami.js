@@ -864,13 +864,13 @@ function ownXlsxSheetHtml(iv) {
   var values = {};
   var d = iv.sample ? null : ownXlsxData();
   if (d) {
+    /* ★画面に出す文字は、そのマスの書式で出す★
+       アプリ側の文字（例「2026年8月9日」）をそのまま出すと、
+       ★画面では見切れるのに、Excelでは 2026/8/9 で収まる★ という食い違いが出る
+       （司さんの指摘「見切れとる」2026-08-09）。 */
+    var sh = book.sheets[si];
     TL.planEdits(SETTINGS.ownCells, d).edits.forEach(function (e) {
-      values[e.ref] =
-        e.kind === "number"
-          ? C.comma(e.value)
-          : e.kind === "date"
-            ? e.text || e.value
-            : String(e.value);
+      values[e.ref] = window.NomiyaXlsxTpl.previewText(book, sh, e.ref, e.kind, e.value, e.text);
     });
   }
   /* ★余白は、そのExcelが持っている値をそのまま使う★
@@ -1197,7 +1197,8 @@ var SHEET_CSS = [
      紙では目盛線を出さない（Excelの印刷と同じ）。実際の罫線はセルごとに直接付けている。 */
   ".iv-xl{padding:20px;overflow:hidden;}",
   ".xl-fit{transform-origin:top left;}",
-  ".xl-grid{border-collapse:collapse;table-layout:fixed;font-size:12px;color:#000000;}",
+  ".xl-grid{border-collapse:collapse;table-layout:fixed;font-size:12px;color:#000000;",
+  "font-family:'Yu Gothic','游ゴシック','Hiragino Sans','Noto Sans JP',sans-serif;}",
   ".xl-grid td{padding:1px 3px;overflow:hidden;white-space:nowrap;",
   "text-overflow:clip;vertical-align:bottom;}",
   ".xl-sheet{position:relative;}",
