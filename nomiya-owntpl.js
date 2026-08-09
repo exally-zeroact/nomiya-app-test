@@ -56,8 +56,9 @@ async function ownTplFromFile(file) {
   var isPdf = /pdf$/i.test(file.type) || /\.pdf$/i.test(file.name || "");
   var img;
   if (isPdf) {
-    var L = await loadPdfJs();
+    // ★先に中身を読む★（1.7MBの部品を読んでいる間にファイルが消えることがある）
     var buf = await file.arrayBuffer();
+    var L = await loadPdfJs();
     var doc = await L.getDocument({ data: buf }).promise;
     if (!doc.numPages) throw new Error("PDFにページがありません");
     var page = await doc.getPage(1); // ★1ページ目だけ★
@@ -947,19 +948,22 @@ function renderOwnTplRow() {
 /* 端末に覚えておける大きさの目安。これを超えると他の物まで保存できなくなる */
 var OWN_XLSX_MAX = 2 * 1024 * 1024;
 
-/** お店のExcelを受け取って覚える（★原本のバイト列のまま★） */
-function takeOwnXlsx(file) {
-  return file
-    .arrayBuffer()
-    .then(function (ab) {
-      var u8 = new Uint8Array(ab);
+/** お店のExcelを受け取って覚える（★原本のバイト列のまま★）
+ *  ★バイト列は先に読んでから渡すこと★
+ *    部品(nomiya-xlsx-tpl.js)を読み込んでいる間に、選んだファイルの中身が
+ *    端末から消えることがある（iPhone/WebKitで実際に起きた：
+ *    「読めませんでした（The object can not be found here.）」）。
+ *    先に読んでしまえば、あとから消えても困らない。 */
+function takeOwnXlsx(u8, name) {
+  return Promise.resolve()
+    .then(function () {
       if (u8.length > OWN_XLSX_MAX)
         throw new Error(
           "このExcelは大きすぎます（" + Math.round(u8.length / 1024) + "KB）。2MBまでにしてください"
         );
       return window.NomiyaXlsxTpl.open(u8).then(function (book) {
         SETTINGS.ownXlsx = bytesToB64(u8);
-        SETTINGS.ownXlsxName = file.name || "テンプレ.xlsx";
+        SETTINGS.ownXlsxName = name || "テンプレ.xlsx";
         SETTINGS.ownSheet = 0;
         SETTINGS.ownTpl = ""; // 紙(絵)のテンプレとは同時に持たない
         SETTINGS.tpl = "own";
@@ -989,9 +993,18 @@ function wireOwnTpl() {
     if (!f) return;
     if (/\.xlsx$/i.test(f.name || "") || /spreadsheetml/.test(f.type || "")) {
       toast("📊 Excelを読んでいます…");
-      loadXlsxTplLib().then(function () {
-        takeOwnXlsx(f);
-      });
+      /* ★先に中身を読む★（部品を読み込んでいる間にファイルが消えることがある） */
+      var nm = f.name;
+      f.arrayBuffer()
+        .then(function (ab) {
+          var u8 = new Uint8Array(ab);
+          return loadXlsxTplLib().then(function () {
+            return takeOwnXlsx(u8, nm);
+          });
+        })
+        .catch(function (e) {
+          toast("⚠️ 読めませんでした（" + ((e && e.message) || e) + "）");
+        });
       return;
     }
     toast("📄 紙を読んでいます…");
