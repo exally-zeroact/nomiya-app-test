@@ -108,30 +108,65 @@
 
   /* 明細は「列」で指す。1行目の場所は、この列たちが指すセルの行から決まる
      （日付の列に A10 を選んだら、明細は10行目から下へ並ぶ）。 */
+  /* ★並びと束ね方も、ここが正★
+     18個をいっぺんに並べると ★何を見せられているのか分からない★（司さんの声 2026-08-10）。
+     group で3つの束に分け、ふだん触らない物は「そのほか」へ落とす。
+     short は束の中で出す短い名前（束の見出しが「明細」なので「明細列：」を繰り返さない）。 */
   var CELL_FIELDS = [
-    { key: "date", label: "請求日", kind: "date" },
-    { key: "no", label: "請求番号", kind: "text" },
-    { key: "to", label: "宛名（御中つき）", kind: "text" },
+    { key: "date", label: "請求日", short: "請求日", group: "head", kind: "date" },
+    { key: "no", label: "請求番号", short: "請求番号", group: "head", kind: "text" },
+    { key: "to", label: "宛名（御中つき）", short: "宛名", group: "head", kind: "text" },
     // ★テンプレに「御中」がもう刷ってあることが多い★。二重に出さないための別口
-    { key: "toName", label: "宛名（御中なし）", kind: "text" },
-    { key: "grand", label: "ご請求金額（税込）", kind: "number" },
-    { key: "net", label: "小計（税抜）", kind: "number" },
-    { key: "tax", label: "消費税", kind: "number" },
-    { key: "total", label: "合計", kind: "number" },
-    { key: "store", label: "店名", kind: "text" },
-    { key: "bank", label: "振込先", kind: "text" },
-    { key: "cDate", label: "明細列：日付", kind: "col" },
-    { key: "cName", label: "明細列：内容", kind: "col" },
-    { key: "cPeople", label: "明細列：人数", kind: "col" },
-    { key: "cAmount", label: "明細列：金額（税込）", kind: "col" },
+    {
+      key: "toName",
+      label: "宛名（御中なし）",
+      short: "宛名（御中なし）",
+      group: "other",
+      kind: "text",
+    },
+    {
+      key: "grand",
+      label: "ご請求金額（税込）",
+      short: "ご請求金額",
+      group: "money",
+      kind: "number",
+    },
+    { key: "net", label: "小計（税抜）", short: "小計（税抜）", group: "money", kind: "number" },
+    { key: "tax", label: "消費税", short: "消費税", group: "money", kind: "number" },
+    { key: "total", label: "合計", short: "合計", group: "money", kind: "number" },
+    { key: "store", label: "店名", short: "店名", group: "other", kind: "text" },
+    { key: "bank", label: "振込先", short: "振込先", group: "other", kind: "text" },
+    { key: "cDate", label: "明細列：日付", short: "日付", group: "detail", kind: "col" },
+    { key: "cName", label: "明細列：内容", short: "内容", group: "detail", kind: "col" },
+    { key: "cPeople", label: "明細列：人数", short: "人数", group: "detail", kind: "col" },
+    {
+      key: "cAmount",
+      label: "明細列：金額（税込）",
+      short: "金額（税込）",
+      group: "detail",
+      kind: "col",
+    },
     /* ★お店の紙は「金額＝税抜／消費税は別の列」であることが多い★
        司さんの実物がまさにこれ（E列=税抜・F列=消費税・合計は SUM で足している）。
        税込だけを入れると ★消費税ぶん多い請求書★ になるので、両方を入れ口にする。
        税抜と消費税の出し方は nomiya-core.js が唯一の正（ここでは割り算しない）。 */
-    { key: "cNet", label: "明細列：金額（税抜）", kind: "col" },
-    { key: "cTax", label: "明細列：消費税", kind: "col" },
-    { key: "cMemo", label: "明細列：備考", kind: "col" },
-    { key: "lastRow", label: "明細の最終行", kind: "row" },
+    {
+      key: "cNet",
+      label: "明細列：金額（税抜）",
+      short: "金額（税抜）",
+      group: "detail",
+      kind: "col",
+    },
+    { key: "cTax", label: "明細列：消費税", short: "消費税", group: "detail", kind: "col" },
+    { key: "cMemo", label: "明細列：備考", short: "備考", group: "detail", kind: "col" },
+    { key: "lastRow", label: "明細の最終行", short: "最後の行", group: "other", kind: "row" },
+  ];
+
+  var CELL_GROUPS = [
+    { key: "head", title: "① 紙の上のほう" },
+    { key: "money", title: "② 金額" },
+    { key: "detail", title: "③ 明細（1行目のマスを、列ごとに）" },
+    { key: "other", title: "そのほか（ふつうは触らなくて大丈夫）" },
   ];
 
   var REF = /^[A-Z]{1,3}[1-9]\d{0,6}$/;
@@ -256,6 +291,290 @@
     return { edits: edits, over: over, warn: warn };
   }
 
+  /* ══════════════════════════════════════════════════════════════════
+     ★どのマスに入れるかを、お店に決めさせない（こちらで当てる）★
+     ------------------------------------------------------------------
+     司さんの声（2026-08-10）
+       「どのマスに入れるかとか意味が分かりにくい」
+       「入ってからこんだけ項目あるけどなんなん」
+     ＝ ★18個の空欄を人に埋めさせている★のが間違い。
+     日本の請求書は言葉が決まっている（御中／ご請求金額／項目・数量・金額・
+     消費税・備考／小計・合計／お振込先）。だから ★紙に刷ってある言葉から機械で当たる★。
+
+     当てない物もある
+       ・店名／振込先＝お店の紙に ★もう刷ってある★（上書きすると自分の会社名が消える）
+       ・宛名（御中なし）＝「御中」が別のマスにある紙だけの話
+     当てた結果は「決まり」ではなく ★下書き★。画面で1つずつ直せる。
+
+     入れる物（画面に依らない形にしてある＝そのまま試験できる）
+       { maxRow, maxCol,
+         cells: { "A1": { text:"請求書", date:false } , … },   // 画面に出る文字そのもの
+         merges: [ {r1,c1,r2,c2} … ],                          // 1から数える
+         ruled: [11,12,…] }                                    // 罫線／塗り／高さのある行
+     ══════════════════════════════════════════════════════════════════ */
+
+  function colName(c) {
+    var s = "";
+    while (c > 0) {
+      var m = (c - 1) % 26;
+      s = String.fromCharCode(65 + m) + s;
+      c = (c - 1 - m) / 26;
+    }
+    return s;
+  }
+  function a1(r, c) {
+    return colName(c) + r;
+  }
+
+  /** 言葉くらべ用に整える（全角→半角・空白/かっこ/コロンを落とす） */
+  function gnorm(s) {
+    return String(s == null ? "" : s)
+      .replace(/[！-～]/g, function (ch) {
+        // 全角の ！〜～ は、半角と 0xFEE0 だけずれている
+        return String.fromCharCode(ch.charCodeAt(0) - 0xfee0);
+      })
+      .replace(/[\s()\[\].:,]/g, "")
+      .toUpperCase();
+  }
+
+  /* 明細の見出しの言葉。keys は「使える順」＝先に空いている方へ入る。
+     AMT は ★税込か税抜かが、その行に「消費税」の列があるかで変わる★ ので後で決める。 */
+  var HEAD_WORDS = [
+    { re: /^(日付|日にち|年月日|利用日|ご利用日|日)$/, keys: ["cDate"] },
+    { re: /^(項目|品名|品目|内容|ご利用内容|商品名|明細|作業内容|サービス)$/, keys: ["cName"] },
+    { re: /^摘要$/, keys: ["cName", "cMemo"] },
+    { re: /^(人数|数量|数|員数|組数)$/, keys: ["cPeople"] },
+    { re: /^(金額税抜|税抜金額|本体価格|本体金額|税抜)$/, keys: ["cNet"] },
+    { re: /^(金額|金額税込|税込金額|価格|料金|税込)$/, keys: ["AMT"] },
+    { re: /^(消費税|消費税額|税額|内税|外税)$/, keys: ["cTax"] },
+    { re: /^(備考|メモ|摘要欄)$/, keys: ["cMemo"] },
+  ];
+
+  /* ★言葉は「丸ごと同じ」で見る（頭が同じだけで拾わない）★
+     頭合わせにしていたら「消費税は10%となっております。」という ★ただの挨拶文★ を
+     消費税の欄と見なして、その右のマスに金額を書きに行った（見本で実際に出た）。 */
+  var STOP_WORDS =
+    /^(小計|合計|総計|総合計|お振込先|振込先|振込口座|お支払金額|税抜計|以上|備考欄)(税抜|税込)?$/;
+
+  var MONEY_WORDS = [
+    {
+      re: /^(ご請求金額|請求金額|ご請求額|今回ご請求額|今回請求額|ご請求合計)(税込|税抜)?$/,
+      key: "grand",
+    },
+    { re: /^(小計|税抜計|税抜金額|差引計)(税抜)?$/, key: "net" },
+    { re: /^(消費税|消費税額|内消費税)(額)?$/, key: "tax" },
+    { re: /^(合計|総計|総合計|お支払金額|請求額計)(税込)?$/, key: "total" },
+  ];
+
+  var DATE_LABEL = /^(請求日|発行日|作成日|日付|年月日)$/;
+  var NO_LABEL = /^(請求番号|請求NO\.?|NO\.?|番号|伝票番号|請求書番号)$/;
+  var TO_LABEL = /^(宛名|御請求先|ご請求先|請求先|お客様名|お得意先|お客様)$/;
+  var NUMERIC = /^[¥￥]?-?[0-9,]+(\.[0-9]+)?円?$/;
+
+  /**
+   * ★紙に刷ってある言葉から、入れ場所を当てる★
+   * @returns {{cells:object, start:number, last:number, headRow:number}}
+   */
+  function guessCells(sheet) {
+    var sh = sheet || {};
+    var src = sh.cells || {};
+    var maxCol = sh.maxCol || 0;
+    var maxRow = sh.maxRow || 0;
+    var ruled = {};
+    (sh.ruled || []).forEach(function (r) {
+      ruled[r] = true;
+    });
+
+    /* 結合のほどき方。押した所が結合の中なら ★左上のマスが本体★、
+       右へ探すときは ★結合の右端の次★ から見る（でないと同じマスを何度も見る）。 */
+    var mTop = {};
+    var mEnd = {};
+    (sh.merges || []).forEach(function (m) {
+      for (var r = m.r1; r <= m.r2; r++)
+        for (var c = m.c1; c <= m.c2; c++) {
+          mTop[r + "," + c] = a1(m.r1, m.c1);
+          mEnd[r + "," + c] = m.c2;
+        }
+    });
+
+    var byRow = {};
+    var list = [];
+    Object.keys(src).forEach(function (ref) {
+      var m = /^([A-Z]{1,3})(\d+)$/.exec(ref);
+      if (!m) return;
+      var c = 0;
+      for (var i = 0; i < m[1].length; i++) c = c * 26 + (m[1].charCodeAt(i) - 64);
+      var r = +m[2];
+      var raw = String((src[ref] && src[ref].text) || "");
+      var it = { ref: ref, r: r, c: c, raw: raw, t: gnorm(raw), date: !!(src[ref] || {}).date };
+      list.push(it);
+      (byRow[r] = byRow[r] || []).push(it);
+      if (r > maxRow) maxRow = r;
+      if (c > maxCol) maxCol = c;
+    });
+    Object.keys(byRow).forEach(function (r) {
+      byRow[r].sort(function (a, b) {
+        return a.c - b.c;
+      });
+    });
+
+    var out = {};
+    var put = function (k, ref) {
+      if (ref && !out[k]) out[k] = ref;
+    };
+    var textAt = function (r, c) {
+      var top = mTop[r + "," + c];
+      var cell = src[top || a1(r, c)];
+      return cell ? String(cell.text || "") : "";
+    };
+
+    /** そのラベルの「値を書くマス」を右に探す（数字が先・無ければ最初の空マス） */
+    var valueRight = function (r, c) {
+      var x = (mEnd[r + "," + c] || c) + 1;
+      var stopAt = Math.min(maxCol + 2, x + 9);
+      var empty = null;
+      while (x <= stopAt) {
+        var mk = r + "," + x;
+        var ref = mTop[mk] || a1(r, x);
+        var t = textAt(r, x);
+        if (t === "") {
+          if (!empty) empty = ref;
+        } else if (NUMERIC.test(gnorm(t))) {
+          return ref;
+        } else {
+          break; // 別の言葉が出てきたら、そこで打ち切り
+        }
+        x = (mEnd[mk] || x) + 1;
+      }
+      return empty;
+    };
+
+    /* ── ① 明細の見出し行を見つける ───────────────────────────── */
+    var best = null;
+    Object.keys(byRow).forEach(function (rk) {
+      var r = +rk;
+      var used = {};
+      var hits = [];
+      byRow[r].forEach(function (it) {
+        if (!it.t) return;
+        for (var i = 0; i < HEAD_WORDS.length; i++) {
+          if (!HEAD_WORDS[i].re.test(it.t)) continue;
+          var keys = HEAD_WORDS[i].keys;
+          for (var j = 0; j < keys.length; j++) {
+            if (used[keys[j]]) continue;
+            used[keys[j]] = true;
+            hits.push({ key: keys[j], c: it.c });
+            return;
+          }
+          return;
+        }
+      });
+      if (hits.length < 2) return;
+      if (
+        !best ||
+        hits.length > best.hits.length ||
+        (hits.length === best.hits.length && r < best.r)
+      )
+        best = { r: r, hits: hits, used: used };
+    });
+
+    var start = 0;
+    var headRow = 0;
+    if (best) {
+      headRow = best.r;
+      start = best.r + 1;
+      best.hits.forEach(function (h) {
+        var key = h.key;
+        if (key === "AMT") {
+          /* ★「金額」が税込か税抜かは、その行に「消費税」の列があるかで決まる★
+             司さんの紙は 金額=税抜／消費税=別の列。ここを取り違えると
+             ★消費税ぶん多い請求書★ が出る。 */
+          key = best.used.cTax && !best.used.cNet ? "cNet" : "cAmount";
+        }
+        put(key, a1(start, h.c));
+      });
+    }
+
+    /* ── ② 明細の最後の行 ─────────────────────────────────────── */
+    var last = 0;
+    if (start) {
+      var stopRow = 0;
+      for (var r2 = start; r2 <= maxRow; r2++) {
+        var row = byRow[r2] || [];
+        for (var i2 = 0; i2 < row.length; i2++)
+          if (row[i2].t && STOP_WORDS.test(row[i2].t)) {
+            stopRow = r2;
+            break;
+          }
+        if (stopRow) break;
+      }
+      last = (stopRow ? stopRow : maxRow + 1) - 1;
+      /* 罫線や塗りのある所までが明細。無い行まで数えると
+         ★枠の外に1行はみ出して書く★ ので、上へ詰める。 */
+      if (sh.ruled && sh.ruled.length) while (last > start && !ruled[last]) last--;
+      // 列はどこでもよい（見るのは行番号だけ）
+      if (last >= start) put("lastRow", a1(last, 1));
+    }
+
+    /* ── ③ 金額のラベル（明細の中は見ない） ───────────────────── */
+    list.forEach(function (it) {
+      if (!it.t) return;
+      if (start && it.r >= headRow && it.r <= last) return;
+      for (var i = 0; i < MONEY_WORDS.length; i++) {
+        if (!MONEY_WORDS[i].re.test(it.t)) continue;
+        put(MONEY_WORDS[i].key, valueRight(it.r, it.c));
+        return;
+      }
+    });
+
+    /* ── ④ 宛名 ───────────────────────────────────────────────── */
+    list.forEach(function (it) {
+      if (out.to || !it.t) return;
+      if (/御中$/.test(it.t) && it.t.length > 2) put("to", it.ref);
+    });
+    list.forEach(function (it) {
+      if (out.to || out.toName || !it.t) return;
+      if (it.t === "御中" && it.c > 1)
+        put("toName", mTop[it.r + "," + (it.c - 1)] || a1(it.r, it.c - 1));
+    });
+    list.forEach(function (it) {
+      if (out.to || out.toName || !it.t) return;
+      if (TO_LABEL.test(it.t)) put("toName", valueRight(it.r, it.c));
+    });
+
+    /* ── ⑤ 請求日・請求番号 ───────────────────────────────────── */
+    list.forEach(function (it) {
+      if (!it.t) return;
+      if (start && it.r >= headRow && it.r <= last) return;
+      if (!out.date && DATE_LABEL.test(it.t)) put("date", valueRight(it.r, it.c));
+      if (!out.no && NO_LABEL.test(it.t)) put("no", valueRight(it.r, it.c));
+    });
+    if (!out.date) {
+      /* ラベルが無い紙（司さんの実物）＝上の方にある「日付の形のマス」がそれ。
+         ★ただし「日付の形だけ付いていて空のマス」が隣に並んでいることがある★
+         （実物は G2・H2 が空の日付書式、実際に日付が入っているのは I2）。
+         空の方を選ぶと ★紙に日付が2つ出る★ ので、
+         ★すでに日付が入っているマスを先に選ぶ★。 */
+      var top = null;
+      var better = function (a, b) {
+        if (!b) return true;
+        var av = a.raw !== "" ? 1 : 0;
+        var bv = b.raw !== "" ? 1 : 0;
+        if (av !== bv) return av > bv;
+        if (a.r !== b.r) return a.r < b.r;
+        return a.c < b.c;
+      };
+      list.forEach(function (it) {
+        if (!it.date) return;
+        if (start && it.r >= start) return;
+        if (better(it, top)) top = it;
+      });
+      if (top) put("date", top.ref);
+    }
+
+    return { cells: normalizeCells(out), start: start, last: last, headRow: headRow };
+  }
+
   return {
     FIELDS: FIELDS,
     defaults: defaults,
@@ -265,6 +584,8 @@
     fromPx: fromPx,
     visible: visible,
     CELL_FIELDS: CELL_FIELDS,
+    CELL_GROUPS: CELL_GROUPS,
+    guessCells: guessCells,
     normalizeCells: normalizeCells,
     detailStart: detailStart,
     detailCapacity: detailCapacity,

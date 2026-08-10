@@ -1380,6 +1380,37 @@ body {
   font-weight: 700;
   opacity: 0.8;
 }
+/* まだ決まっていない物を ★言葉でも★ 出す（色だけでは伝わらない） */
+.xl-non {
+  font-style: normal;
+  font-size: 11px;
+  opacity: 0.55;
+}
+/* 言葉のボタンを束ねる（18個をいっぺんに並べない） */
+.xl-grp {
+  margin: 10px 0 2px;
+}
+.xl-grp-t,
+.xl-grp > summary {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-label);
+  margin-bottom: 4px;
+}
+.xl-grp > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 6px 0;
+}
+.xl-grp > summary::-webkit-details-marker {
+  display: none;
+}
+.xl-grp > summary::before {
+  content: "▸ ";
+}
+.xl-grp[open] > summary::before {
+  content: "▾ ";
+}
 .chip.sel {
   outline: 2px solid var(--c-accent);
   outline-offset: 1px;

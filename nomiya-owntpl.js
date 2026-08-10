@@ -399,6 +399,46 @@ function xlGridHtml(book, si, values, opt) {
   );
 }
 
+/** ★紙に刷ってある言葉から、入れ場所を当てる★（当て方そのものは nomiya-tpl.js が正） */
+function autoGuess(TL, book, si) {
+  try {
+    return TL.guessCells(window.NomiyaXlsxTpl.sheetView(book, si)).cells;
+  } catch (e) {
+    return {}; // 当てられない紙でも、画面は開けること
+  }
+}
+
+/** 言葉のボタンを「束ごと」に並べる
+ *  ★18個をいっぺんに出さない★（司さん「こんだけ項目あるけどなんなん」2026-08-10）。
+ *  ふだん触らない物は「そのほか」に畳んでおく（<details>＝端末の力で開く。JSは要らない）。 */
+function cellChipsHtml(TL, cells) {
+  var one = function (f) {
+    var on = !!cells[f.key];
+    return (
+      '<button class="chip chip-sm' +
+      (on ? " on" : "") +
+      '" type="button" data-cf="' +
+      f.key +
+      '">' +
+      esc(f.short || f.label) +
+      (on ? ' <b class="xl-ref">' + cells[f.key] + "</b>" : ' <i class="xl-non">まだ</i>') +
+      "</button>"
+    );
+  };
+  return TL.CELL_GROUPS.map(function (g) {
+    var fs = TL.CELL_FIELDS.filter(function (f) {
+      return f.group === g.key;
+    });
+    if (!fs.length) return "";
+    var body = '<div class="chips">' + fs.map(one).join("") + "</div>";
+    if (g.key === "other")
+      return (
+        '<details class="xl-grp"><summary>' + esc(g.title) + "</summary>" + body + "</details>"
+      );
+    return '<div class="xl-grp"><div class="xl-grp-t">' + esc(g.title) + "</div>" + body + "</div>";
+  }).join("");
+}
+
 /** 割り当てる画面（項目を押す → セルを押す） */
 function openCellPlacer() {
   Promise.all([loadTplLib(), ownBook()])
@@ -412,19 +452,7 @@ function openCellPlacer() {
         labels[f.key] = f.label;
       });
       var si = Math.min(SETTINGS.ownSheet || 0, book.sheets.length - 1);
-
-      var chips = TL.CELL_FIELDS.map(function (f) {
-        return (
-          '<button class="chip chip-sm' +
-          (cells[f.key] ? " on" : "") +
-          '" type="button" data-cf="' +
-          f.key +
-          '">' +
-          esc(f.label) +
-          (cells[f.key] ? ' <b class="xl-ref">' + cells[f.key] + "</b>" : "") +
-          "</button>"
-        );
-      }).join("");
+      var chips = cellChipsHtml(TL, cells);
 
       var sheetPick =
         book.sheets.length > 1
@@ -446,11 +474,13 @@ function openCellPlacer() {
           : "";
 
       openModal(
-        "どのマスに入れるか決める",
-        '<div class="hint">上の項目を押してから、下の表の ★入れたいマス★ を押します。' +
-          "明細は、1行目のマスを列ごとに選んでください（日付・内容・金額…）。<br>" +
+        "書く場所をたしかめる",
+        '<div class="hint">★場所は こちらで当てておきました★（紙に刷ってある言葉から）。<br>' +
+          "下の紙を見て、★違う所だけ★ 直してください。" +
+          "直し方は、上の言葉を押してから、紙の ★入れたいマス★ を押す。<br>" +
           "判子は ★指でつまんで動かせます★（動かした分は、出すExcelにも入ります）。</div>" +
-          '<div class="chips" id="xlFields">' +
+          '<div class="hint" id="xlCount"></div>' +
+          '<div id="xlFields">' +
           chips +
           "</div>" +
           sheetPick +
@@ -459,8 +489,9 @@ function openCellPlacer() {
           "</div>" +
           '<div class="hint" id="xlNote"></div>' +
           '<div class="btn-row" style="margin-top:12px">' +
-          '<button class="btn btn-primary" id="xlcOk">この割り当てで決める</button>' +
-          '<button class="btn btn-ghost" id="xlcClear">割り当てを全部消す</button>' +
+          '<button class="btn btn-primary" id="xlcOk">これでよい</button>' +
+          '<button class="btn btn-ghost" id="xlcAuto">もう一度<br>自動で当てる</button>' +
+          '<button class="btn btn-ghost" id="xlcClear">全部<br>空にする</button>' +
           "</div>"
       );
       wireCellPlacer(TL, book, cells, labels, si);
@@ -473,6 +504,23 @@ function openCellPlacer() {
 function wireCellPlacer(TL, book, cells, labels, si) {
   var picked = null;
   var note = $("xlNote");
+
+  /* 「いくつ入っているか」を言葉で出す（色だけでは伝わらない）。
+     ★数え方は、この画面の外（設定の行・入れたときの知らせ）と必ず同じにする★
+     ＝ 別の数え方にすると「12コ」と言われた直後に「11コ」と出て、どちらが本当か分からなくなる。 */
+  var count = function () {
+    var el = $("xlCount");
+    if (!el) return;
+    var on = TL.CELL_FIELDS.filter(function (f) {
+      return cells[f.key];
+    });
+    el.innerHTML =
+      "入っている <b>" +
+      on.length +
+      "</b> コ ／ 空 <b>" +
+      (TL.CELL_FIELDS.length - on.length) +
+      "</b> コ（空は、この紙に無い項目です。そのままで大丈夫）";
+  };
 
   var say = function () {
     var start = TL.detailStart(cells);
@@ -520,9 +568,18 @@ function wireCellPlacer(TL, book, cells, labels, si) {
         var k = b.getAttribute("data-cf");
         b.classList.toggle("on", !!cells[k]);
         b.classList.toggle("sel", picked === k);
-        b.innerHTML = esc(labels[k]) + (cells[k] ? ' <b class="xl-ref">' + cells[k] + "</b>" : "");
+        b.innerHTML =
+          esc(shortOf(k)) +
+          (cells[k] ? ' <b class="xl-ref">' + cells[k] + "</b>" : ' <i class="xl-non">まだ</i>');
       });
+    count();
     say();
+  };
+
+  var shortOf = function (k) {
+    for (var i = 0; i < TL.CELL_FIELDS.length; i++)
+      if (TL.CELL_FIELDS[i].key === k) return TL.CELL_FIELDS[i].short || TL.CELL_FIELDS[i].label;
+    return k;
   };
 
   var wireGrid = function () {
@@ -574,11 +631,25 @@ function wireCellPlacer(TL, book, cells, labels, si) {
             .forEach(function (x) {
               x.classList.toggle("on", +x.getAttribute("data-sh") === si);
             });
-          cells = {}; // シートが変われば番地の意味も変わる
+          // シートが変われば番地の意味も変わる。新しいシートで当て直す
+          cells = autoGuess(TL, book, si);
           picked = null;
           redraw();
         };
       });
+
+  $("xlcAuto").onclick = function () {
+    var g = autoGuess(TL, book, si);
+    Object.keys(cells).forEach(function (k) {
+      delete cells[k];
+    });
+    Object.keys(g).forEach(function (k) {
+      cells[k] = g[k];
+    });
+    picked = null;
+    redraw();
+    toast(Object.keys(g).length ? "自動で当て直しました" : "この紙からは当てられませんでした");
+  };
 
   $("xlcClear").onclick = function () {
     Object.keys(cells).forEach(function (k) {
@@ -601,6 +672,7 @@ function wireCellPlacer(TL, book, cells, labels, si) {
   fitPlacer();
   wireStamp();
   wireGrid();
+  count();
   say();
 
   /* ★表を画面の幅に収める★
@@ -783,7 +855,7 @@ function exportOwnXlsx() {
       if (!d) throw new Error("先に請求先を選んでください");
       var plan = TL.planEdits(SETTINGS.ownCells, d);
       if (!plan.edits.length)
-        throw new Error("どのマスに入れるかが決まっていません（「どのマスに入れるか決める」から）");
+        throw new Error("書く場所が決まっていません（「書く場所をたしかめる」から）");
       var si = Math.min(SETTINGS.ownSheet || 0, book.sheets.length - 1);
       var st = SETTINGS.ownStamp || { dx: 0, dy: 0 };
       var made = window.NomiyaXlsxTpl.fill(book, si, plan.edits, {
@@ -1014,7 +1086,10 @@ function renderOwnTplRow() {
   /* ★2行になる所を、こちらで決める★
      自動の折り返しに任せると「…決め／る」で切れる（司さんの指摘 2026-08-09）。
      下の段は「決める」で揃える。 */
-  if (place) place.innerHTML = xl ? "どのマスに入れるか<br>決める" : "項目の置き場所を<br>決める";
+  /* ★言葉を、やることに合わせる★
+     Excel は こちらが先に当てるので、お店がやるのは「たしかめる」だけ
+     （司さん「どのマスに入れるかとか意味が分かりにくい」2026-08-10）。 */
+  if (place) place.innerHTML = xl ? "書く場所を<br>たしかめる" : "項目の置き場所を<br>決める";
   var out = $("btnOwnXlsx");
   if (out) out.style.display = xl ? "" : "none";
   var note = $("ownTplNote");
@@ -1029,9 +1104,9 @@ function renderOwnTplRow() {
       (SETTINGS.ownXlsxName || "テンプレ") +
       "（約" +
       kb2 +
-      "KB・割り当て " +
-      n +
-      "件）。★元のファイルは変えません★";
+      "KB）。" +
+      (n ? "書く場所は ★" + n + "コ 当ててあります★。" : "★書く場所がまだ決まっていません★。") +
+      "元のファイルは変えません。";
     return;
   }
   if (!SETTINGS.ownTpl) {
@@ -1067,10 +1142,26 @@ function takeOwnXlsx(u8, name) {
         SETTINGS.tpl = "own";
         OWN_BOOK = book;
         _bookFor = SETTINGS.ownXlsx;
-        saveSettings();
-        renderOwnTplRow();
-        renderAll();
-        toast("✅ Excelを入れました。次に「どのマスに入れるか決める」を押してください");
+        /* ★入れた時点で、場所まで当ててしまう★
+           ここで当てないと、お店は ★18個の空欄★ を前にして何をすればよいか分からない
+           （司さん「入ってからこんだけ項目あるけどなんなん」2026-08-10）。
+           当てた結果は下書き。「書く場所をたしかめる」で1つずつ直せる。 */
+        return loadTplLib().then(function (TL) {
+          var g = autoGuess(TL, book, 0);
+          SETTINGS.ownCells = g;
+          SETTINGS.ownStamp = { dx: 0, dy: 0 }; // 紙が変われば判子の位置も元に戻す
+          saveSettings();
+          renderOwnTplRow();
+          renderAll();
+          var n = Object.keys(g).length;
+          toast(
+            n
+              ? "✅ Excelを入れました。★書く場所も " +
+                  n +
+                  "コ 当てておきました★。「書く場所をたしかめる」で見てください"
+              : "✅ Excelを入れました。次に「書く場所をたしかめる」を押してください"
+          );
+        });
       });
     })
     .catch(function (e) {

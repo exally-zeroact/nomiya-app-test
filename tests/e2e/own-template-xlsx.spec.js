@@ -75,10 +75,21 @@ async function putXlsx(page) {
   );
 }
 
-/** 項目を押してから、マスを押す */
+/** 項目を押してから、マスを押す（「そのほか」は畳んであるので先に開く） */
 async function assign(page, key, ref) {
+  const det = page.locator("#xlFields details.xl-grp").first();
+  if (await det.count()) await det.evaluate((d) => (d.open = true));
   await page.locator(`#xlFields [data-cf='${key}']`).click();
   await page.locator(`#xlWrap td[data-r='${ref}']`).click();
+}
+
+/** 当たっている割り当てを全部消す（「まだ決まっていない」状態を作る） */
+async function clearAssign(page) {
+  await page.locator("#btnOwnPlace").click();
+  await expect(page.locator("#xlWrap")).toBeVisible();
+  await page.locator("#xlcClear").click();
+  await page.locator("#xlcOk").click();
+  await expect(page.locator("#modalOv")).not.toHaveClass(/open/);
 }
 
 test.describe("自社テンプレ（お店のExcel）", () => {
@@ -143,6 +154,95 @@ test.describe("自社テンプレ（お店のExcel）", () => {
     expect(look.border, "明細の枠の罫線が出ていない").toBe("solid");
     expect(look.cols[0], "A列の幅が効いていない").toBeGreaterThan(look.cols[1]);
 
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  /* ★お店に18個の空欄を埋めさせない★
+     司さん「どのマスに入れるかとか意味が分かりにくい」「こんだけ項目あるけどなんなん」
+     （2026-08-10）。Excelを入れた時点で、紙に刷ってある言葉から こちらが当てる。 */
+  test("★Excelを入れただけで、書く場所が入っている（1回も押していない）★", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, { date: "2026-08-01", name: "山田商事", amount: 44000 });
+    await pickCompany(page, "山田商事");
+    await openLook(page);
+    await putXlsx(page); // ← ファイルを選んだだけ。マスは1つも押していない
+
+    const saved = await page.evaluate(() => window.__NOMIYA.settings.ownCells);
+    expect(Object.keys(saved).length, "★当てられていない＝お店が18個埋めることになる★").toBe(13);
+    expect(saved.date, "請求日").toBe("E3");
+    expect(saved.no, "請求番号").toBe("E4");
+    expect(saved.grand, "ご請求金額").toBe("B7");
+    expect(saved.cDate, "明細の日付の列").toBe("A10");
+    expect(saved.cAmount, "明細の金額の列").toBe("E10");
+    expect(saved.lastRow, "明細の最後の行").toBe("A29");
+    expect(saved.store, "★店名は当てない（紙にもう刷ってある）★").toBeUndefined();
+    expect(saved.bank, "★振込先は当てない★").toBeUndefined();
+    await expect(page.locator("#ownTplNote"), "当てた数を知らせていない").toContainText(
+      "13コ 当ててあります"
+    );
+
+    // ★そのまま紙に値が出る（押さずに使える）★
+    const seen = await page.evaluate(() => {
+      const t = document.querySelector("#invSheets .xl-grid");
+      const g = (r) => (t.querySelector(`td[data-r="${r}"]`) || {}).textContent || "";
+      return { grand: g("B7"), d1: g("A10"), a1: g("E10"), total: g("E33") };
+    });
+    /* ★B7 には表示形式が付いていない＝本物のExcelでも「44000」と出る★
+       画面はそのマスの書式どおりに出す（桁区切りを勝手に足さない）。E33 は #,##0 なので 44,000。 */
+    expect(seen.grand, "ご請求金額が出ていない").toBe("44000");
+    expect(seen.d1, "明細の日付が出ていない").toBe("8/1");
+    expect(seen.a1, "明細の金額が出ていない").toBe("44000");
+    expect(seen.total, "合計が出ていない").toContain("44,000");
+
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★項目は束ねて出す／ふだん触らない物は畳んである★", async ({ page }) => {
+    const errors = await open(page);
+    await openLook(page);
+    await putXlsx(page);
+    await page.locator("#btnOwnPlace").click();
+    await expect(page.locator("#xlWrap")).toBeVisible();
+
+    await expect(page.locator("#modalTitle"), "画面の名前が変わっていない").toContainText(
+      "書く場所をたしかめる"
+    );
+    await covering("束の見出し", 4, async (c) => {
+      for (const t of ["紙の上のほう", "金額", "明細", "そのほか"]) {
+        c.seen(t);
+        await expect(page.locator("#xlFields"), t + " の見出しが無い").toContainText(t);
+      }
+    });
+    // ★「そのほか」は畳んである＝いきなり18個は出さない★
+    const det = page.locator("#xlFields details.xl-grp").first();
+    expect(await det.count(), "「そのほか」が畳める形になっていない").toBe(1);
+    expect(await det.evaluate((d) => d.open), "★はじめから開いている★").toBe(false);
+    const shown = await page.locator("#xlFields [data-cf]:visible").count();
+    expect(shown, "はじめに見える数が多すぎる").toBeLessThanOrEqual(14);
+
+    /* 何コ入っているかを ★言葉で★ 出す。
+       ★設定の行と同じ数★ でなければならない（別の数え方だと、どちらが本当か分からない） */
+    await expect(page.locator("#xlCount")).toContainText("入っている 13 コ");
+    await expect(page.locator("#ownTplNote")).toContainText("13コ 当ててあります");
+
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★消しても「もう一度 自動で当てる」で戻せる★", async ({ page }) => {
+    const errors = await open(page);
+    await openLook(page);
+    await putXlsx(page);
+    await page.locator("#btnOwnPlace").click();
+    await expect(page.locator("#xlWrap")).toBeVisible();
+
+    await page.locator("#xlcClear").click();
+    await expect(page.locator("#xlCount"), "消えていない").toContainText("入っている 0");
+    await page.locator("#xlcAuto").click();
+    await expect(page.locator("#xlCount"), "当て直していない").not.toContainText("入っている 0");
+    await page.locator("#xlcOk").click();
+
+    const saved = await page.evaluate(() => window.__NOMIYA.settings.ownCells);
+    expect(saved.cAmount, "当て直した結果が保存されていない").toBe("E10");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
@@ -279,8 +379,11 @@ test.describe("自社テンプレ（お店のExcel）", () => {
     await pickCompany(page, "山田商事");
     await openLook(page);
     await putXlsx(page);
+    /* ★入れた時点で当ててある★ので、まず全部消してから確かめる。
+       （消さずに押すと ふつうに書き出せてしまい、この確認は何も見ていないことになる） */
+    await clearAssign(page);
     await page.locator("#btnOwnXlsx").click();
-    await expect(page.locator("#toast"), "理由が出ていない").toContainText("どのマスに入れるか");
+    await expect(page.locator("#toast"), "理由が出ていない").toContainText("書く場所が決まって");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 

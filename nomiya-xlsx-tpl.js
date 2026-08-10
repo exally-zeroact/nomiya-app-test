@@ -987,6 +987,50 @@
     return fmtNumber(n, code);
   }
 
+  /** そのマスに罫線か塗りがあるか（「ここまでが明細の枠」を見分ける目印） */
+  function hasEdge(book, s) {
+    if (s == null || s === "") return false;
+    var xf = book.styles && book.styles.xf[+s];
+    if (!xf) return false;
+    var b = book.styles.border[xf.borderId];
+    if (b && (b.l || b.r || b.t || b.b)) return true;
+    return !!book.styles.fill[xf.fillId];
+  }
+
+  /**
+   * ★言葉から入れ場所を当てるための「紙の中身」★（NomiyaTpl.guessCells に渡す形）
+   * 画面に出る文字そのものを渡す＝当てる側は Excel の中身を知らなくてよい。
+   * 番地は ★1から数える★ 形に直してある（A1 と同じ数え方にしないと必ず1つズレる）。
+   */
+  function sheetView(book, si) {
+    var s = book && book.sheets && book.sheets[si];
+    if (!s) return { maxRow: 0, maxCol: 0, cells: {}, merges: [], ruled: [] };
+    var cells = {};
+    var ruled = {};
+    Object.keys(s.cells).forEach(function (ref) {
+      var p = parseRef(ref);
+      if (!p) return;
+      cells[ref] = { text: cellText(book, s, ref), date: isDateStyle(book, s.cells[ref].s) };
+      if (hasEdge(book, s.cells[ref].s)) ruled[p.row + 1] = 1;
+    });
+    // 行そのものに付いた飾り／高さも「明細の枠」の目印になる
+    Object.keys(s.rowStyle || {}).forEach(function (r) {
+      if (hasEdge(book, s.rowStyle[r])) ruled[+r] = 1;
+    });
+    Object.keys(s.heights || {}).forEach(function (r) {
+      ruled[+r] = 1;
+    });
+    return {
+      maxRow: s.maxRow,
+      maxCol: s.maxCol,
+      cells: cells,
+      merges: (s.merges || []).map(function (m) {
+        return { r1: m.r1 + 1, c1: m.c1 + 1, r2: m.r2 + 1, c2: m.c2 + 1 };
+      }),
+      ruled: Object.keys(ruled).map(Number),
+    };
+  }
+
   /* ── 値を差し込む ──────────────────────────────────────────────── */
 
   /** 1つのセルのXMLを組み立てる（★飾り(s=)は元のまま残す★＝罫線も書体も寄せも変わらない） */
@@ -1374,6 +1418,7 @@
     fill: fill,
     setCells: setCells,
     cellText: cellText,
+    sheetView: sheetView,
     previewText: previewText,
     isDateStyle: isDateStyle,
     parseRef: parseRef,

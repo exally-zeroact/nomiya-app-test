@@ -877,6 +877,11 @@ test.describe("飲み屋 売上管理", () => {
       const n = rowsByTpl[tpl];
       await expect(page.locator("#invSheets .iv-tbl tbody tr")).toHaveCount(n);
       await expect(page.locator("#invSheets .iv-more")).toContainText("ほか " + (25 - n) + " 件");
+      /* ★書体が届く前に測らない★
+         紙の高さは字の形で決まる。明朝が届く前に測ると ★1126px★ になり、
+         届いたあとは 1123px。全部いっぺんに走らせた時だけ たまに赤くなっていた
+         （2026-08-10 に実測。アプリではなく、この確認の測り方の問題）。 */
+      await page.evaluate(() => document.fonts.ready);
       const h = await page
         .locator("#invSheets .sheet")
         .first()
