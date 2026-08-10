@@ -514,10 +514,10 @@ test.describe("自社テンプレ（お店のExcel）", () => {
     await page.mouse.up();
     await page.waitForTimeout(200);
 
-    /* ★「判子が文字の下に潜って掴めない」は、この見本では再現できなかった★
-       司さんの実物では起きたので z-index で直したが、見本では
-       ★壊しても赤にならない＝落ちようのない確認★だったので、その確認は置かない。
-       （落ちようのない試験は、あるだけ害）。実物での確認だけが根拠。 */
+    /* ★「判子が文字の下に潜って掴めない」の見張りは、下の専用テストに置いた★
+       （2026-08-09 は「見本では再現できない」と書いたが、それは ★判子の真ん中★ だけを
+         見ていたから。実際には右のほう（社名がはみ出している所）で重なっている。
+         測る場所を変えれば、この見本でも ★壊すと赤になる★。実測済み） */
     const st = await page.evaluate(() => window.__NOMIYA.settings.ownStamp);
     expect(st, "★判子の動かし量が保存されていない（設定に無い）★").toBeTruthy();
     /* ★表は画面の幅に縮めて出している★ので、
@@ -526,6 +526,84 @@ test.describe("自社テンプレ（お店のExcel）", () => {
     expect(k, "縮尺が取れていない").toBeGreaterThan(0);
     expect(st.dx, "★割り当てたあと、判子が動かない★").toBe(Math.round(-40 / k));
     expect(st.dy, "★割り当てたあと、判子が動かない★").toBe(Math.round(25 / k));
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  /* ★判子は「はみ出した文字」より上に居る（重なっている所でも指で掴める）★
+     Excelは、隣が空なら文字がマスからはみ出して見える。その文字は position:absolute の
+     span（z-index:1）なので、判子(.xl-img)の z-index を下げると
+     ★重なった所だけ 文字が上になり、判子が掴めなくなる★（司さんの実物で起きた）。
+
+     ★どこを測るかで、赤にも緑にもなる★
+       判子の真ん中は どの文字とも重なっていない＝壊しても緑のまま（2026-08-09 に
+       「見本では再現できない」と取り下げたのは、真ん中しか見ていなかったから）。
+       ★重なっている所（見本では社名「合同会社サンプル」がはみ出している右のほう）★を
+       自分で探して、そこで掴む。 */
+  test("★判子が、はみ出した文字の下に潜らない（重なった所でも掴める）★", async ({ page }) => {
+    const errors = await open(page);
+    await openLook(page);
+    await page.locator("#invTpl [data-tpl='own']").click();
+    await expect(page.locator("#ownTplRow")).toBeVisible();
+    await page.locator("#ownTplFile").setInputFiles("tests/e2e/fixtures/tpl-real-like.xlsx");
+    await expect(page.locator("#ownTplNote")).toContainText("Excelが入っています", {
+      timeout: 30000,
+    });
+    await page.locator("#btnOwnPlace").click();
+    await expect(page.locator("#xlWrap")).toBeVisible();
+    await expect(page.locator("#xlWrap .xl-img"), "★見本に判子が無い★").toBeVisible();
+
+    // 判子と、はみ出した文字が ★いちばん広く重なっている点★ を探す
+    const hit = await page.evaluate(() => {
+      const im = document.querySelector("#xlWrap .xl-img");
+      const b = im.getBoundingClientRect();
+      let best = null;
+      for (const s of document.querySelectorAll("#xlWrap td.xl-sp > span")) {
+        const r = s.getBoundingClientRect();
+        const x1 = Math.max(b.left, r.left);
+        const x2 = Math.min(b.right, r.right);
+        const y1 = Math.max(b.top, r.top);
+        const y2 = Math.min(b.bottom, r.bottom);
+        if (x2 - x1 <= 2 || y2 - y1 <= 2) continue;
+        const area = (x2 - x1) * (y2 - y1);
+        if (!best || area > best.area) {
+          best = { area, x: (x1 + x2) / 2, y: (y1 + y2) / 2, text: s.textContent.trim() };
+        }
+      }
+      if (!best) return null;
+      return {
+        x: best.x,
+        y: best.y,
+        text: best.text,
+        // その点で上から順に何が居るか（先頭が判子でなければ、文字の下に潜っている）
+        stack: document
+          .elementsFromPoint(best.x, best.y)
+          .slice(0, 3)
+          .map((e) => e.tagName + (e.className ? "." + String(e.className).split(" ")[0] : "")),
+      };
+    });
+    // ★重なりが1つも無ければ、この確認は何も見ていない★
+    expect(hit, "★判子とはみ出した文字が重なっていない＝この確認は何も見ていない★").toBeTruthy();
+    expect(
+      hit.stack[0],
+      "★重なった所で、判子より文字(" + hit.text + ")が上に居る: " + hit.stack.join(" > ") + "★"
+    ).toBe("IMG.xl-img");
+
+    // ★その重なった所から、実際に掴んで動かせる★（見た目だけでなく、指の当たりも）
+    await page.evaluate(() => (window.__NOMIYA.settings.ownStamp = null));
+    await page.mouse.move(hit.x, hit.y);
+    await page.mouse.down();
+    await page.mouse.move(hit.x - 30, hit.y + 20, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+
+    const st2 = await page.evaluate(() => window.__NOMIYA.settings.ownStamp);
+    expect(
+      st2,
+      "★文字と重なっている所で判子を掴めない（文字の下に潜っている）: " + hit.text + "★"
+    ).toBeTruthy();
+    const k2 = await page.evaluate(() => document.getElementById("xlWrap").__k || 1);
+    expect(st2.dx, "★重なった所で掴んでも、横に動かない★").toBe(Math.round(-30 / k2));
+    expect(st2.dy, "★重なった所で掴んでも、縦に動かない★").toBe(Math.round(20 / k2));
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 

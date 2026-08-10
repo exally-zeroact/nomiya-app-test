@@ -1343,7 +1343,12 @@ body {
   position: absolute;
   pointer-events: none;
   /* ★判子は文字より上★ Excelでも図形は上に載る。
-     下にすると、はみ出した文字(z-index:1)に隠れて ★指で掴めない★（実測） */
+     下にすると、はみ出した文字(z-index:1)に隠れて ★指で掴めない★（実測）
+     ★効いているのは こっちではない★（2026-08-10 実測）。
+     nomiya-ui-kami.js の紙のCSS `.xl-img{position:absolute;z-index:2;}` が後から
+     入るので、そちらが勝つ。ここだけ 0 にしても ★何も起きない★。
+     直す時は両方。見張りは own-template-xlsx.spec.js の
+     「判子が、はみ出した文字の下に潜らない」 */
   z-index: 2;
 }
 .xl-grid {
