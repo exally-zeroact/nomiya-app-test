@@ -508,6 +508,7 @@ function wireCellPlacer(TL, book, cells, labels, si) {
        ★Chrome も WebKit も戻らない★（消しても試験が緑のまま＝何も直していなかった）ので外した。 */
   var redraw = function () {
     $("xlWrap").innerHTML = xlGridHtml(book, si, {}, { pick: true, cells: cells, labels: labels });
+    fitPlacer();
     wireGrid();
     /* ★描き直したら、判子の配線も付け直す★
        付け直さないと、マスを1つ割り当てた時点で ★判子が動かなくなる★
@@ -597,9 +598,32 @@ function wireCellPlacer(TL, book, cells, labels, si) {
     toast("✅ 割り当てを決めました");
   };
 
+  fitPlacer();
   wireStamp();
   wireGrid();
   say();
+
+  /* ★表を画面の幅に収める★
+     お店の紙は 626px 幅。スマホは 390px しかないので、そのまま出すと
+     ★右の方（判子や合計）が画面の外に出て、触れない★
+     （司さん実機で「判子はなにもできない」の本当の理由。2026-08-09）。
+     縮めて全部見せる。押した所とのズレが出ないよう、倍率は指の動きにも使う。 */
+  function fitPlacer() {
+    var w = $("xlWrap");
+    var inner = w && w.querySelector(".xl-sheet");
+    if (!w || !inner) return;
+    inner.style.transformOrigin = "top left";
+    inner.style.transform = "none";
+    var gw = inner.offsetWidth || 1;
+    var gh = inner.offsetHeight || 1;
+    var k = Math.min(1, (w.clientWidth - 4) / gw);
+    w.__k = k;
+    inner.style.transform = "scale(" + k + ")";
+    /* 縮めても「場所」は元の大きさのままなので、余った分を負の余白で詰める。
+       ここを詰めないと ★横に275px 隠れたまま★ になる（実測 2026-08-09）。 */
+    inner.style.marginBottom = -(gh - gh * k) + "px";
+    inner.style.marginRight = -(gw - gw * k) + "px";
+  }
 
   /* ★判子を指で動かす★
      お店の紙の判子は、Excelの中に位置が書いてある。ここで動かした分は
@@ -638,8 +662,9 @@ function wireCellPlacer(TL, book, cells, labels, si) {
     };
     var moveTo = function (ev) {
       if (!drag) return;
-      var ddx = ev.clientX - drag.x;
-      var ddy = ev.clientY - drag.y;
+      var k = ($("xlWrap") && $("xlWrap").__k) || 1;
+      var ddx = (ev.clientX - drag.x) / k; // ★縮めている分だけ戻す★
+      var ddy = (ev.clientY - drag.y) / k;
       img.style.left = drag.l + ddx + "px";
       img.style.top = drag.t + ddy + "px";
       SETTINGS.ownStamp = { dx: Math.round(drag.dx + ddx), dy: Math.round(drag.dy + ddy) };

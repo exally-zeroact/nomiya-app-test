@@ -414,11 +414,15 @@ test.describe("自社テンプレ（お店のExcel）", () => {
     /* ★「判子が文字の下に潜って掴めない」は、この見本では再現できなかった★
        司さんの実物では起きたので z-index で直したが、見本では
        ★壊しても赤にならない＝落ちようのない確認★だったので、その確認は置かない。
-       （落ちようのない試験は、あるだけ害）。実物での確認だけが根拠。 */ const st =
-      await page.evaluate(() => window.__NOMIYA.settings.ownStamp);
+       （落ちようのない試験は、あるだけ害）。実物での確認だけが根拠。 */
+    const st = await page.evaluate(() => window.__NOMIYA.settings.ownStamp);
     expect(st, "★判子の動かし量が保存されていない（設定に無い）★").toBeTruthy();
-    expect(st.dx, "★割り当てたあと、判子が動かない★").toBe(-40);
-    expect(st.dy, "★割り当てたあと、判子が動かない★").toBe(25);
+    /* ★表は画面の幅に縮めて出している★ので、
+       画面で40px動かすと、紙の上では 40/縮尺 px 動くのが正しい。 */
+    const k = await page.evaluate(() => document.getElementById("xlWrap").__k || 1);
+    expect(k, "縮尺が取れていない").toBeGreaterThan(0);
+    expect(st.dx, "★割り当てたあと、判子が動かない★").toBe(Math.round(-40 / k));
+    expect(st.dy, "★割り当てたあと、判子が動かない★").toBe(Math.round(25 / k));
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
@@ -514,8 +518,53 @@ test.describe("自社テンプレ（お店のExcel）", () => {
       send("pointerup", cx - 40, cy + 25);
       return window.__NOMIYA.settings.ownStamp;
     });
-    expect(moved.dx, "★指で動かせない（横）★").toBe(-40);
-    expect(moved.dy, "★指で動かせない（縦）★").toBe(25);
+    // 表を画面幅に縮めているので、画面40px＝紙の上では 40/縮尺 px
+    const k2 = await page.evaluate(() => document.getElementById("xlWrap").__k || 1);
+    expect(moved.dx, "★指で動かせない（横）★").toBe(Math.round(-40 / k2));
+    expect(moved.dy, "★指で動かせない（縦）★").toBe(Math.round(25 / k2));
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  /* ★スマホの幅に、表が全部おさまること★
+     お店の紙は 626px 幅、スマホは 390px。そのまま出すと
+     ★右の方（判子・合計）が画面の外に出て触れない★
+     ＝司さんの「判子はなにもできない」の本当の理由（2026-08-09）。 */
+  test("★スマホの幅で、割り当ての表が全部見える★", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const errors = await open(page);
+    await openLook(page);
+    await page.locator("#invTpl [data-tpl='own']").click();
+    await expect(page.locator("#ownTplRow")).toBeVisible();
+    await page.locator("#ownTplFile").setInputFiles("tests/e2e/fixtures/tpl-real-like.xlsx");
+    await expect(page.locator("#ownTplNote")).toContainText("Excelが入っています", {
+      timeout: 30000,
+    });
+    await page.locator("#btnOwnPlace").click();
+    await expect(page.locator("#xlWrap")).toBeVisible();
+
+    const fit = await page.evaluate(() => {
+      const w = document.getElementById("xlWrap");
+      const inner = w.querySelector(".xl-sheet");
+      const im = w.querySelector(".xl-img");
+      const wb = w.getBoundingClientRect();
+      const ib = inner.getBoundingClientRect();
+      const mb = im ? im.getBoundingClientRect() : null;
+      return {
+        紙の元の幅: inner.offsetWidth,
+        入れ物の幅: Math.round(wb.width),
+        出ている幅: Math.round(ib.width),
+        横に隠れている: Math.round(w.scrollWidth - w.clientWidth),
+        判子が入っている: mb ? mb.right <= wb.right + 1 && mb.left >= wb.left - 1 : null,
+      };
+    });
+    expect(fit.紙の元の幅, "★見本が画面より狭い＝この確認は何も見ていない★").toBeGreaterThan(
+      fit.入れ物の幅
+    );
+    expect(fit.出ている幅, "★表が画面の幅に収まっていない★").toBeLessThanOrEqual(
+      fit.入れ物の幅 + 2
+    );
+    expect(fit.横に隠れている, "★横に隠れている所がある★").toBeLessThanOrEqual(2);
+    expect(fit.判子が入っている, "★判子が画面の外にある（触れない）★").toBe(true);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
