@@ -6496,3 +6496,101 @@ test.describe("㉚ 管理画面への入口", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
+
+/* ㉛ ファイルの渡し口（ホーム画面から開いたアプリで閉じ込められない）
+   iPhoneでホーム画面に登録したアプリ(standalone)には、URL欄も戻るボタンも無い。
+   そこで同じ窓に blob: のファイルを開くと、端末のファイル画面へ飛んだきり
+   ★アプリを殺すしか帰れない★（AIラジオで実際に司さんが閉じ込められた 2026-08-05）。
+   → 保存は必ず saveAsFile を通し、★target="_blank"★ を付ける（全アプリ共通の決まり）。
+
+   ★ここは「そう書いてあるか」ではなく「押したときに本当に付くか」を測る★
+   （書いてあるかの方は tests/nomiya-fileout.test.js） */
+test.describe("㉛ ファイルの渡し口", () => {
+  // 保存の <a> を捕まえる。本当に落とすと窓が動くので、押す所だけ横取りする。
+  async function spyAnchors(page) {
+    await page.evaluate(() => {
+      window.__anchors = [];
+      HTMLAnchorElement.prototype.click = function () {
+        window.__anchors.push({
+          download: this.getAttribute("download") || "",
+          target: this.getAttribute("target") || "",
+          rel: this.getAttribute("rel") || "",
+          href: String(this.getAttribute("href") || "").split(":")[0],
+        });
+      };
+    });
+  }
+  const anchors = (page) => page.evaluate(() => window.__anchors);
+
+  test("★保存を押すと、必ず target=_blank の <a> でファイルを渡す★", async ({ page }) => {
+    const errors = await open(page);
+    await seed(page);
+    await spyAnchors(page);
+
+    // ① 一覧タブ →「Excelに書き出す」
+    await goto(page, "list");
+    await page.locator("#btnXlsxList").click();
+    await expect(page.locator("#modalOv")).toHaveClass(/open/);
+    await page.locator("#xlOk").click();
+    await expect.poll(async () => (await anchors(page)).length, { timeout: 20000 }).toBe(1);
+
+    // ② 設定 →「書き出す」（端末の控えを丸ごとJSONで渡す）
+    await goto(page, "set");
+    await page.locator("#btnExport").click();
+    await expect.poll(async () => (await anchors(page)).length, { timeout: 10000 }).toBe(2);
+
+    const got = await anchors(page);
+    // ★1つも捕まえていないなら、この確認は何も見ていない★
+    expect(got.length, "★保存を押したのに <a> が作られていない＝何も見ていない★").toBe(2);
+    for (const a of got) {
+      expect(a.download, "保存の名前が付いていない: " + JSON.stringify(a)).not.toBe("");
+      expect(
+        a.target,
+        "★target=_blank が無い＝ホーム画面から開いたアプリが、そのファイルの画面から戻れなくなる: " +
+          JSON.stringify(a) +
+          "★"
+      ).toBe("_blank");
+      expect(a.rel, "rel=noopener が無い: " + JSON.stringify(a)).toContain("noopener");
+      expect(a.href, "端末の中で作った物を渡していない: " + JSON.stringify(a)).toBe("blob");
+    }
+    // 中身から作った名前が出ている（空の "ダウンロード" にしない）
+    expect(got[0].download, "Excelの名前が中身から作られていない").toMatch(/売上帳.*\.xlsx$/);
+    expect(got[1].download, "控えの名前が日付付きになっていない").toMatch(
+      /^uriage-\d{4}-\d{2}-\d{2}\.json$/
+    );
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  /* ★新しい窓を開けない端末（ホーム画面のアプリは開けないことがある）★
+     そのときは その場で保存に切り替える。ここが渡し口を通っていないと、
+     ★一番閉じ込められやすい場面で、閉じ込められる★ */
+  test("★新しい窓が開けない端末では、PDFを渡し口(target=_blank)で保存する★", async ({ page }) => {
+    const errors = await open(page);
+    await seed(page);
+    await spyAnchors(page);
+    await page.evaluate(() => {
+      window.__openCalls = 0;
+      window.open = function () {
+        window.__openCalls++;
+        return null; // 開けない端末のふり
+      };
+    });
+
+    await goto(page, "list");
+    await page.locator("#btnPrintList").click();
+    await expect.poll(async () => (await anchors(page)).length, { timeout: 25000 }).toBe(1);
+
+    expect(await page.evaluate(() => window.__openCalls), "新しい窓を開けにいっていない").toBe(1);
+    expect(await page.evaluate(() => window.__PDF_ERR__ || ""), "PDFが作れずに逃げている").toBe("");
+    const a = (await anchors(page))[0];
+    expect(a.download, "PDFの名前が付いていない: " + JSON.stringify(a)).toMatch(/\.pdf$/);
+    expect(
+      a.target,
+      "★窓が開けない端末なのに target=_blank が無い＝そのまま閉じ込められる: " +
+        JSON.stringify(a) +
+        "★"
+    ).toBe("_blank");
+    expect(a.href, "端末の中で作った物を渡していない: " + JSON.stringify(a)).toBe("blob");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+});

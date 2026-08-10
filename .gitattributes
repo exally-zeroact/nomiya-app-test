@@ -1,0 +1,32 @@
+## 改行コードを、どの環境でも ★LF★ に固定する
+#
+# ★なぜ要るか（2026-08-10 実測）★
+#   配るJS/CSSは `?v=<中身のSHA>` を押して配っている（scripts/stamp-assets.mjs）。
+#   Windowsの手元だけ CRLF になっていると、同じ中身なのにSHAが変わる。
+#   その版を押したまま push すると、CI(Linux・LFで取り出す)では
+#   ★「版が中身と違う」で必ず赤★ になる（手元は緑のまま＝原因が見えない最悪の形）。
+#   実際に b23c4c6 / 77316c9 / 0d6f409 の3コミット連続でCIが落ちていた。
+#     nomiya-uriage.css   html=34189c38 / CIでの中身=1c3264e5
+#     nomiya-ui-uriage.js html=92a87159 / CIでの中身=18d0b02e
+#
+#   同じ穴は アマかせ 2026-08-08 でも踏んでいる（あちらは 手元赤・CI緑 の向き）。
+#   ★中身のSHAで配る物を持つrepoは、必ずこの1枚を置く★
+
+* text=auto eol=lf
+
+# 中身をいじってはいけない物（改行の変換をかけない）
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.xlsx binary
+*.xls binary
+*.zip binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.mp4 binary

@@ -1702,10 +1702,9 @@ function printSheets(innerId, title) {
       var w = window.open(url, "_blank");
       if (!w) {
         // 新しい窓を開けない端末は、その場で保存する
-        var a = document.createElement("a");
-        a.href = url;
-        a.download = title + ".pdf";
-        a.click();
+        // ★渡し口は saveAsFile ただ1つ★（target=_blank が付く。ホーム画面から開いたアプリで
+        //   同じ窓にPDFが開くと、戻る導線が無くて閉じ込められる）
+        saveAsFile(blob, title + ".pdf");
         toast("📄 " + title + " を保存しました。開いて印刷してください");
       } else {
         toast("📄 " + title + " を開きました。共有／プリントから印刷できます");

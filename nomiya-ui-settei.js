@@ -149,15 +149,9 @@ function onExport() {
     works: WORKS,
   };
   var blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-  var a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "uriage-" + todayIso() + ".json";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(function () {
-    URL.revokeObjectURL(a.href);
-  }, 1000);
+  // ★渡し口は saveAsFile ただ1つ★（target=_blank が付く。ホーム画面から開いたアプリで
+  //   同じ窓にファイルが開くと、戻る導線が無くて閉じ込められる）
+  saveAsFile(blob, "uriage-" + todayIso() + ".json");
   toast("💾 書き出しました");
 }
 
