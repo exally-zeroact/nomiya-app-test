@@ -42,7 +42,7 @@
       href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="nomiya-uriage.css?v=f0276124" />
+    <link rel="stylesheet" href="nomiya-uriage.css?v=492d3a25" />
     <!-- A4用紙のスタイル（画面プレビューと印刷用の新しい窓で同じものを使う＝見た目のズレを作らない） -->
     <style id="sheetCss"></style>
     <!-- 店の色・書体の上書き（設定で選んだときだけ中身が入る） -->
@@ -295,11 +295,13 @@
           <div class="frow" id="ownTplRow" style="display: none">
             <span class="flabel">自社のテンプレ</span>
             <div class="btn-row">
+              <!-- ★2行になる所は、こちらで決める★
+                   自動の折り返しに任せると「…決め／る」で切れる（司さんの指摘 2026-08-09） -->
               <button class="btn btn-ghost btn-sm" type="button" id="btnOwnPick">
-                テンプレを選ぶ（Excel・PDF・写真）
+                テンプレを選ぶ<br />（Excel・PDF・写真）
               </button>
               <button class="btn btn-ghost btn-sm" type="button" id="btnOwnPlace">
-                項目の置き場所を決める
+                項目の置き場所を<br />決める
               </button>
             </div>
             <input

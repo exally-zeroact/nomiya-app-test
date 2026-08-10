@@ -460,4 +460,62 @@ test.describe("自社テンプレ（お店のExcel）", () => {
     );
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
+
+  /* ★「指」で動かせること★
+     司さん実機で「判子はなにもできない」（2026-08-09）。
+     マウスでは動いていた＝★試験がマウスだけだったので気づけなかった★。
+     iPhoneでは
+       ・表は横に動く箱の中なので、指を置くと ★ブラウザが先にスクロールを始める★（touch-action:none が要る）
+       ・絵は長押しで保存メニュー／画像のドラッグが始まる
+     ので、★指の出来事(pointer/touch)★ で動くことを確かめる。 */
+  test("★指(タッチ)で判子を動かせる★", async ({ page }) => {
+    const errors = await open(page);
+    await openLook(page);
+    await page.locator("#invTpl [data-tpl='own']").click();
+    await expect(page.locator("#ownTplRow")).toBeVisible();
+    await page.locator("#ownTplFile").setInputFiles("tests/e2e/fixtures/tpl-real-like.xlsx");
+    await expect(page.locator("#ownTplNote")).toContainText("Excelが入っています", {
+      timeout: 30000,
+    });
+    await page.locator("#btnOwnPlace").click();
+    await expect(page.locator("#xlWrap")).toBeVisible();
+    await assign(page, "to", "A3"); // 先に割り当てる（実際の順番）
+
+    const css = await page.evaluate(() => {
+      const im = document.querySelector("#xlWrap .xl-img");
+      const c = getComputedStyle(im);
+      return { touch: c.touchAction, pe: c.pointerEvents, cls: im.className };
+    });
+    expect(css.pe, "判子が押せない設定になっている").toBe("auto");
+    expect(css.touch, "★touch-action が none でない＝指を置いた瞬間にスクロールが始まる★").toBe(
+      "none"
+    );
+
+    const moved = await page.evaluate(() => {
+      const im = document.querySelector("#xlWrap .xl-img");
+      const b = im.getBoundingClientRect();
+      const cx = b.left + b.width / 2;
+      const cy = b.top + b.height / 2;
+      const send = (type, x, y) =>
+        im.dispatchEvent(
+          new PointerEvent(type, {
+            pointerId: 1,
+            pointerType: "touch",
+            isPrimary: true,
+            clientX: x,
+            clientY: y,
+            bubbles: true,
+            cancelable: true,
+          })
+        );
+      send("pointerdown", cx, cy);
+      send("pointermove", cx - 20, cy + 12);
+      send("pointermove", cx - 40, cy + 25);
+      send("pointerup", cx - 40, cy + 25);
+      return window.__NOMIYA.settings.ownStamp;
+    });
+    expect(moved.dx, "★指で動かせない（横）★").toBe(-40);
+    expect(moved.dy, "★指で動かせない（縦）★").toBe(25);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
 });

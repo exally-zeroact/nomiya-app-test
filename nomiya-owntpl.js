@@ -604,50 +604,98 @@ function wireCellPlacer(TL, book, cells, labels, si) {
   /* ★判子を指で動かす★
      お店の紙の判子は、Excelの中に位置が書いてある。ここで動かした分は
      ★書き出すときに、その Excel の中の判子そのものを動かす★（別の絵を重ねない）。 */
+  /* ★判子を指で動かす★
+     ------------------------------------------------------------------
+     ★iPhoneでは「指」の扱いが違う★（司さん実機で「判子はなにもできない」2026-08-09）
+       ・表は横に動く箱の中にあるので、指を置いた瞬間 ★ブラウザがスクロールを始める★。
+         そのままだと touchmove が来ない／来ても遅い。→ ★touch-action:none★ が要る。
+       ・絵は長押しで ★保存メニュー／画像のドラッグ★ が始まる。
+         → -webkit-touch-callout / -webkit-user-drag / user-select を止める。
+       ・指が絵から外れても追いかけたい。→ ★setPointerCapture★ で指を掴んでおく。
+     マウスも指も同じ道（Pointer Events）で扱う。 */
   function wireStamp() {
-    var img = $("xlWrap").querySelector(".xl-img");
+    var img = $("xlWrap") && $("xlWrap").querySelector(".xl-img");
     if (!img) return;
-    img.style.pointerEvents = "auto";
-    img.style.cursor = "move";
+    img.classList.add("xl-drag"); // 動かせる印（点線の枠）＋ 指の邪魔を止めるCSS
     var drag = null;
-    var pt = function (ev) {
-      var t = ev.touches && ev.touches[0] ? ev.touches[0] : ev;
-      return { x: t.clientX, y: t.clientY };
-    };
-    var start = function (ev) {
-      var p = pt(ev);
+    var startAt = function (ev) {
       var st = SETTINGS.ownStamp || { dx: 0, dy: 0 };
       drag = {
-        x: p.x,
-        y: p.y,
+        x: ev.clientX,
+        y: ev.clientY,
         dx: +st.dx || 0,
         dy: +st.dy || 0,
-        l: parseFloat(img.style.left),
-        t: parseFloat(img.style.top),
+        l: parseFloat(img.style.left) || 0,
+        t: parseFloat(img.style.top) || 0,
       };
+      try {
+        img.setPointerCapture(ev.pointerId);
+      } catch (e) {
+        /* 古い端末では掴めなくてよい（下の document 側で拾う） */
+      }
       ev.preventDefault();
       ev.stopPropagation();
     };
-    var move = function (ev) {
+    var moveTo = function (ev) {
       if (!drag) return;
-      var p = pt(ev);
-      img.style.left = drag.l + (p.x - drag.x) + "px";
-      img.style.top = drag.t + (p.y - drag.y) + "px";
-      SETTINGS.ownStamp = {
-        dx: Math.round(drag.dx + (p.x - drag.x)),
-        dy: Math.round(drag.dy + (p.y - drag.y)),
-      };
+      var ddx = ev.clientX - drag.x;
+      var ddy = ev.clientY - drag.y;
+      img.style.left = drag.l + ddx + "px";
+      img.style.top = drag.t + ddy + "px";
+      SETTINGS.ownStamp = { dx: Math.round(drag.dx + ddx), dy: Math.round(drag.dy + ddy) };
       ev.preventDefault();
     };
-    var end = function () {
+    var endAt = function () {
+      if (!drag) return;
       drag = null;
+      saveSettings(); // 動かした分は、その場で覚える
+      renderAll();
     };
-    img.addEventListener("mousedown", start);
-    img.addEventListener("touchstart", start, { passive: false });
-    document.addEventListener("mousemove", move);
-    document.addEventListener("touchmove", move, { passive: false });
-    document.addEventListener("mouseup", end);
-    document.addEventListener("touchend", end);
+    if (window.PointerEvent) {
+      img.addEventListener("pointerdown", startAt);
+      img.addEventListener("pointermove", moveTo);
+      img.addEventListener("pointerup", endAt);
+      img.addEventListener("pointercancel", endAt);
+      document.addEventListener("pointermove", moveTo);
+      document.addEventListener("pointerup", endAt);
+    } else {
+      // Pointer Events の無い古い端末
+      var pt = function (ev) {
+        var t = ev.touches && ev.touches[0] ? ev.touches[0] : ev;
+        return {
+          clientX: t.clientX,
+          clientY: t.clientY,
+          preventDefault: function () {
+            ev.preventDefault();
+          },
+          stopPropagation: function () {
+            ev.stopPropagation();
+          },
+        };
+      };
+      img.addEventListener("mousedown", function (e) {
+        startAt(pt(e));
+      });
+      img.addEventListener(
+        "touchstart",
+        function (e) {
+          startAt(pt(e));
+        },
+        { passive: false }
+      );
+      document.addEventListener("mousemove", function (e) {
+        moveTo(pt(e));
+      });
+      document.addEventListener(
+        "touchmove",
+        function (e) {
+          moveTo(pt(e));
+        },
+        { passive: false }
+      );
+      document.addEventListener("mouseup", endAt);
+      document.addEventListener("touchend", endAt);
+    }
   }
 }
 
@@ -938,7 +986,10 @@ function renderOwnTplRow() {
   if (!on) return;
   var place = $("btnOwnPlace");
   var xl = !!SETTINGS.ownXlsx;
-  if (place) place.textContent = xl ? "どのマスに入れるか決める" : "項目の置き場所を決める";
+  /* ★2行になる所を、こちらで決める★
+     自動の折り返しに任せると「…決め／る」で切れる（司さんの指摘 2026-08-09）。
+     下の段は「決める」で揃える。 */
+  if (place) place.innerHTML = xl ? "どのマスに入れるか<br>決める" : "項目の置き場所を<br>決める";
   var out = $("btnOwnXlsx");
   if (out) out.style.display = xl ? "" : "none";
   var note = $("ownTplNote");

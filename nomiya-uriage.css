@@ -1321,6 +1321,23 @@ body {
 .xl-sheet {
   position: relative;
 }
+/* ★判子を指で動かせるようにする★
+   iPhoneでは、指を置いた瞬間にブラウザが横スクロールを始めるので touch-action:none が要る。
+   絵の長押しで出る保存メニューや画像のドラッグも止める。
+   （司さん実機で「判子はなにもできない」2026-08-09） */
+.xl-grid ~ .xl-img.xl-drag,
+.xl-img.xl-drag {
+  pointer-events: auto;
+  cursor: move;
+  touch-action: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  /* 動かせることが分かる印 */
+  outline: 2px dashed var(--c-accent);
+  outline-offset: 2px;
+}
 /* 貼ってある絵（判子・ロゴ）。表の上に、Excelと同じ場所へ重ねる */
 .xl-img {
   position: absolute;
