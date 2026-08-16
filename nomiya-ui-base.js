@@ -233,15 +233,22 @@ function saveSales() {
   }
   queuePush();
 }
+/** 設定を端末に覚える。
+ *  ★入らなかったら false を返す★（黙って捨てない）。
+ *  2026-08-16 実測：端末の控えが満杯のとき、ここが黙って諦めていたので
+ *  「✅ Excelを入れました」と出るのに ★開き直すと消えている★ という嘘が出た。
+ *  他の save*（売上・宛先・スタッフ）は前から一言出している。ここだけ黙っていた。 */
 function saveSettings(keepAt) {
   try {
     if (!keepAt) SET_AT = new Date().toISOString();
     localStorage.setItem(K_SET, JSON.stringify(SETTINGS));
     localStorage.setItem(K_SET_AT, SET_AT);
   } catch (e) {
-    /* 設定が保存できなくても画面は動かす */
+    toast("⚠️ 端末の空きが足りず保存できませんでした");
+    return false;
   }
   if (!keepAt) queuePush();
+  return true;
 }
 /** 作ったファイルを端末に渡す。
  *  ★target=_blank は必ず付ける★（ホーム画面から開いたアプリだと、同じ窓でファイルが開いて

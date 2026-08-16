@@ -872,6 +872,21 @@ function exportOwnXlsx() {
       if (made.skipped.length)
         msgs.push("計算式のマス（" + made.skipped.join("・") + "）には入れていません");
       var suggest = ownXlsxSuggestName(d);
+      /* ★どれを「ほか」にまとめたかは、押す前に画面で見られる★（紙には出さない）
+         黙ってまとめると、あとで「この日の分はどこ？」に答えられない。 */
+      var mergedHtml = "";
+      if (plan.merged && plan.merged.length) {
+        mergedHtml =
+          '<details class="look" style="margin-top:8px"><summary>「ほか ' +
+          plan.merged.length +
+          '件」の中身を見る</summary><div class="hint" style="margin-top:6px">' +
+          plan.merged
+            .map(function (r) {
+              return esc((r.dateText || r.date || "") + "　" + C.yen(r.amount));
+            })
+            .join("<br>") +
+          "</div></details>";
+      }
       openModal(
         "お店のExcelに入れて渡す",
         '<div class="frow"><span class="flabel">ファイル名</span>' +
@@ -885,6 +900,7 @@ function exportOwnXlsx() {
           "マスぶん入れます。★元のファイルは変わりません★" +
           (msgs.length ? "<br>★" + esc(msgs.join(" / ")) + "★" : "") +
           "</div>" +
+          mergedHtml +
           '<div style="margin-top:12px"><button class="btn btn-primary" id="oxOk">書き出す</button></div>'
       );
       $("oxOk").onclick = function () {
@@ -1127,7 +1143,45 @@ var OWN_XLSX_MAX = 2 * 1024 * 1024;
  *    端末から消えることがある（iPhone/WebKitで実際に起きた：
  *    「読めませんでした（The object can not be found here.）」）。
  *    先に読んでしまえば、あとから消えても困らない。 */
+/** いまのテンプレまわりの設定を控える（入らなかったら、そっくり元へ戻すため） */
+function ownTplSnapshot() {
+  return {
+    ownXlsx: SETTINGS.ownXlsx,
+    ownXlsxName: SETTINGS.ownXlsxName,
+    ownSheet: SETTINGS.ownSheet,
+    ownCells: SETTINGS.ownCells,
+    ownStamp: SETTINGS.ownStamp,
+    ownTpl: SETTINGS.ownTpl,
+    ownFields: SETTINGS.ownFields,
+    tpl: SETTINGS.tpl,
+  };
+}
+function ownTplRestore(snap) {
+  Object.keys(snap).forEach(function (k) {
+    SETTINGS[k] = snap[k];
+  });
+  OWN_BOOK = null;
+  _bookFor = "";
+  saveSettings();
+  renderOwnTplRow();
+  renderAll();
+}
+/** ★端末に入らなければ、入れる前の姿へ戻して 止める★（「入れました」と嘘をつかない）
+ *  2026-08-16 実測：控えが満杯のとき、画面は「✅ 12コ当てました」なのに
+ *  控えも倉庫も空＝★開き直すと消えていた★。 */
+function saveOwnTplOrRollback(snap, whatKb) {
+  if (saveSettings()) return true;
+  ownTplRestore(snap);
+  toast(
+    "⚠️ 端末の空きが足りません（この物は約" +
+      whatKb +
+      "KB）。判子や前のテンプレ、いらない写真を減らしてから もう一度どうぞ"
+  );
+  return false;
+}
+
 function takeOwnXlsx(u8, name) {
+  var snap = ownTplSnapshot();
   return Promise.resolve()
     .then(function () {
       if (u8.length > OWN_XLSX_MAX)
@@ -1150,7 +1204,7 @@ function takeOwnXlsx(u8, name) {
           var g = autoGuess(TL, book, 0);
           SETTINGS.ownCells = g;
           SETTINGS.ownStamp = { dx: 0, dy: 0 }; // 紙が変われば判子の位置も元に戻す
-          saveSettings();
+          if (!saveOwnTplOrRollback(snap, Math.round(u8.length / 1024))) return;
           renderOwnTplRow();
           renderAll();
           var n = Object.keys(g).length;
@@ -1197,6 +1251,7 @@ function wireOwnTpl() {
       return;
     }
     toast("📄 紙を読んでいます…");
+    var snap = ownTplSnapshot();
     ownTplFromFile(f)
       .then(function (dataUrl) {
         SETTINGS.ownTpl = dataUrl;
@@ -1206,7 +1261,8 @@ function wireOwnTpl() {
         if (!SETTINGS.ownFields || !Object.keys(SETTINGS.ownFields).length) {
           SETTINGS.ownFields = window.NomiyaTpl ? window.NomiyaTpl.defaults() : {};
         }
-        saveSettings();
+        // ★入らなければ 入れる前へ戻して止める（「入れました」と嘘をつかない）
+        if (!saveOwnTplOrRollback(snap, Math.round((dataUrl.length * 0.75) / 1024))) return;
         renderOwnTplRow();
         renderAll();
         toast("✅ 紙を入れました。次に「項目の置き場所を決める」を押してください");

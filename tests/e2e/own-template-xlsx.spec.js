@@ -373,6 +373,67 @@ test.describe("自社テンプレ（お店のExcel）", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
+  /* ★枠に入りきらない月は「ほか ◯件」の1行にまとめる★（指示役の裁定(c)・2026-08-16）
+     ★紙の明細を足した額 ＝ 請求額★ でなければ、客が明細を足して合わないと言ってくる。
+     ここは ★書き出した本物のExcelを読み戻して★ 足し算で確かめる（画面の中の値では見ない）。 */
+  test("★明細があふれた月：ほか◯件にまとめ、紙の明細を足すと請求額に合う★", async ({ page }, info) => {
+    const errors = await open(page);
+    // 4件（合計 110,000円）を、明細3行しか無いテンプレに入れる
+    await addSale(page, { date: "2026-08-01", name: "山田商事", amount: 44000 });
+    await addSale(page, { date: "2026-08-05", name: "山田商事", amount: 33000 });
+    await addSale(page, { date: "2026-08-09", name: "山田商事", amount: 22000 });
+    await addSale(page, { date: "2026-08-12", name: "山田商事", amount: 11000 });
+    await pickCompany(page, "山田商事");
+    await openLook(page);
+    await putXlsx(page);
+
+    await page.locator("#btnOwnPlace").click();
+    await assign(page, "to", "B4");
+    await assign(page, "total", "E33");
+    await assign(page, "cDate", "A10");
+    await assign(page, "cName", "C10");
+    await assign(page, "cAmount", "E10");
+    await assign(page, "lastRow", "A12"); // ★10〜12行＝3行しか無い★
+    await page.locator("#xlcOk").click();
+
+    await page.locator("#btnOwnXlsx").click();
+    // ★黙ってまとめない★
+    const hint = await page.locator("#modalOv .hint").first().textContent();
+    expect(hint, "★まとめたことを画面に出していない★").toContain("「ほか」にまとめました");
+    // ★どれをまとめたかを、押す前に見られる★
+    const det = page.locator("#modalOv details");
+    await expect(det, "★まとめた中身を見る所が無い★").toBeVisible();
+    await det.locator("summary").click();
+    const inside = await det.textContent();
+    expect(inside, "まとめた明細の中身が出ていない").toContain("¥22,000");
+    expect(inside, "まとめた明細の中身が出ていない").toContain("¥11,000");
+
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.locator("#oxOk").click(),
+    ]);
+    const out = path.join(info.outputDir, "over.xlsx");
+    await download.saveAs(out);
+    const book = await T.open(new Uint8Array(fs.readFileSync(out)));
+    const s = book.sheets[0];
+
+    // ★3行の枠を1行も越えていない（元から在る空のマスに、値を書いていない）★
+    expect(s.cells.E13 ? s.cells.E13.v : null, "★枠の下まで書いている★").toBe(null);
+    expect(s.cells.A13 ? s.cells.A13.v : null, "★枠の下まで書いている★").toBe(null);
+    // 2行が明細・3行目が「ほか 2件」
+    expect(T.cellText(book, s, "E10")).toBe("44000");
+    expect(T.cellText(book, s, "E11")).toBe("33000");
+    expect(T.cellText(book, s, "C12"), "★「ほか ◯件」の行が無い★").toBe("ほか 2件");
+    // ★紙に出た明細を1行ずつ足したら 請求額★
+    const paid = ["E10", "E11", "E12"].map((r) => Number(s.cells[r].v));
+    const sum = paid.reduce((a, b) => a + b, 0);
+    expect(paid[2], "「ほか」の金額が違う").toBe(33000);
+    expect(sum, "★紙の明細を足した額 ≠ 請求額★").toBe(110000);
+    expect(Number(String(T.cellText(book, s, "E33")).replace(/,/g, "")), "合計欄が違う").toBe(110000);
+
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
   test("マスを決めていなければ、理由を出して止まる", async ({ page }) => {
     const errors = await open(page);
     await addSale(page, { date: "2026-08-01", name: "山田商事", amount: 44000 });

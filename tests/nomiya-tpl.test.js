@@ -207,26 +207,126 @@ describe("自社テンプレ：Excelのどのマスに入れるか", () => {
     ).toBe(true);
   });
 
-  it("★テンプレの枠に入りきらない分は、書かずに知らせる★", () => {
-    const many = { ...D, rows: [] };
-    for (let i = 0; i < 30; i++)
-      many.rows.push({ date: "2026-08-01", dateText: "8/1", name: "x", people: 1, amount: 1000 });
-    const cells = { ...CELLS, lastRow: "A14" }; // 10〜14行＝5行しか無い
-    expect(T.detailCapacity(cells), "入る行数を数え違えている").toBe(5);
-    const p = T.planEdits(cells, many);
-    expect(p.over, "あふれた件数が合わない").toBe(25);
-    expect(p.warn.join(""), "あふれたことを知らせていない").toContain("25 件");
-    // 明細の日付の列だけを数える（A37=振込先は明細ではないので混ぜない）
-    const detailDates = p.edits.filter((e) => e.kind === "date" && /^A\d+$/.test(e.ref));
-    expect(detailDates.length, "枠を越えて書いている").toBe(5);
-    expect(
-      detailDates.map((e) => e.ref),
-      "並べる行が違う"
-    ).toEqual(["A10", "A11", "A12", "A13", "A14"]);
-    expect(
-      p.edits.some((e) => e.ref === "A15"),
-      "★最終行の下まで書いている★"
-    ).toBe(false);
+  /* ★枠に入りきらない分は「ほか ◯件」の1行にまとめる★（指示役の裁定(c)・2026-08-16）
+     前は「書かずに知らせる」だった。それだと ★紙の明細を足しても請求額にならない紙★ が
+     客先へ出る（客が明細を足して合わないと言ってくる＝一番 高くつく型）。
+     ここで縛るのは ★紙に出た金額を1行ずつ足したら 請求額と1円もずれない★ こと。 */
+  describe("★あふれた明細は「ほか ◯件」にまとめる（紙の合計が必ず合う）★", () => {
+    /** 実物と同じ形：明細16行・税抜と消費税の列がある */
+    const CELLS16 = {
+      ...CELLS,
+      cAmount: null,
+      cNet: "E10",
+      cTax: "F10",
+      lastRow: "A25", // 10〜25行＝16行
+    };
+    delete CELLS16.cAmount;
+
+    /** n件の売上（1件 11,000円＝税抜10,000／消費税1,000） */
+    function makeRows(n) {
+      const rows = [];
+      for (let i = 0; i < n; i++)
+        rows.push({
+          date: "2026-08-01",
+          dateText: "8/1",
+          name: "ご飲食代",
+          people: 2,
+          amount: 11000,
+          net: 10000,
+          tax: 1000,
+          memo: "",
+        });
+      return rows;
+    }
+    const data = (n) => {
+      const rows = makeRows(n);
+      return {
+        ...D,
+        rows,
+        net: 10000 * n,
+        tax: 1000 * n,
+        total: 11000 * n,
+        grand: 11000 * n,
+      };
+    };
+    /** 紙に出た ★明細の行だけ★ を1行ずつ足す（★中の値ではなく、書いた物を足す★）
+        10〜25行が明細。E31/E32/E33 は請求の合計欄なので混ぜない（混ぜると 40,000 ずれる） */
+    const rowNo = (ref) => +ref.replace(/\D/g, "");
+    const sumCol = (p, col) =>
+      p.edits
+        .filter(
+          (e) =>
+            e.ref.startsWith(col) &&
+            e.kind === "number" &&
+            rowNo(e.ref) >= 10 &&
+            rowNo(e.ref) <= 25
+        )
+        .reduce((a, e) => a + e.value, 0);
+
+    it("入る行数を数え違えていない（16行）", () => {
+      expect(T.detailCapacity(CELLS16)).toBe(16);
+    });
+
+    for (const n of [16, 17, 30]) {
+      it(`★${n}件：紙の明細を足した額 ＝ 請求額／16行を1行も超えない★`, () => {
+        const d = data(n);
+        const p = T.planEdits(CELLS16, d);
+        // 明細として使った行は 10〜25 の中だけ（31〜33は請求の合計欄・36〜37は店と振込先）
+        const usedRows = p.edits
+          .map((e) => rowNo(e.ref))
+          .filter((r) => r >= 10 && r <= 30);
+        expect(Math.max(...usedRows), "★16行の枠を越えて書いている★").toBeLessThanOrEqual(25);
+        // ★恒等式★
+        expect(sumCol(p, "E"), "★紙の税抜を足すと 請求の税抜に合わない★").toBe(d.net);
+        expect(sumCol(p, "F"), "★紙の消費税を足すと 請求の消費税に合わない★").toBe(d.tax);
+        expect(sumCol(p, "E") + sumCol(p, "F"), "★紙の明細の合計 ≠ 請求額★").toBe(d.total);
+        // 16件ちょうどは まとめない／超えたらまとめる
+        const other = p.edits.filter((e) => /^ほか \d+件$/.test(String(e.value)));
+        if (n <= 16) {
+          expect(other.length, "まだ入るのに まとめている").toBe(0);
+          expect(p.merged.length).toBe(0);
+        } else {
+          expect(other.length, "★「ほか」の行が無い＝黙って落としている★").toBe(1);
+          expect(other[0].value, "まとめた件数が違う").toBe("ほか " + (n - 15) + "件");
+          expect(p.merged.length, "まとめた明細を返していない").toBe(n - 15);
+          expect(
+            p.warn.join(""),
+            "★黙ってまとめている（画面に出す言葉が無い）★"
+          ).toContain("「ほか」にまとめました");
+        }
+        expect(p.over, "★捨てた件数が残っている（まとめたのに）★").toBe(0);
+      });
+    }
+
+    it("★1件ずつ丸めた税の合計がずれても、紙は請求額に合わせる★", () => {
+      // 1件 1,000円（税抜909・消費税91）を20件＝丸めで合計がずれる形
+      const rows = [];
+      for (let i = 0; i < 20; i++)
+        rows.push({
+          date: "2026-08-01",
+          dateText: "8/1",
+          name: "ご飲食代",
+          people: 1,
+          amount: 1000,
+          net: 909,
+          tax: 91,
+          memo: "",
+        });
+      const d = { ...D, rows, net: 18182, tax: 1818, total: 20000, grand: 20000 };
+      const p = T.planEdits(CELLS16, d);
+      expect(sumCol(p, "E"), "★紙の税抜が請求の税抜と違う★").toBe(18182);
+      expect(sumCol(p, "F"), "★紙の消費税が請求の消費税と違う★").toBe(1818);
+      expect(sumCol(p, "E") + sumCol(p, "F"), "★紙の明細の合計 ≠ 請求額★").toBe(20000);
+    });
+
+    it("名前も備考の列も決めていない店は、今までどおり知らせるだけ", () => {
+      const cells = { ...CELLS16 };
+      delete cells.cName;
+      delete cells.cMemo;
+      const p = T.planEdits(cells, data(30));
+      expect(p.over, "置き場所が無いのに まとめている").toBe(14);
+      expect(p.warn.join(""), "知らせていない").toContain("入りきりません");
+    });
   });
 
   it("最終行を決めていなければ、件数ぶんそのまま並べる", () => {

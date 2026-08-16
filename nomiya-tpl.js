@@ -255,11 +255,23 @@
 
     var start = detailStart(c);
     var over = 0;
+    var merged = []; // ★「ほか」にまとめた明細（画面で見せる／紙には出さない）★
     if (start) {
       var cap = detailCapacity(c);
       var rows = d.rows || [];
+      /* ★枠に入りきらない分は「ほか ◯件」の1行にまとめる★（指示役 2026-08-16 の裁定(c)）
+         書かずに捨てると ★紙の明細を足しても請求額にならない紙★ が客先へ出る。
+         ＝「合計と明細が合わない紙」＝うちで一番 高くつく型。
+         まとめる文字は名前の列（無ければ備考の列）に置く。どちらも無い店だけ、
+         今までどおり「入りきりません」と知らせるだけにする（置く場所が無いので）。 */
+      var otherKey = c.cName ? "cName" : c.cMemo ? "cMemo" : "";
       var n = cap ? Math.min(rows.length, cap) : rows.length;
-      over = rows.length - n;
+      if (cap && rows.length > cap && otherKey) {
+        n = cap - 1; // ★最後の1行は「ほか」に使う★
+        merged = rows.slice(n);
+      } else {
+        over = rows.length - n;
+      }
       var map = {
         cDate: { get: "date", kind: "date" },
         cName: { get: "name", kind: "text" },
@@ -284,11 +296,56 @@
           });
         });
       }
-      if (over > 0) warn.push("明細が " + over + " 件 入りきりません（合計には入っています）");
+      if (merged.length) {
+        /* ★「ほか」の金額は 足し算ではなく「合計 − 出した分」で出す★
+           1件ずつ税を丸めているので、残りを足すと合計と1円ずれることがある。
+           ★紙の明細を足した額 ＝ 請求額★ を必ず成り立たせる（指示役の合格条件）。 */
+        var sumOf = function (key) {
+          var t = 0;
+          for (var j = 0; j < n; j++) t += +(rows[j][key] || 0);
+          return t;
+        };
+        var allOf = function (key) {
+          var t = 0;
+          for (var j = 0; j < rows.length; j++) t += +(rows[j][key] || 0);
+          return t;
+        };
+        var totalFor = function (key, whole) {
+          return (whole == null || whole === "" ? allOf(key) : +whole) - sumOf(key);
+        };
+        var restRow = start + n;
+        edits.push({
+          ref: colLetters(c[otherKey]) + restRow,
+          kind: "text",
+          value: "ほか " + merged.length + "件",
+          force: true,
+        });
+        [
+          ["cAmount", "amount", d.total],
+          ["cNet", "net", d.net],
+          ["cTax", "tax", d.tax],
+        ].forEach(function (x) {
+          if (!c[x[0]]) return;
+          edits.push({
+            ref: colLetters(c[x[0]]) + restRow,
+            kind: "number",
+            value: totalFor(x[1], x[2]),
+            force: true,
+          });
+        });
+        // ★ は出す側（画面）が付けるので、ここでは付けない（★★になる）
+        warn.push(merged.length + "件を「ほか」にまとめました（合計は合っています）");
+      }
+      if (over > 0)
+        warn.push(
+          "明細が " +
+            over +
+            " 件 入りきりません（★名前か備考の列を決めれば「ほか ◯件」にまとめます★）"
+        );
     } else if (detailCols(c).length) {
       warn.push("明細の列が ★別々の行★ を指しています。同じ行のセルを選んでください");
     }
-    return { edits: edits, over: over, warn: warn };
+    return { edits: edits, over: over, merged: merged, warn: warn };
   }
 
   /* ══════════════════════════════════════════════════════════════════
