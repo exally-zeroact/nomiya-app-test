@@ -17,7 +17,8 @@ import { test, expect } from "@playwright/test";
 
 const PAGE = "/nomiya-uriage.html";
 const FIX = "tests/e2e/fixtures/tpl-real-like.xlsx";
-const FIX2 = "tests/e2e/fixtures/tpl-invoice.xlsx";
+/* ★「端末の控えが満杯のとき」は heavy-own-template-storage.spec.js に切り出した★
+   （控えを5MB埋めるので、ふつうの試験と同時に走らせない＝2026-08-17 指示役） */
 
 test.setTimeout(90000);
 
@@ -112,89 +113,6 @@ test.describe("お店のExcelは、機種を変えても残る", () => {
     await page.locator("#btnOwnPlace").click();
     await expect(page.locator("#xlWrap")).toBeVisible();
     await page.locator("#xlcOk").click();
-    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
-  });
-
-  /* ★入らない物は、入れる前の姿に戻して止まる★
-     控えが満杯のときに「入れました」と出して、実は保存できていない＝★黙って消える★
-     （2026-08-16 実測。JSエラーは0なので、これを見張らないと誰も気づけない） */
-  test("★端末の空きが足りないときは「入れました」と言わず、前のテンプレを残す★", async ({
-    page,
-  }) => {
-    const errors = await open(page);
-    await openOwnTplRow(page);
-    // 先に ★小さいほう★ を入れておく（この店は もう使えている状態）
-    await page.locator("#ownTplFile").setInputFiles(FIX2);
-    await expect(page.locator("#ownTplNote")).toContainText("Excelが入っています", {
-      timeout: 30000,
-    });
-    const before = await deviceTpl(page);
-    expect(before.len).toBeGreaterThan(1000);
-
-    // 端末の控えを ★隙間まで★ 埋める（判子・写真・売上で埋まった店と同じ状態）
-    const filled = await page.evaluate(() => {
-      let bytes = 0;
-      for (const chunk of [64 * 1024, 4 * 1024, 512]) {
-        for (let i = 0; i < 600; i++) {
-          try {
-            localStorage.setItem("__ballast" + chunk + "_" + i, "x".repeat(chunk));
-            bytes += chunk;
-          } catch (e) {
-            break;
-          }
-        }
-      }
-      return Math.round(bytes / 1024);
-    });
-    // ★本当に満杯でなければ、この確認は何も見ていない★
-    expect(filled, "端末の控えを埋められていない").toBeGreaterThan(1000);
-    const full = await page.evaluate(() => {
-      try {
-        localStorage.setItem("__t", "x".repeat(4 * 1024));
-        localStorage.removeItem("__t");
-        return false;
-      } catch (e) {
-        return true;
-      }
-    });
-    expect(full, "★控えがまだ空いている＝満杯を再現できていない★").toBe(true);
-
-    // ★もっと大きいテンプレ★ に入れ替えようとする（増える分は入らない）
-    await page.locator("#ownTplFile").setInputFiles(FIX);
-    await expect(page.locator("#toast"), "★空きが無いことを知らせていない★").toContainText(
-      "端末の空きが足りません",
-      { timeout: 30000 }
-    );
-    // ★「入れました」と言っていない★
-    const toastText = await page.locator("#toast").textContent();
-    expect(toastText, "★入っていないのに「入れました」と出している★").not.toContain(
-      "Excelを入れました"
-    );
-
-    // ★前のテンプレがそのまま残っている（画面も中身も）★
-    const nowDev = await deviceTpl(page);
-    expect(nowDev.name, "★前のテンプレが壊れた★").toBe(before.name);
-    const inMem = await page.evaluate(() => ({
-      len: (window.__NOMIYA.settings.ownXlsx || "").length,
-      name: window.__NOMIYA.settings.ownXlsxName || "",
-    }));
-    expect(inMem.name, "★画面の中だけ新しい物になっている（開き直すと消える）★").toBe(before.name);
-    expect(inMem.len, "★画面の中だけ新しい物になっている（開き直すと消える）★").toBe(before.len);
-
-    // 開き直しても、画面で見えていた物と同じ物が残る（嘘にならない）
-    await page.evaluate(() =>
-      Object.keys(localStorage)
-        .filter((k) => k.startsWith("__ballast") || k.startsWith("__fine"))
-        .forEach((k) => localStorage.removeItem(k))
-    );
-    await page.reload({ waitUntil: "load" });
-    await expect(page.locator("#scr-input")).toBeVisible();
-    const after = await page.evaluate(() => ({
-      len: (window.__NOMIYA.settings.ownXlsx || "").length,
-      name: window.__NOMIYA.settings.ownXlsxName || "",
-    }));
-    expect(after.name, "★開き直したらテンプレが消えた★").toBe(before.name);
-    expect(after.len, "★開き直したらテンプレが消えた★").toBe(before.len);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });
