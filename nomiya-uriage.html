@@ -42,7 +42,7 @@
       href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="nomiya-uriage.css?v=07dee8d7" />
+    <link rel="stylesheet" href="nomiya-uriage.css?v=09a07c4c" />
     <!-- A4用紙のスタイル（画面プレビューと印刷用の新しい窓で同じものを使う＝見た目のズレを作らない） -->
     <style id="sheetCss"></style>
     <!-- 店の色・書体の上書き（設定で選んだときだけ中身が入る） -->
@@ -352,12 +352,18 @@
         <div class="btn-row no-print">
           <button class="btn btn-ghost" id="btnPrintInv">🖨 印刷 / PDFにする</button>
         </div>
-        <!-- 自社のテンプレが Excel のときだけ出る（お店のExcelに入れて渡す） -->
+        <!-- 自社のテンプレが Excel のときだけ出る。
+             ★言葉は「何が手に入るか」だけ書く★（中の動きは書かない・隣の「印刷 / PDFにする」と形をそろえる）
+             司さん「意味わからない」2026-08-17。押せない時の理由は renderOwnTplRow が中に書く。 -->
         <div class="btn-row no-print">
           <button class="btn btn-ghost" id="btnOwnXlsx" style="display: none">
-            📊 お店のExcelに入れて出す
+            📊 Excelにする（お店の様式）
           </button>
         </div>
+        <!-- ★押せない理由と、その直し方への入口★
+             ここは「見た目を変える」の ★外★ に置く。中に置くと畳んだ時に消えて
+             ★たどり着けない★（司さん実機 2026-08-17「押しても何も起きない」）。 -->
+        <div class="hint no-print why-row" id="ownXlsxWhy" style="display: none"></div>
         <div class="btn-row no-print">
           <button class="btn btn-ghost" id="btnPaid">この請求分を入金済みにする</button>
         </div>
@@ -887,7 +893,7 @@
     <script defer src="hanko.js?v=d1d32621"></script>
     <script defer src="nomiya-core.js?v=f0399771"></script>
     <!-- ★画面のJS。読み込む順番が命（起動は最後）。tests/app-source.mjs が食い違いを見張る -->
-    <script defer src="nomiya-ui-base.js?v=fe1e8d05"></script>
+    <script defer src="nomiya-ui-base.js?v=9d03610e"></script>
     <script defer src="nomiya-ui-uriage.js?v=18d0b02e"></script>
     <script defer src="nomiya-ui-kaishu.js?v=53cff47e"></script>
     <script defer src="nomiya-ui-kami.js?v=870b8129"></script>

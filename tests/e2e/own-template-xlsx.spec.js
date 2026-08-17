@@ -434,17 +434,25 @@ test.describe("自社テンプレ（お店のExcel）", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
-  test("マスを決めていなければ、理由を出して止まる", async ({ page }) => {
+  /* ★マスを決めていなければ「押す前に」理由を出す★
+     ★2026-08-17 に決まりが変わった★：前は「押したらトーストで理由」だったが、
+     司さんの実機で ★押しても何も起きない★ に見えた（トーストは消える・気づかない）。
+     → ★灰色にして、理由をボタンの中に書く★（押す前に分かる）。
+     押した時の toast は ★最後の砦★として残す（配線が切れた時のため）。 */
+  test("マスを決めていなければ、押す前に理由が出る（灰色＋理由）", async ({ page }) => {
     const errors = await open(page);
     await addSale(page, { date: "2026-08-01", name: "山田商事", amount: 44000 });
     await pickCompany(page, "山田商事");
     await openLook(page);
     await putXlsx(page);
     /* ★入れた時点で当ててある★ので、まず全部消してから確かめる。
-       （消さずに押すと ふつうに書き出せてしまい、この確認は何も見ていないことになる） */
+       （消さずに見ると ふつうに押せてしまい、この確認は何も見ていないことになる） */
     await clearAssign(page);
-    await page.locator("#btnOwnXlsx").click();
-    await expect(page.locator("#toast"), "理由が出ていない").toContainText("書く場所が決まって");
+    const out = page.locator("#btnOwnXlsx");
+    await expect(out, "★決まっていないのに押せる＝押しても何も起きない形★").toBeDisabled();
+    await expect(out, "★理由がボタンの中に無い★").toContainText("書く場所が決まっていません");
+    // 直し方への入口も、畳みの外に出ている
+    await expect(page.locator("#ownTplFix"), "★直し方への入口が無い★").toBeVisible();
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 

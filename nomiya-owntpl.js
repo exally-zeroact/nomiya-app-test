@@ -408,6 +408,93 @@ function autoGuess(TL, book, si) {
   }
 }
 
+/** ★テンプレと「書く場所」は いつも一緒に保存する★
+ *  片方だけ書く道を残すと ★テンプレは在るのに当てが無い★ 状態が生まれる
+ *  （司さんの実機で実際に起きた。2026-08-17）。書き手はこの1つだけ。 */
+function saveOwnTpl(patch) {
+  var keys = [
+    "ownXlsx",
+    "ownXlsxName",
+    "ownSheet",
+    "ownCells",
+    "ownStamp",
+    "ownTpl",
+    "ownFields",
+    "ownNoGuess",
+    "tpl",
+  ];
+  keys.forEach(function (k) {
+    if (patch && Object.prototype.hasOwnProperty.call(patch, k)) SETTINGS[k] = patch[k];
+  });
+  return saveSettings();
+}
+
+/** ★当てて・保存して・知らせる★ ＝ 入れた時も 当て直す時も ★ここ1か所★ を通す
+ *  （2か所に書くと、必ずどちらかが古くなる） */
+function guessAndSave(TL, book, si, why) {
+  var g = autoGuess(TL, book, si);
+  var n = Object.keys(g).length;
+  var ok = saveOwnTpl({
+    ownCells: g,
+    ownSheet: si,
+    ownStamp: { dx: 0, dy: 0 }, // 紙が変われば判子の位置も元に戻す
+    ownNoGuess: false,
+  });
+  renderOwnTplRow();
+  renderAll();
+  if (!ok) return { n: n, saved: false };
+  // ★黙って直さない★（人が押していない直しほど、必ず知らせる）
+  if (why === "repair")
+    toast(
+      n
+        ? "✅ 書く場所が入っていなかったので、★" + n + "コ 当てておきました★"
+        : "⚠️ この紙からは書く場所を当てられませんでした。「書く場所をたしかめる」から決めてください"
+    );
+  else
+    toast(
+      n
+        ? "✅ Excelを入れました。★書く場所も " +
+            n +
+            "コ 当てておきました★。「書く場所をたしかめる」で見てください"
+        : "✅ Excelを入れました。次に「書く場所をたしかめる」を押してください"
+    );
+  return { n: n, saved: true };
+}
+
+/** ★テンプレは在るのに「書く場所」が無い古い控えを、開いた時に直す★
+ *  ・人が「全部 空にする」で わざと空にした時は 直さない（ownNoGuess の印）
+ *  ・同じテンプレに対して 何度も走らせない */
+var _repairing = false;
+function ensureOwnGuess() {
+  if (_repairing) return Promise.resolve(false);
+  if (!SETTINGS.ownXlsx || SETTINGS.ownNoGuess) return Promise.resolve(false);
+  var TLnow = window.NomiyaTpl;
+  var have = TLnow ? Object.keys(TLnow.normalizeCells(SETTINGS.ownCells)).length : 0;
+  if (have) return Promise.resolve(false);
+  _repairing = true;
+  /* ★Excelを読む部品を先に読む★（開いた直後は まだ入っていない）。
+     ここを忘れると ownBook() が落ちて ★黙って直らない★（この直しを書いた1回目で実際に踏んだ） */
+  return loadXlsxTplLib()
+    .then(function () {
+      return Promise.all([loadTplLib(), ownBook()]);
+    })
+    .then(function (a) {
+      var TL = a[0];
+      var book = a[1];
+      if (!book) return false;
+      var si = Math.min(SETTINGS.ownSheet || 0, book.sheets.length - 1);
+      guessAndSave(TL, book, si, "repair");
+      return true;
+    })
+    .catch(function () {
+      return false;
+    })
+    .then(function (r) {
+      _repairing = false;
+      return r;
+    });
+}
+
 /** 言葉のボタンを「束ごと」に並べる
  *  ★18個をいっぺんに出さない★（司さん「こんだけ項目あるけどなんなん」2026-08-10）。
  *  ふだん触らない物は「そのほか」に畳んでおく（<details>＝端末の力で開く。JSは要らない）。 */
@@ -661,9 +748,14 @@ function wireCellPlacer(TL, book, cells, labels, si) {
   };
 
   $("xlcOk").onclick = function () {
-    SETTINGS.ownCells = TL.normalizeCells(cells);
-    SETTINGS.ownSheet = si;
-    saveSettings();
+    var kept = TL.normalizeCells(cells);
+    /* ★人が「全部 空にする」で わざと空にしたのか、仕組みが当てていないのかを分ける★
+       印が無いと、開くたびに勝手に当て直して ★人の操作を上書きする★。 */
+    saveOwnTpl({
+      ownCells: kept,
+      ownSheet: si,
+      ownNoGuess: !Object.keys(kept).length,
+    });
     closeModal();
     renderAll();
     toast("✅ 割り当てを決めました");
@@ -888,7 +980,7 @@ function exportOwnXlsx() {
           "</div></details>";
       }
       openModal(
-        "お店のExcelに入れて渡す",
+        "Excelにする（お店の様式）",
         '<div class="frow"><span class="flabel">ファイル名</span>' +
           '<input class="finput" type="text" id="oxName" value="' +
           esc(suggest) +
@@ -924,6 +1016,17 @@ function exportOwnXlsx() {
 /* ── 置き場所を決める画面 ────────────────────────────────────── */
 
 /** いま置いている物を、A4のプレビューの上で指で動かせるようにする */
+/** ★どこから押しても、1回で「書く場所をたしかめる」に着く★
+ *  請求書の設定は <details>（見た目を変える）に畳んである。畳んだまま裏で開くと、
+ *  窓を閉じたあと ★どこに居るか分からなくなる★ ので、畳みも開けてから開く。
+ *  （司さん実機「押しても何も起きない」2026-08-17／案内先が畳みの中だった） */
+function openOwnPlacerFromHere() {
+  var d = document.querySelectorAll("#scr-inv details.look");
+  for (var i = 0; i < d.length; i++) if (d[i].id !== "partnerBox") d[i].open = true;
+  renderOwnTplRow();
+  return openOwnPlacer();
+}
+
 function openOwnPlacer() {
   if (SETTINGS.ownXlsx) return openCellPlacer();
   loadTplLib()
@@ -1096,6 +1199,8 @@ function renderOwnTplRow() {
   if (!row) return;
   var on = (SETTINGS.tpl || "card") === "own";
   row.style.display = on ? "" : "none";
+  var why = $("ownXlsxWhy");
+  if (why && !on) why.style.display = "none";
   if (!on) return;
   var place = $("btnOwnPlace");
   var xl = !!SETTINGS.ownXlsx;
@@ -1107,22 +1212,61 @@ function renderOwnTplRow() {
      （司さん「どのマスに入れるかとか意味が分かりにくい」2026-08-10）。 */
   if (place) place.innerHTML = xl ? "書く場所を<br>たしかめる" : "項目の置き場所を<br>決める";
   var out = $("btnOwnXlsx");
-  if (out) out.style.display = xl ? "" : "none";
   var note = $("ownTplNote");
+  var n = Object.keys(
+    window.NomiyaTpl ? window.NomiyaTpl.normalizeCells(SETTINGS.ownCells) : {}
+  ).length;
+  if (out) {
+    out.style.display = xl ? "" : "none";
+    /* ★押しても何も起きない物を作らない★（司さん実機 2026-08-17）
+       押せない時は ★灰色＋理由をボタンの中に★ 書く。トーストで理由を出すのは
+       「押してから分かる」＝遅い。 */
+    if (xl) {
+      out.disabled = !n;
+      out.textContent = n
+        ? "📊 Excelにする（お店の様式）"
+        : "📊 Excelにする（書く場所が決まっていません）";
+    }
+  }
+  /* ★押せない理由と、直し方への入口を「畳みの外」に出す★
+     案内先（書く場所をたしかめる）は「見た目を変える」の中にあるので、
+     ここに入口を置かないと ★言われた物にたどり着けない★（司さん実機 2026-08-17）。 */
+  if (why) {
+    var noCells = xl && !n;
+    why.style.display = noCells ? "" : "none";
+    if (noCells) {
+      why.innerHTML =
+        "<div>" +
+        "お店のExcelは入っていますが、<b>どのマスに書くかが決まっていません</b>。" +
+        "</div>" +
+        '<button class="btn btn-ghost btn-sm" type="button" id="ownTplFix">' +
+        "書く場所をたしかめる</button>";
+      var fx = $("ownTplFix");
+      if (fx)
+        fx.onclick = function () {
+          openOwnPlacerFromHere();
+        };
+    }
+  }
   if (!note) return;
   if (xl) {
     var kb2 = Math.round((SETTINGS.ownXlsx.length * 0.75) / 1024);
-    var n = Object.keys(
-      window.NomiyaTpl ? window.NomiyaTpl.normalizeCells(SETTINGS.ownCells) : {}
-    ).length;
-    note.textContent =
-      "Excelが入っています：" +
-      (SETTINGS.ownXlsxName || "テンプレ") +
-      "（約" +
-      kb2 +
-      "KB）。" +
-      (n ? "書く場所は ★" + n + "コ 当ててあります★。" : "★書く場所がまだ決まっていません★。") +
-      "元のファイルは変えません。";
+    /* ★テンプレは在るのに当てが無い古い控えは、その場で当て直す★
+       （司さんの端末で起きていた。仕組みが出来る前に入れたテンプレ） */
+    if (!n && !SETTINGS.ownNoGuess && typeof ensureOwnGuess === "function") ensureOwnGuess();
+    note.innerHTML =
+      esc(
+        "Excelが入っています：" +
+          (SETTINGS.ownXlsxName || "テンプレ") +
+          "（約" +
+          kb2 +
+          "KB）。" +
+          (n
+            ? "書く場所は ★" + n + "コ 当ててあります★。"
+            : "★書く場所がまだ決まっていません★。") +
+          "元のファイルは変えません。"
+      );
+    /* 直し方への入口は ★畳みの外（#ownXlsxWhy）★ に1つだけ置く（ここには置かない） */
     return;
   }
   if (!SETTINGS.ownTpl) {
@@ -1201,20 +1345,17 @@ function takeOwnXlsx(u8, name) {
            （司さん「入ってからこんだけ項目あるけどなんなん」2026-08-10）。
            当てた結果は下書き。「書く場所をたしかめる」で1つずつ直せる。 */
         return loadTplLib().then(function (TL) {
-          var g = autoGuess(TL, book, 0);
-          SETTINGS.ownCells = g;
-          SETTINGS.ownStamp = { dx: 0, dy: 0 }; // 紙が変われば判子の位置も元に戻す
-          if (!saveOwnTplOrRollback(snap, Math.round(u8.length / 1024))) return;
-          renderOwnTplRow();
-          renderAll();
-          var n = Object.keys(g).length;
-          toast(
-            n
-              ? "✅ Excelを入れました。★書く場所も " +
-                  n +
-                  "コ 当てておきました★。「書く場所をたしかめる」で見てください"
-              : "✅ Excelを入れました。次に「書く場所をたしかめる」を押してください"
-          );
+          /* ★当てて・保存して・知らせるのは guessAndSave 1か所★（当て直しと同じ処理を通す）。
+             入らなかった時だけ、入れる前の姿へ戻して止める。 */
+          var r = guessAndSave(TL, book, 0, "new");
+          if (!r.saved) {
+            ownTplRestore(snap);
+            toast(
+              "⚠️ 端末の空きが足りません（この物は約" +
+                Math.round(u8.length / 1024) +
+                "KB）。判子や前のテンプレ、いらない写真を減らしてから もう一度どうぞ"
+            );
+          }
         });
       });
     })

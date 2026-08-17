@@ -269,6 +269,26 @@ body {
   cursor: pointer;
   transition: all 0.15s;
 }
+/* ★押せないボタンは「灰色＋押せない指」★（司さん実機 2026-08-17）
+   理由はボタンの中に書く決まりなので、見た目でも ★押せないと分かる★ ようにする。
+   （字は読める濃さを残す＝理由が読めないと意味がない） */
+.btn:disabled,
+.btn[disabled] {
+  background: var(--c-bg);
+  color: var(--c-label);
+  border-color: var(--c-line2);
+  border-style: dashed;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+/* 押せない物の理由と、その直し方への入口（畳みの外に置く） */
+.why-row {
+  display: block;
+  margin: 6px 2px 0;
+}
+.why-row .btn {
+  margin-top: 6px;
+}
 /* 主役のボタンは、枠を太く濃くして見分ける（面の色は同じ） */
 .btn-primary {
   background: var(--c-btn);

@@ -88,3 +88,34 @@ describe("ファイルの渡し口（ホーム画面アプリで閉じ込めら�
     ).toBeGreaterThanOrEqual(2);
   });
 });
+
+/* ★ボタンの言葉は「何が手に入るか」だけ書く（中の動きを書かない）★
+   司さん「意味わからない」2026-08-17。「入れて出す」＝中で何をするかの説明。
+   ★画面の字はJSが上書きするので、HTMLだけ直しても直った気になる★（実測）。
+   だからHTMLとJSの両方から、人に見せる字として残っていないかを見る。
+   実UIの側は tests/e2e/own-template-repair.spec.js の④が押して測る。 */
+describe("人に見せるボタンの言葉", () => {
+  const HTML_AND_JS = [
+    { file: "nomiya-uriage.html", text: fs.readFileSync(path.join(ROOT, "nomiya-uriage.html"), "utf8") },
+  ].concat(SRC);
+
+  it("★配っている物に「入れて出す／入れて渡す」が残っていない★", () => {
+    const hits = [];
+    for (const s of HTML_AND_JS) {
+      const c = code(s.text);
+      ["入れて出す", "入れて渡す"].forEach((w) => {
+        if (c.includes(w)) hits.push(s.file + "の「" + w + "」");
+      });
+    }
+    expect(
+      hits,
+      "★中の動きを書いた言葉が残っている: " + hits.join(" / ") + "（何が手に入るかを書く）★"
+    ).toEqual([]);
+  });
+
+  it("★言い換えた先の言葉が、ちゃんと在る（消しただけになっていない）★", () => {
+    const all = HTML_AND_JS.map((s) => s.text).join("\n");
+    expect(all.includes("Excelにする（お店の様式）"), "言い換えた先の言葉が無い").toBe(true);
+    expect(all.includes("印刷 / PDFにする"), "隣のボタンの言葉が変わっている").toBe(true);
+  });
+});

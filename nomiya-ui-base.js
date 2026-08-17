@@ -55,6 +55,11 @@ function defaultSettings() {
     ownXlsxName: "",
     ownSheet: 0,
     ownCells: {},
+    /* ★人が「全部 空にする」で わざと空にした印★
+       これが無いと、開くたびに勝手に当て直して ★人の操作を上書きする★。
+       ここ（既定値）に書き忘れると load() が黙って捨てるので、開き直した瞬間に
+       印が消えて また当て直す（＝この項目は必ず既定値に置く）。 */
+    ownNoGuess: false,
     // ★お店のExcelに貼ってある判子を動かした量（px）★ 触らなければ 0＝Excelのまま
     ownStamp: { dx: 0, dy: 0 },
     logo: "",
