@@ -980,7 +980,7 @@ function exportOwnXlsx() {
           "</div></details>";
       }
       openModal(
-        "Excelにする（お店の様式）",
+        "Excelに書き出す（お店の様式）",
         '<div class="frow"><span class="flabel">ファイル名</span>' +
           '<input class="finput" type="text" id="oxName" value="' +
           esc(suggest) +
@@ -1224,8 +1224,8 @@ function renderOwnTplRow() {
     if (xl) {
       out.disabled = !n;
       out.textContent = n
-        ? "📊 Excelにする（お店の様式）"
-        : "📊 Excelにする（書く場所が決まっていません）";
+        ? "📊 Excelに書き出す（お店の様式）"
+        : "📊 Excelに書き出す（書く場所が決まっていません）";
     }
   }
   /* ★押せない理由と、直し方への入口を「畳みの外」に出す★

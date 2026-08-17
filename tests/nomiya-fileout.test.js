@@ -98,24 +98,55 @@ describe("人に見せるボタンの言葉", () => {
   const HTML_AND_JS = [
     { file: "nomiya-uriage.html", text: fs.readFileSync(path.join(ROOT, "nomiya-uriage.html"), "utf8") },
   ].concat(SRC);
+  const ALL = HTML_AND_JS.map((s) => s.text).join("\n");
+  /* ★コメントを外すのは「ファイルごと」★
+     束ねてから外すと、HTMLの中の "/*" が別のファイルの終わりと組になって
+     ★間の中身を丸ごと消す★（この見張りを書いた1回目で実際に踏んだ＝0件になった）。 */
+  const CODE = HTML_AND_JS.map((s) => code(s.text)).join("\n");
 
-  it("★配っている物に「入れて出す／入れて渡す」が残っていない★", () => {
+  /* ★同じ動きは、アプリのどこでも同じ言い方★（司さん 2026-08-17「なんで統一させてないんど」）
+     私は請求書側だけ「Excelにする」と付けて、★一覧タブに既に在る「Excelに書き出す」を数えなかった★。
+     ＝CLAUDE.md 5章「作る前に、社内に同じ物が無いか探す」を飛ばした。
+     だから ★言い方が2通りになったら赤★ にする。 */
+  const BANNED = [
+    ["入れて出す", "中の動きを書いている"],
+    ["入れて渡す", "中の動きを書いている"],
+    ["Excelにする", "書き出しの言い方が2通りになる（正は「Excelに書き出す」）"],
+    ["テンプレを選ぶ", "読み込みの言い方が2通りになる（正は「お店の様式を読み込む」）"],
+  ];
+
+  it("★言い方が2通りになる言葉が、配る物に残っていない★", () => {
     const hits = [];
     for (const s of HTML_AND_JS) {
       const c = code(s.text);
-      ["入れて出す", "入れて渡す"].forEach((w) => {
-        if (c.includes(w)) hits.push(s.file + "の「" + w + "」");
+      BANNED.forEach(function (b) {
+        if (c.includes(b[0])) hits.push(s.file + "の「" + b[0] + "」＝" + b[1]);
       });
     }
-    expect(
-      hits,
-      "★中の動きを書いた言葉が残っている: " + hits.join(" / ") + "（何が手に入るかを書く）★"
-    ).toEqual([]);
+    expect(hits, "★" + hits.join(" / ") + "★").toEqual([]);
   });
 
-  it("★言い換えた先の言葉が、ちゃんと在る（消しただけになっていない）★", () => {
-    const all = HTML_AND_JS.map((s) => s.text).join("\n");
-    expect(all.includes("Excelにする（お店の様式）"), "言い換えた先の言葉が無い").toBe(true);
-    expect(all.includes("印刷 / PDFにする"), "隣のボタンの言葉が変わっている").toBe(true);
+  it("★正しい言い方が、要る所ぜんぶに在る（消しただけになっていない）★", () => {
+    // Excelを受け取るボタンは2か所（一覧の売上帳／請求書のお店の様式）＝同じ言葉で始まる
+    const n = (ALL.match(/Excelに書き出す/g) || []).length;
+    expect(n, "「Excelに書き出す」が足りない（一覧と請求書の2か所に要る）").toBeGreaterThanOrEqual(3);
+    expect(ALL.includes("Excelに書き出す（お店の様式）"), "請求書側の言葉が無い").toBe(true);
+    expect(ALL.includes("お店の様式を"), "読み込み側の言葉が無い").toBe(true);
+    expect(ALL.includes("印刷 / PDFにする"), "印刷の言葉が変わっている").toBe(true);
+  });
+
+  it("★同じ動きの言い方を数える（増えたら気づく）★", () => {
+    const 書き出し = ["Excelに書き出す", "Excelにする", "Excelで出す", "Excelを作る", "入れて出す"].filter(
+      (w) => CODE.includes(w)
+    );
+    const 読み込み = ["お店の様式を", "テンプレを選ぶ", "様式を選ぶ", "紙を選ぶ"].filter((w) =>
+      CODE.includes(w)
+    );
+    expect(書き出し, "★書き出しの言い方が2通り以上ある: " + 書き出し.join("・") + "★").toEqual([
+      "Excelに書き出す",
+    ]);
+    expect(読み込み, "★読み込みの言い方が2通り以上ある: " + 読み込み.join("・") + "★").toEqual([
+      "お店の様式を",
+    ]);
   });
 });

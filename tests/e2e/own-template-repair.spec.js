@@ -146,7 +146,7 @@ test.describe("テンプレは在るのに当てが無い（司さんの実機�
       timeout: 30000,
     });
     const out = page.locator("#btnOwnXlsx");
-    await expect(out, "Excelにするボタンが出ていない").toBeVisible();
+    await expect(out, "Excelに書き出すボタンが出ていない").toBeVisible();
     await expect(out, "当たっているのに押せない").toBeEnabled();
 
     // 人が「全部 空にする」を押した状態＝当てが無い（ここは自動で当て直さない）
@@ -219,20 +219,25 @@ test.describe("テンプレは在るのに当てが無い（司さんの実機�
       timeout: 30000,
     });
     const out = page.locator("#btnOwnXlsx");
-    await expect(out, "★言葉が「Excelにする（お店の様式）」でない★").toContainText(
-      "Excelにする（お店の様式）"
+    /* ★同じ動きは同じ言い方★（司さん 2026-08-17「なんで統一させてないんど」）
+       一覧タブの売上帳も「📊 Excelに書き出す」。請求書側だけ別の言い方にしない。 */
+    await expect(out, "★言葉が「Excelに書き出す（お店の様式）」でない★").toContainText(
+      "Excelに書き出す（お店の様式）"
     );
     // 隣（印刷）と形がそろっている
     await expect(page.locator("#btnPrintInv")).toContainText("印刷 / PDFにする");
     // 画面のどこにも「入れて出す／入れて渡す」を出さない
     const bad = await page.evaluate(() => {
       const t = document.body.innerText;
-      return ["入れて出す", "入れて渡す"].filter((w) => t.includes(w));
+      // ★中の動きを書いた言葉／言い方が2通りになる言葉を、画面に出さない★
+      return ["入れて出す", "入れて渡す", "Excelにする", "テンプレを選ぶ"].filter((w) =>
+        t.includes(w)
+      );
     });
     expect(bad, "★人に見せる字に「" + bad.join("・") + "」が残っている★").toEqual([]);
     // 押して出る窓の題も同じ言葉
     await out.click();
-    await expect(page.locator("#modalTitle")).toContainText("Excelにする");
+    await expect(page.locator("#modalTitle")).toContainText("Excelに書き出す");
     const inModal = await page.evaluate(() => document.getElementById("modalOv").innerText);
     expect(
       ["入れて出す", "入れて渡す"].filter((w) => inModal.includes(w)),
