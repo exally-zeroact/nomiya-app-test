@@ -19,7 +19,8 @@
     "stamp": "node scripts/stamp-assets.mjs",
     "compare": "node scripts/compare-repos.mjs",
     "measure": "node scripts/measure-start.mjs",
-    "selftest": "node tests/check-kit.selftest.mjs"
+    "selftest": "node tests/check-kit.selftest.mjs",
+    "check:deployed": "node scripts/check-deployed-version.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.16.0",
