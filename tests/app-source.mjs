@@ -92,6 +92,32 @@ const ON_DISK = fs
   }
 }
 
+/* ── ★あとから読む物（遅れて読むJS）★ ────────────────────────────────────────
+   お店のテンプレ・Excelの部品は、押した時に初めて読む（ふだんの起動を軽くするため）。
+   ＝ HTML の <script src> には出てこない。
+   ★2026-08-18 実測：言葉の見張りが nomiya-owntpl.js を1文字も見ていなかった★
+   （そこに「割り当て」という中の言葉が残っていて、0コ空にしたのに「決めました」と出ていた）。
+   ＝「見ていない場所がある見張り」は、その場所については ★何も見ていない緑★。
+   だから ★遅れて読む物も、置いてある物と突き合わせて 必ず範囲に入れる★。 */
+const LAZY_NAMES = [
+  ...new Set(
+    (UI_FILES.length ? UI_FILES.map((f) => read(f)).join(String.fromCharCode(10)) : INLINE_JS)
+      .matchAll(new RegExp(String.raw`[.]src\s*=\s*"([^"]+[.]js)"`, "g"))
+  )
+]
+  .map((m) => m[1])
+  .filter((f) => !/^https?:/i.test(f))
+  .sort();
+{
+  const missing = LAZY_NAMES.filter((f) => !fs.existsSync(path.join(ROOT, f)));
+  if (missing.length)
+    throw new Error("あとから読むJSが置いていない[" + missing.join(",") + "]");
+  if (!LAZY_NAMES.length)
+    throw new Error("あとから読むJSが1本も見つからない＝見張りの範囲が空になっている");
+}
+/** あとから読むJS（押した時に読む物）。ファイル名と中身。 */
+export const LAZY_JS = LAZY_NAMES.map((f) => ({ file: f, text: read(f) }));
+
 export const PAGE_JS = must(
   "画面を作っているJS",
   UI_FILES.length ? UI_FILES.map((f) => read(f)).join("\n") : INLINE_JS,

@@ -245,4 +245,52 @@ test.describe("テンプレは在るのに当てが無い（司さんの実機�
     ).toEqual([]);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
+  /* ★実際に押して出た「知らせ」を読む★（画面の外から言葉を数えるだけでは足りない）
+     2026-08-18 実測：0コ 空にしたのに「✅ 割り当てを決めました」と出ていた
+     ＝やった事と違う事を言う＋中の言葉（割り当て）を見せていた。 */
+  test("★⑤ 押して出る知らせは、やった事のとおり・言い方は1通り★", async ({ page }) => {
+    const errors = await open(page);
+    await addSaleAndPick(page, "山田商事");
+    await openOwnTplRow(page);
+    await page.locator("#ownTplFile").setInputFiles(FIX);
+    await expect(page.locator("#ownTplNote")).toContainText("Excelが入っています", {
+      timeout: 30000,
+    });
+    // 入れた直後 ＝「書く場所を ○コ」で言う
+    await expect(page.locator("#toast")).toContainText("書く場所");
+
+    await page.locator("#btnOwnPlace").click();
+    await expect(page.locator("#xlWrap")).toBeVisible({ timeout: 30000 });
+
+    // もう一度 自動で当てる → 数を言う
+    await page.locator("#xlcAuto").click();
+    await expect(page.locator("#toast")).toContainText("当て直しました");
+    await expect(page.locator("#toast")).toContainText("コ");
+
+    // 全部 空にする → 「消しました」ではなく「空にしました」（したことのとおり）
+    await page.locator("#xlcClear").click();
+    await expect(page.locator("#toast")).toContainText("書く場所を 全部 空にしました");
+
+    // これでよい → ★0コなのに「決めました」と言わない★
+    await page.locator("#xlcOk").click();
+    await expect(page.locator("#toast")).toContainText("空のまま");
+    expect(await cellCount(page), "空にしたのに残っている").toBe(0);
+
+    // 画面のどこにも中の言葉（割り当て）を出さない
+    const jargon = await page.evaluate(() => document.body.innerText.includes("割り当て"));
+    expect(jargon, "★人に見せる字に「割り当て」が残っている★").toBe(false);
+
+    // 当て直して、書き出す前の窓で ★2つの数が結び付いている★
+    await page.locator("#ownTplFix").click();
+    await expect(page.locator("#xlWrap")).toBeVisible({ timeout: 30000 });
+    await page.locator("#xlcAuto").click();
+    await page.locator("#xlcOk").click();
+    const n = await cellCount(page);
+    expect(n, "当て直せていない").toBeGreaterThan(0);
+    await page.locator("#btnOwnXlsx").click();
+    await expect(page.locator("#oxName")).toBeVisible({ timeout: 60000 });
+    const hint = await page.evaluate(() => document.getElementById("modalBody").innerText);
+    expect(hint, "★マスの数と書く場所の数が結び付いていない★").toContain("決めてある書く場所は " + n + "コ");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
 });

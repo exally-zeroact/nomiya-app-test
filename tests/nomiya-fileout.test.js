@@ -19,13 +19,19 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { ROOT, SCRIPT_SRCS } from "./app-source.mjs";
+import { ROOT, SCRIPT_SRCS, LAZY_JS } from "./app-source.mjs";
 
 /** 配っている自前のJS（vendor は他人の物なので見ない） */
 const APP_JS = SCRIPT_SRCS.filter((s) => !s.startsWith("vendor/")).filter((s) =>
   fs.existsSync(path.join(ROOT, s))
 );
-const SRC = APP_JS.map((f) => ({ file: f, text: fs.readFileSync(path.join(ROOT, f), "utf8") }));
+/* ★あとから読む物まで入れる★（2026-08-18）
+   HTMLの <script src> だけを見ていたので、押した時に読む nomiya-owntpl.js などを
+   ★1文字も見ていなかった★＝その範囲については「何も見ていない緑」だった。 */
+const SRC = APP_JS.map((f) => ({
+  file: f,
+  text: fs.readFileSync(path.join(ROOT, f), "utf8"),
+})).concat(LAZY_JS);
 
 /** コメントを外して見る（説明文の中の `a.download` を本物と間違えないため） */
 function code(text) {
@@ -37,6 +43,11 @@ const OWNER = "nomiya-ui-base.js"; // 渡し口を持ってよい ただ1つの�
 describe("ファイルの渡し口（ホーム画面アプリで閉じ込められない）", () => {
   it("★配っている自前のJSを読めている（読めていなければ、この見張りは何も見ていない）★", () => {
     expect(APP_JS.length, "HTMLが読んでいる自前のJSが1本も取れない").toBeGreaterThanOrEqual(8);
+    /* ★あとから読む物も範囲に入っているか★＝ここが空だと、その分だけ黙って見なくなる */
+    expect(
+      SRC.map((s) => s.file),
+      "★あとから読むJSが範囲に入っていない＝そこは何も見ていない★"
+    ).toEqual(expect.arrayContaining(["nomiya-owntpl.js", "nomiya-tpl.js", "nomiya-xlsx-tpl.js"]));
     expect(
       SRC.some((s) => path.basename(s.file) === OWNER),
       OWNER + " を読んでいない（渡し口の置き場所が変わったのに、この見張りを直していない）"
@@ -113,6 +124,9 @@ describe("人に見せるボタンの言葉", () => {
     ["入れて渡す", "中の動きを書いている"],
     ["Excelにする", "書き出しの言い方が2通りになる（正は「Excelに書き出す」）"],
     ["テンプレを選ぶ", "読み込みの言い方が2通りになる（正は「お店の様式を読み込む」）"],
+    /* ★中の言葉を見せない★（2026-08-18 実測：0コ空にしたのに「割り当てを決めました」と出ていた）
+       画面はどこでも「書く場所」で言う。 */
+    ["割り当て", "中の言葉（人に見せる字は「書く場所」）"],
   ];
 
   it("★言い方が2通りになる言葉が、配る物に残っていない★", () => {
@@ -148,5 +162,17 @@ describe("人に見せるボタンの言葉", () => {
     expect(読み込み, "★読み込みの言い方が2通り以上ある: " + 読み込み.join("・") + "★").toEqual([
       "お店の様式を",
     ]);
+    /* ★当てた結果の言い方も1通りにする★＝「当てておきました」「当て直しました」「で決めました」は
+       どれも ★「書く場所を ○コ」★ で始める。数え方が2通りになるのを、増えた瞬間に赤くする。 */
+    const 場所 = ["書く場所", "割り当て", "入れる所", "書き込み先"].filter((w) => CODE.includes(w));
+    expect(場所, "★書く場所の言い方が2通り以上ある: " + 場所.join("・") + "★").toEqual(["書く場所"]);
+  });
+
+  /* ★同じ物を2通りで数えたら、どちらが本当か分からなくなる★（指示役 2026-08-18 ②）
+     画面は「入っている 12 コ」、書き出す前は「10マス」。数が違うのは正しいが、
+     ★言葉の中で結び付いていないと「12と言われた直後に10」になる★。 */
+  it("★書き出す前の断り書きは、2つの数を結び付けて出す★", () => {
+    const src = SRC.map((s) => s.text).join(String.fromCharCode(10));
+    expect(src.includes("マス★ に入れます（決めてある書く場所は "), "マスの数と書く場所の数が結び付いていない").toBe(true);
   });
 });

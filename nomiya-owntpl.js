@@ -735,7 +735,13 @@ function wireCellPlacer(TL, book, cells, labels, si) {
     });
     picked = null;
     redraw();
-    toast(Object.keys(g).length ? "自動で当て直しました" : "この紙からは当てられませんでした");
+    /* ★言い方は1通り★＝入れた時・当て直した時・ここ、どこでも「書く場所を ○コ」で言う
+       （司さん「なんで統一させてないんど」2026-08-17／指示役 2026-08-18 ①） */
+    toast(
+      Object.keys(g).length
+        ? "✅ 書く場所を " + Object.keys(g).length + "コ 当て直しました"
+        : "⚠️ この紙からは書く場所を当てられませんでした"
+    );
   };
 
   $("xlcClear").onclick = function () {
@@ -744,7 +750,7 @@ function wireCellPlacer(TL, book, cells, labels, si) {
     });
     picked = null;
     redraw();
-    toast("割り当てを消しました");
+    toast("書く場所を 全部 空にしました");
   };
 
   $("xlcOk").onclick = function () {
@@ -758,7 +764,10 @@ function wireCellPlacer(TL, book, cells, labels, si) {
     });
     closeModal();
     renderAll();
-    toast("✅ 割り当てを決めました");
+    /* ★やった事のとおりに言う★＝0コなのに「決めました」と出していた（2026-08-18 実測）。
+       空にしたのに「決めました」だと、直したつもりで直っていない事に気づけない。 */
+    var n = Object.keys(kept).length;
+    toast(n ? "✅ 書く場所を " + n + "コ で決めました" : "✅ 書く場所は 空のままにしました");
   };
 
   fitPlacer();
@@ -987,9 +996,11 @@ function exportOwnXlsx() {
           '"></div>' +
           '<div class="hint">' +
           esc(SETTINGS.ownXlsxName || "テンプレ") +
-          " に " +
+          " の ★" +
           made.wrote +
-          "マスぶん入れます。★元のファイルは変わりません★" +
+          "マス★ に入れます（決めてある書く場所は " +
+          Object.keys(TL.normalizeCells(SETTINGS.ownCells)).length +
+          "コ。そのうち、この請求で中身が在る分）。★元のファイルは変わりません★" +
           (msgs.length ? "<br>★" + esc(msgs.join(" / ")) + "★" : "") +
           "</div>" +
           mergedHtml +
@@ -1034,7 +1045,9 @@ function openOwnPlacer() {
       var placed = TL.normalize(SETTINGS.ownFields);
       var bg = SETTINGS.ownTpl
         ? '<img class="op-bg" src="' + esc(SETTINGS.ownTpl) + '" alt="">'
-        : '<div class="op-none">先に「紙を選ぶ」でテンプレを入れてください</div>';
+        : /* ★言い方は1通り★＝ボタンの名前をそのまま書く。
+             2026-08-18 まで「紙を選ぶ」＝★その名前のボタンはもう無い★（＝押しに行けない案内） */
+          '<div class="op-none">先に「お店の様式を読み込む」で、お店の紙を入れてください</div>';
       var boxes = TL.FIELDS.map(function (f) {
         var p = placed[f.key];
         return (
