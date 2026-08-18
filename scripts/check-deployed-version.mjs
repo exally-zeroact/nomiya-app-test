@@ -59,17 +59,41 @@ export function judgePage(deployedHtml, root = ROOT) {
   return rows;
 }
 
+/** ★あとから読む物（押した時に読むJS）★ を、配信で受け取った中身から拾う
+ *  版(?v=)が付かないので ① では見えない。ここを見ないと ★押した時に初めて404で死ぬ★
+ *  （exally の正本が book.html の _loadScript を見ているのと同じ理由）。 */
+export function lazyNamesOf(texts) {
+  const out = new Set();
+  for (const t of texts)
+    for (const m of t.matchAll(/[.]src\s*=\s*"([^"]+[.]js)"/g))
+      if (!/^https?:/i.test(m[1])) out.add(m[1]);
+  return [...out].sort();
+}
+
 /** 呼ばれる側（js/css）が配信に実在して、中身まで同じか */
-export async function judgeAssets(host, rows, get) {
+export async function judgeAssets(host, rows, get, root = ROOT) {
   const out = [];
+  const texts = [];
   for (const r of rows) {
     const url = host + "/" + r.file + (r.配信 ? "?v=" + r.配信 : "");
     const res = await get(url);
+    if (res.body && /[.]js$/i.test(r.file)) texts.push(res.body.toString("utf8"));
     out.push({
       file: r.file,
       status: res.status,
       中身: res.body == null ? null : sha8(res.body),
       ok: res.status === 200 && res.body != null && sha8(res.body) === r.手元,
+    });
+  }
+  /* ★あとから読む物も、同じ厳しさで見る★（版が無いので「在るか＋中身が同じか」で見る） */
+  for (const f of lazyNamesOf(texts)) {
+    const here = fs.existsSync(path.join(root, f)) ? versionOf(root, f) : null;
+    const res = await get(host + "/" + f);
+    out.push({
+      file: f + "（あとから読む）",
+      status: res.status,
+      中身: res.body == null ? null : sha8(res.body),
+      ok: !!here && res.status === 200 && res.body != null && sha8(res.body) === here,
     });
   }
   return out;
@@ -89,7 +113,7 @@ export async function check({ host, root = ROOT, get = httpGet } = {}) {
     return { host: h, 届いた: false, 理由: PAGE + " が " + page.status, 版: [], 部品: [] };
   }
   const rows = judgePage(page.body.toString("utf8"), root);
-  const assets = await judgeAssets(h, rows, get);
+  const assets = await judgeAssets(h, rows, get, root);
   const ng版 = rows.filter((r) => !r.ok);
   const ng部品 = assets.filter((a) => !a.ok);
   return {
@@ -104,7 +128,8 @@ export async function check({ host, root = ROOT, get = httpGet } = {}) {
           : "",
     版: rows,
     部品: assets,
-    叩いた回数: rows.length + 1,
+    /* ★叩いた回数は本当の数を出す★（画面1回＋版の付いた物＋あとから読む物） */
+    叩いた回数: assets.length + 1,
   };
 }
 

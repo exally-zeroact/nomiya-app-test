@@ -67,6 +67,29 @@ describe("配信の見張り（客に届いているか）", () => {
     expect(r.届いた).toBe(false);
   });
 
+  /* ★あとから読む物（押した時に読むJS）は版が付かない＝①では見えない★
+     ここを見ないと「HTMLもUIも新しいのに、押した瞬間だけ404で死ぬ」を見逃す。 */
+  it("★あとから読む物が配信に無い★を赤くする", async () => {
+    const r = await check({
+      host: "https://例",
+      root: ROOT,
+      get: 偽の網(html, { 落とす: ["nomiya-owntpl.js"] }),
+    });
+    expect(r.部品.some((a) => a.file.includes("nomiya-owntpl.js")), "あとから読む物を見ていない").toBe(
+      true
+    );
+    expect(r.届いた).toBe(false);
+  });
+
+  it("★あとから読む物の中身が古い★も赤くする", async () => {
+    const r = await check({
+      host: "https://例",
+      root: ROOT,
+      get: 偽の網(html, { 中身を変える: ["nomiya-tpl.js"] }),
+    });
+    expect(r.届いた).toBe(false);
+  });
+
   it("画面そのものが出ない（404）なら赤", async () => {
     const r = await check({ host: "https://例", root: ROOT, get: async () => ({ status: 404, body: null }) });
     expect(r.届いた).toBe(false);
