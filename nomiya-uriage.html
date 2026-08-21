@@ -424,6 +424,7 @@
         <button class="chip chip-sm" type="button" data-sseg="partner">会社</button>
         <button class="chip chip-sm" type="button" data-sseg="staff">従業員</button>
         <button class="chip chip-sm" type="button" data-sseg="item">商品</button>
+        <button class="chip chip-sm" type="button" data-sseg="acct">アカウント</button>
       </div>
 
       <div class="pane active" id="pane-self">
@@ -526,6 +527,12 @@
           </div>
         </div>
 
+      </div>
+
+      <!-- ===== アカウント・データ（お店の情報とは別の面にする） =====
+           ★1画面に「お店の情報」「アカウント」「データ（全部消す）」を並べない★
+           （指示役 2026-08-21。危ない物を、毎日 触る物と同じ所に置かない） -->
+      <div class="pane" id="pane-acct">
         <div class="card">
           <div class="card-label">アカウント</div>
           <div class="hint" id="acctInfo"></div>
@@ -907,12 +914,12 @@
     <script defer src="hanko.js?v=d1d32621"></script>
     <script defer src="nomiya-core.js?v=f0399771"></script>
     <!-- ★画面のJS。読み込む順番が命（起動は最後）。tests/app-source.mjs が食い違いを見張る -->
-    <script defer src="nomiya-ui-base.js?v=a247a133"></script>
-    <script defer src="nomiya-ui-uriage.js?v=0795c5e3"></script>
+    <script defer src="nomiya-ui-base.js?v=d025bc95"></script>
+    <script defer src="nomiya-ui-uriage.js?v=89cf1e4b"></script>
     <script defer src="nomiya-ui-kaishu.js?v=53cff47e"></script>
     <script defer src="nomiya-ui-kami.js?v=8f73e48a"></script>
-    <script defer src="nomiya-ui-settei.js?v=81ee79d6"></script>
+    <script defer src="nomiya-ui-settei.js?v=db8d53cf"></script>
     <script defer src="nomiya-ui-kyuryo.js?v=711a2d8a"></script>
-    <script defer src="nomiya-ui-boot.js?v=c03eb0ea"></script>
+    <script defer src="nomiya-ui-boot.js?v=c43a3fde"></script>
   </body>
 </html>

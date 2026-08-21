@@ -48,6 +48,10 @@ function renderSettings() {
   });
   $("dataInfo").textContent =
     "売上 " + alive.length + " 件。ファイルに書き出して手元にも残せます。";
+  /* ★戻せない物を作らない★（指示役 2026-08-21）
+     この画面を開いてから1回も書き出していないうちは「全部消す」を押せない。
+     押せない理由は ボタンの中に書く（さっき決めた形と同じ）。 */
+  gateBtn("btnWipe", !UI.exported, "全部消す", "先に書き出してください");
   renderPayRules();
   renderMasters();
 }
@@ -150,11 +154,16 @@ function onExport() {
     closes: CLOSES,
     staff: STAFF,
     works: WORKS,
+    /* ★入金が入っていなかった★（2026-08-21 実測）＝「先に書き出してから消せ」と言うのに、
+       戻せない物が残っていた。書き出す物と読み込む物は 必ず同じにする。 */
+    payments: PAYMENTS,
   };
+  UI.exported = true; // ★書き出したら「全部消す」の鍵が開く★
   var blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   // ★渡し口は saveAsFile ただ1つ★（target=_blank が付く。ホーム画面から開いたアプリで
   //   同じ窓にファイルが開くと、戻る導線が無くて閉じ込められる）
   saveAsFile(blob, "uriage-" + todayIso() + ".json");
+  renderSettings(); // ★鍵が開いた事を、その場で画面に出す★
   toast("💾 書き出しました");
 }
 
@@ -229,6 +238,12 @@ function finishImport(data) {
     CLOSES = cl2;
     saveCloses();
   }
+  if (Array.isArray(data.payments)) {
+    PAYMENTS = data.payments.map(function (x) {
+      return Object.assign({}, x, { updatedAt: nowIso });
+    });
+    savePayments();
+  }
   if (data.partners && typeof data.partners === "object") {
     var pt = {};
     Object.keys(data.partners).forEach(function (k) {
@@ -244,9 +259,39 @@ function finishImport(data) {
 }
 
 function onWipe() {
+  /* ★押す前に「何が」「いくつ」消えるかを数で見せる★（指示役 2026-08-21）
+     ＝「全部消す」と書いてあるのに、消えない物が在る（スタッフ・出勤・入金・締め）。
+     数と、残る物を はっきり出す。 */
+  var nSales = SALES.filter(function (s) {
+    return !s.deletedAt;
+  }).length;
+  var nPt = Object.keys(PARTNERS).filter(function (k) {
+    return !PARTNERS[k].deletedAt;
+  }).length;
+  var nInv = (INVOICES || []).length;
+  var nStaff = C.aliveStaff(STAFF).length;
+  var nWork = (WORKS || []).filter(function (w) {
+    return !w.deletedAt;
+  }).length;
+  var nPay = (PAYMENTS || []).filter(function (p) {
+    return !p.deletedAt;
+  }).length;
   openModal(
     "全部消す",
-    '<div class="hint">売上をすべて消します（クラウドの分も消えます）。取り消せません。<br>先に「書き出す」でバックアップを取ってください。</div>' +
+    '<div class="hint">★消えるもの★<br>売上 <b>' +
+      nSales +
+      "</b> 件 ／ 宛先（会社） <b>" +
+      nPt +
+      "</b> 件 ／ 請求書番号 <b>" +
+      nInv +
+      "</b> 件<br>クラウドの分も消えます。取り消せません。</div>" +
+      '<div class="hint">残るもの：スタッフ ' +
+      nStaff +
+      " 人 ／ 出勤 " +
+      nWork +
+      " 件 ／ 入金 " +
+      nPay +
+      " 件 ／ レジ締め ／ お店の情報</div>" +
       '<div class="btn-right" style="margin-top:14px">' +
       '<button class="btn btn-ghost btn-sm" id="mdNo">やめる</button>' +
       '<button class="btn btn-ghost btn-danger btn-sm" id="mdYes">全部消す</button></div>'
@@ -312,8 +357,7 @@ function renderClosePeriod() {
         +UI.closeYmd.slice(5, 7) - 1,
         +UI.closeYmd.slice(8, 10) + +b.getAttribute("data-cmv")
       );
-      UI.closeYmd = C.toIso(d);
-      renderClose();
+      setWorkDay(C.toIso(d)); // 入力タブの日も一緒に動く（見ている日は1つ）
     };
   });
 }

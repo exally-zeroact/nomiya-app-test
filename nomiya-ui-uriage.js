@@ -242,6 +242,19 @@ function onDelete() {
   };
 }
 
+/** ★「見ている日」は1つ★（入力タブと締めタブが 別々の日を持たない）
+ *  指示役 2026-08-21：同じ状態を2画面で別々に持つな。
+ *  ★日を書き換えるのは この関数だけ★。書き換えたら 両方 出し直す。
+ *  （前は「出金を打った時だけ揃う」＝すでに2通りあった＝食い違いが出る形だった） */
+function setWorkDay(ymd) {
+  if (!C.isIsoDate(ymd)) return;
+  $("inDate").value = ymd;
+  UI.closeYmd = ymd;
+  renderDay();
+  syncDateNote();
+  renderClose(); // 中で renderClosePeriod も呼ばれる
+}
+
 function renderDay() {
   var d = $("inDate").value;
   var rows = C.sortSales(C.filterSales(SALES, { from: d, to: d }));

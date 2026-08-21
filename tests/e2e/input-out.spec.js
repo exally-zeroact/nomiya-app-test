@@ -89,9 +89,7 @@ test.describe("入力タブから出金を打つ", () => {
   test("★締めた日は、入力タブからも足せない（灰色＋理由）★", async ({ page }) => {
     const errors = await open(page);
     await setDay(page, "2026-08-15");
-    /* ★入力タブの日と、締めタブの日は別々に動く★（実測 2026-08-21）。
-       出金を1件 入れると 締めタブもその日に揃うので、そこから締める。 */
-    await addOut(page, { amount: 1000, memo: "氷" });
+    /* ★見ている日は1つ★（2026-08-21 指示役の裁定）＝入力タブで選べば 締めタブも同じ日。 */
     await page.locator(".nav-item[data-scr='close']").click();
     await expect(page.locator("#periodClose")).toContainText("2026年8月15日");
     await page.locator("#clCount").fill("0");
@@ -103,6 +101,33 @@ test.describe("入力タブから出金を打つ", () => {
     const b = page.locator("#btnInOutAdd");
     await expect(b, "締めた日なのに足せてしまう").toBeDisabled();
     await expect(b).toContainText("この日はもう締めています");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+  /* ★見ている日は1つ★（指示役 2026-08-21「同じ状態を2画面で別々に持つな」）
+     前は 入力タブと締めタブが別々の日を持ち、出金を打った時だけ揃っていた＝2通りあった。 */
+  test("★入力タブと締めタブは いつも同じ日を見る（どちらから動かしても）★", async ({ page }) => {
+    const errors = await open(page);
+    await setDay(page, "2026-08-15");
+    await page.locator(".nav-item[data-scr='close']").click();
+    await expect(page.locator("#periodClose"), "入力で選んだ日に締めが付いてこない").toContainText(
+      "2026年8月15日"
+    );
+
+    // 締めタブから前の日へ動かすと、入力タブも同じ日になる
+    await page.locator("#periodClose [data-cmv='-1']").click();
+    await expect(page.locator("#periodClose")).toContainText("2026年8月14日");
+    await page.locator(".nav-item[data-scr='input']").click();
+    await expect(page.locator("#inDate"), "締めで動かした日に入力が付いてこない").toHaveValue(
+      "2026-08-14"
+    );
+    await expect(page.locator("#inOutLabel")).toContainText("2026年8月14日");
+
+    // 「今日」を押せば、両方が今日に戻る
+    await page.locator("#btnToday").click();
+    const today = await page.evaluate(() => new Date().toISOString().slice(0, 10));
+    await expect(page.locator("#inDate")).toHaveValue(today);
+    await page.locator(".nav-item[data-scr='close']").click();
+    await expect(page.locator("#periodClose")).toContainText("日");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });

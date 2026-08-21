@@ -73,7 +73,7 @@ function syncPanes() {
   [
     ["listSeg", "data-lseg", UI.listSeg, ["list", "sum", "tax"]],
     ["invSeg", "data-iseg", UI.invSeg, ["inv", "due", "paid"]],
-    ["setSeg", "data-sseg", UI.setSeg, ["self", "partner", "staff", "item"]],
+    ["setSeg", "data-sseg", UI.setSeg, ["self", "partner", "staff", "item", "acct"]],
   ].forEach(function (x) {
     $(x[0])
       .querySelectorAll("[" + x[1] + "]")
@@ -256,13 +256,10 @@ function init() {
   syncInputChips();
 
   $("btnToday").onclick = function () {
-    $("inDate").value = todayIso();
-    renderDay();
-    syncDateNote();
+    setWorkDay(todayIso());
   };
   $("inDate").onchange = function () {
-    renderDay();
-    syncDateNote();
+    setWorkDay($("inDate").value);
   };
   $("inDate").oninput = syncDateNote;
   // 金額を打つと印紙の注意が変わるので、入力に合わせて注記を出し直す。
