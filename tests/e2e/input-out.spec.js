@@ -124,7 +124,16 @@ test.describe("入力タブから出金を打つ", () => {
 
     // 「今日」を押せば、両方が今日に戻る
     await page.locator("#btnToday").click();
-    const today = await page.evaluate(() => new Date().toISOString().slice(0, 10));
+    /* ★2026-08-22：ここは ★時計仕掛けの赤★ だった（画面の作り替えとは無関係）★
+       toISOString() は ★UTC★ の日付＝日本時間の 0時〜9時に回すと 前の日が返る。
+       アプリ側は nomiya-core.js の toIso() で「ローカル時刻の今日」を出しており、
+       ★アプリは正しく、試験だけが1日ずれていた★（実測：JST 8/22 00:2x に 8/21 と比べて赤）。
+       ★この repo は「toISOStringはUTCずれで前日になるので使わない」と自分で書いてある★ */
+    const today = await page.evaluate(() => {
+      const d = new Date();
+      const p2 = (n) => String(n).padStart(2, "0");
+      return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate());
+    });
     await expect(page.locator("#inDate")).toHaveValue(today);
     await page.locator(".nav-item[data-scr='close']").click();
     await expect(page.locator("#periodClose")).toContainText("日");

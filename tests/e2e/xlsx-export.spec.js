@@ -102,8 +102,8 @@ test.describe("Excelに書き出す（一覧タブ）", () => {
       pay: "invoice",
     });
 
-    await page.locator(".nav-item[data-scr='list']").click();
-    await expect(page.locator("#scr-list")).toBeVisible();
+    await page.locator(".nav-item[data-scr='sum']").click(); // 売上帳は集計タブ（2026-08-21）
+    await expect(page.locator("#scr-sum")).toBeVisible();
 
     // ★押す道順を実際になぞる★
     await page.locator("#btnXlsxList").click();
@@ -176,7 +176,7 @@ test.describe("Excelに書き出す（一覧タブ）", () => {
       pay: "tsuke",
     });
 
-    await page.locator(".nav-item[data-scr='list']").click();
+    await page.locator(".nav-item[data-scr='sum']").click(); // 売上帳は集計タブ（2026-08-21）
     // 現金だけに絞る
     await page.locator("#filPay [data-fp='cash']").click();
     await page.locator("#btnXlsxList").click();
@@ -194,7 +194,7 @@ test.describe("Excelに書き出す（一覧タブ）", () => {
   test("売上が1件も無い期間では、★押す前から灰色＋理由★（空のファイルを作らない）", async ({ page }) => {
     /* 2026-08-19 に変えた：前は押してからトーストで理由が出ていた＝遅い。 */
     const errors = await open(page);
-    await page.locator(".nav-item[data-scr='list']").click();
+    await page.locator(".nav-item[data-scr='sum']").click(); // 売上帳は集計タブ（2026-08-21）
     const b = page.locator("#btnXlsxList");
     await expect(b, "灰色になっていない").toBeDisabled();
     await expect(b, "理由がボタンの中に無い").toContainText("この期間に売上がありません");
@@ -210,7 +210,7 @@ test.describe("Excelに書き出す（一覧タブ）", () => {
     );
     expect(before, "起動の時点で Excel の部品を読んでいる").toBe(false);
     await addSale(page, { date: "2026-08-07", name: "客", people: 1, amount: 100, pay: "cash" });
-    await page.locator(".nav-item[data-scr='list']").click();
+    await page.locator(".nav-item[data-scr='sum']").click(); // 売上帳は集計タブ（2026-08-21）
     await page.locator("#btnXlsxList").click();
     await Promise.all([page.waitForEvent("download"), page.locator("#xlOk").click()]);
     const after = await page.evaluate(() =>

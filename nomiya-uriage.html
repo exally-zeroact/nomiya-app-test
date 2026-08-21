@@ -170,16 +170,29 @@
     </section>
 
     <!-- ==================== 一覧（売上帳） ==================== -->
+    <!-- ===== 一覧＝見て・直して・消す所。紙もExcelも ここには置かない =====
+         司さん 2026-08-21「一覧にPDFにしたりする機能はいらんやろ／赤丸のごちゃごちゃは一覧にはいらん」
+         見本＝代行請求の「明細一覧 / 修正」（絞り込みは最小・タップで1件ずつ直す） -->
     <section class="screen" id="scr-list">
-      <!-- 毎日使うのは「一覧」。集計と税理士の紙は同じ売上の見方違いなので、ここの中に入れる。 -->
-      <div class="chips chips-bar" id="listSeg">
-        <button class="chip chip-sm on" type="button" data-lseg="list">一覧</button>
-        <button class="chip chip-sm" type="button" data-lseg="sum">集計</button>
-        <button class="chip chip-sm" type="button" data-lseg="tax">税理士の紙</button>
+      <div class="period" id="periodList"></div>
+      <div class="strip" id="tabListStrip"></div>
+      <div class="card">
+        <div class="card-label">明細</div>
+        <div class="hint" style="margin-bottom: 8px">タップで1件ずつ 直せます・消せます。</div>
+        <div id="listRows"></div>
+      </div>
+    </section>
+
+    <!-- ===== 集計＝紙を作る所（売上帳・集計・税理士の紙）。毎日は使わない ===== -->
+    <section class="screen" id="scr-sum">
+      <div class="chips chips-bar" id="sumSeg">
+        <button class="chip chip-sm on" type="button" data-mseg="ledger">売上帳</button>
+        <button class="chip chip-sm" type="button" data-mseg="sum">集計</button>
+        <button class="chip chip-sm" type="button" data-mseg="tax">税理士の紙</button>
       </div>
 
-      <div class="pane active" id="pane-list">
-        <div class="period" id="periodList"></div>
+      <div class="pane active" id="pane-ledger">
+        <div class="period" id="periodLedger"></div>
 
         <div class="card">
           <div class="card-label">支払い方法で見る</div>
@@ -218,7 +231,6 @@
         </div>
       </div>
 
-      <!-- ===== 集計（画面で見るだけ。紙は「税理士の紙」） ===== -->
       <div class="pane" id="pane-sum">
         <div class="period" id="periodSum"></div>
         <div class="chips chips-bar" id="sumRecTabs">
@@ -279,7 +291,6 @@
       </div>
     </section>
 
-    <!-- ==================== 請求書 ==================== -->
     <section class="screen" id="scr-inv">
       <!-- ツケも請求書送りも「まだもらっていない金」。1か所にまとめる。 -->
       <div class="chips chips-bar" id="invSeg">
@@ -854,8 +865,10 @@
     <!-- ==================== NAV ==================== -->
     <!-- 一番使う「入力」を真ん中に置く（親指が届く位置） -->
     <nav class="bottom-nav">
-      <button class="nav-item" data-scr="list" type="button">
-        <span class="nav-ic">📋</span><span class="nav-lb">一覧</span>
+      <!-- ★毎日 打つ所（入力）のとなりに 一覧★（司さん 2026-08-21）
+           紙を作る所（集計）は 端に置く -->
+      <button class="nav-item" data-scr="sum" type="button">
+        <span class="nav-ic">📊</span><span class="nav-lb">集計</span>
       </button>
       <button class="nav-item" data-scr="inv" type="button">
         <span class="nav-ic">🧾</span><span class="nav-lb">請求書</span>
@@ -863,6 +876,9 @@
       </button>
       <button class="nav-item active" data-scr="input" type="button">
         <span class="nav-ic">✍️</span><span class="nav-lb">入力</span>
+      </button>
+      <button class="nav-item" data-scr="list" type="button">
+        <span class="nav-ic">📋</span><span class="nav-lb">一覧</span>
       </button>
       <button class="nav-item" data-scr="pay" type="button">
         <span class="nav-ic">💰</span><span class="nav-lb">給料</span>
@@ -914,12 +930,12 @@
     <script defer src="hanko.js?v=d1d32621"></script>
     <script defer src="nomiya-core.js?v=f0399771"></script>
     <!-- ★画面のJS。読み込む順番が命（起動は最後）。tests/app-source.mjs が食い違いを見張る -->
-    <script defer src="nomiya-ui-base.js?v=d025bc95"></script>
-    <script defer src="nomiya-ui-uriage.js?v=89cf1e4b"></script>
+    <script defer src="nomiya-ui-base.js?v=0439a450"></script>
+    <script defer src="nomiya-ui-uriage.js?v=389386a2"></script>
     <script defer src="nomiya-ui-kaishu.js?v=53cff47e"></script>
     <script defer src="nomiya-ui-kami.js?v=8f73e48a"></script>
     <script defer src="nomiya-ui-settei.js?v=db8d53cf"></script>
     <script defer src="nomiya-ui-kyuryo.js?v=711a2d8a"></script>
-    <script defer src="nomiya-ui-boot.js?v=c43a3fde"></script>
+    <script defer src="nomiya-ui-boot.js?v=1bb101b5"></script>
   </body>
 </html>

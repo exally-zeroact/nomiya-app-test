@@ -349,7 +349,7 @@ function buildListFilters() {
   fp.querySelectorAll("[data-fp]").forEach(function (b) {
     b.onclick = function () {
       UI.filPay = b.getAttribute("data-fp");
-      renderList();
+      renderLedger();
     };
   });
   $("filRec")
@@ -357,7 +357,7 @@ function buildListFilters() {
     .forEach(function (b) {
       b.onclick = function () {
         UI.filRec = b.getAttribute("data-rec");
-        renderList();
+        renderLedger();
       };
     });
 }
@@ -481,7 +481,39 @@ function exportListXlsx() {
   };
 }
 
+/** ★一覧＝見て・直して・消す所★（司さん 2026-08-21）
+ *  絞り込みのチップも 紙も Excel も ここには置かない（見本＝代行請求の「明細一覧 / 修正」）。
+ *  期間の中の売上を、そのまま日付つきで並べる。押せば その1件を直せる・消せる。 */
 function renderList() {
+  var r = periodRange();
+  var rows = C.sortSales(C.filterSales(SALES, { from: r.from, to: r.to }));
+  var sum = C.summarize(rows);
+  $("tabListStrip").innerHTML =
+    stripItem("組数", C.comma(sum.count), "組") +
+    stripItem("のべ人数", C.comma(sum.people), "人") +
+    stripItem("売上", C.yen(sum.amount));
+  $("listRows").innerHTML = rows.length
+    ? rows
+        .map(function (x) {
+          // 日付を頭に付ける（月をまたいで並ぶので、日が無いと どれか分からない）
+          return saleLi(x).replace(
+            '<div class="li-nm">',
+            '<div class="li-nm">' + esc(C.mdShort(x.date)) + "　"
+          );
+        })
+        .join("")
+    : '<div class="empty">まだありません</div>';
+  $("listRows")
+    .querySelectorAll("[data-id]")
+    .forEach(function (el) {
+      el.onclick = function () {
+        startEdit(el.getAttribute("data-id"));
+      };
+    });
+}
+
+/** ★売上帳＝紙を作る所★（集計タブの中）。絞り込みと紙と Excel はここ。 */
+function renderLedger() {
   $("filPay")
     .querySelectorAll("[data-fp]")
     .forEach(function (b) {

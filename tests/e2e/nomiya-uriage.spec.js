@@ -42,20 +42,34 @@ async function open(page, opts) {
 }
 
 // 画面へ行く。実際に指で押す道順と同じにする。
-//   設定＝右上の歯車 / 集計・税理士の紙＝「一覧」の中の切替 / 他＝下ナビ
+//   設定＝右上の歯車 / 売上帳・集計・税理士の紙＝「集計」タブの中の切替 / 他＝下ナビ
+//   ★2026-08-21：一覧（見て直す所）と 集計（紙を作る所）を分けた★
 async function goto(page, scr) {
   if (scr === "set") {
     if (!(await page.locator("#scr-set").isVisible())) await page.locator("#btnGear").click();
     await expect(page.locator("#scr-set")).toBeVisible();
     return;
   }
-  if (scr === "sum" || scr === "tax") {
-    await page.locator(".nav-item[data-scr='list']").click();
-    await page.locator(`#listSeg [data-lseg='${scr}']`).click();
+  if (scr === "ledger" || scr === "sum" || scr === "tax") {
+    await page.locator(".nav-item[data-scr='sum']").click();
+    await page.locator(`#sumSeg [data-mseg='${scr}']`).click();
     await expect(page.locator(`#pane-${scr}`)).toBeVisible();
     return;
   }
   await page.locator(`.nav-item[data-scr='${scr}']`).click();
+}
+
+// 期間（いつからいつまで）を決める。
+// ★期間の帯は画面ごとに在る★（一覧=#periodList／売上帳=#periodLedger／集計=#periodSum／税理士=#periodTax）。
+// どの帯を押すかを試験が覚えていると、画面を分けるたびに嘘になる。
+// ★指と同じで「いま見えている帯」を押す★（見えている帯が無ければ ここで落ちる＝空振りしない）。
+async function setPeriod(page, from, to) {
+  const lb = page.locator(".period-lb:visible");
+  await expect(lb).toHaveCount(1); // 見えている帯は1本だけのはず
+  await lb.click();
+  await page.locator("#mdFrom").fill(from);
+  await page.locator("#mdTo").fill(to);
+  await page.locator("#mdOk").click();
 }
 
 // 偽のクラウドに入っている行を読む。
@@ -199,10 +213,7 @@ async function seed(page) {
   for (const s of SEED) await addSale(page, s);
   // 期間を7月に合わせる（今日が7月とは限らないので範囲指定で固定）
   await goto(page, "list");
-  await page.locator("#periodList .period-lb").click();
-  await page.locator("#mdFrom").fill("2026-07-01");
-  await page.locator("#mdTo").fill("2026-07-31");
-  await page.locator("#mdOk").click();
+  await setPeriod(page, "2026-07-01", "2026-07-31");
   // 請求書タブの月も、テストの売上と同じ2026年7月に合わせる
   await setInvMonth(page, "2026-07");
   await goto(page, "list");
@@ -274,6 +285,8 @@ test.describe("飲み屋 売上管理", () => {
     const errors = await open(page);
     await seed(page);
 
+    await goto(page, "ledger"); // 売上帳は集計タブの中（2026-08-21）
+
     await expect(page.locator("#listSheets tr[data-id]")).toHaveCount(5);
     const strip = page.locator("#listStrip .strip-v");
     await expect(strip.nth(0)).toHaveText("5組");
@@ -293,6 +306,8 @@ test.describe("飲み屋 売上管理", () => {
   test("一覧タブ: 支払い方法別・領収書別のタブ切り替えが効く", async ({ page }) => {
     const errors = await open(page);
     await seed(page);
+
+    await goto(page, "ledger"); // 売上帳は集計タブの中（2026-08-21）
 
     await page.locator("#filPay button[data-fp='invoice']").click();
     await expect(page.locator("#listSheets tr[data-id]")).toHaveCount(1);
@@ -319,11 +334,17 @@ test.describe("飲み屋 売上管理", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
-  test("一覧タブ: 紙の行をタップすると入力画面で直せる", async ({ page }) => {
+  // ★2026-08-21：一覧は「見て・直して・消す所」になった（紙は集計タブ）★
+  //   ＝一覧の行（#listRows）をタップして直す。紙の行タップは 下の「集計タブ:」の試験で見る。
+  test("一覧タブ: 行をタップすると入力画面で直せる", async ({ page }) => {
     const errors = await open(page);
     await seed(page);
 
-    await page.locator("#listSheets tr[data-id]").first().click();
+    await expect(page.locator("#scr-list")).toBeVisible();
+    await expect(page.locator("#listRows [data-id]")).toHaveCount(5);
+    await expect(page.locator("#tabListStrip .strip-v").nth(2)).toHaveText("¥82,000");
+    await expect(page.locator("#listRows [data-id]").first()).toContainText("田中");
+    await page.locator("#listRows [data-id]").first().click();
     await expect(page.locator("#scr-input")).toBeVisible();
     await expect(page.locator("#inputMode")).toHaveText("この売上を直す");
     await expect(page.locator("#inName")).toHaveValue("田中");
@@ -331,9 +352,24 @@ test.describe("飲み屋 売上管理", () => {
     await page.locator("#btnSave").click();
 
     await goto(page, "list");
+    await expect(page.locator("#tabListStrip .strip-v").nth(2)).toHaveText("¥83,000");
+    await expect(page.locator("#listRows [data-id]")).toHaveCount(5);
+    await goto(page, "ledger");
     await expect(page.locator("#listStrip .strip-v").nth(2)).toHaveText("¥83,000");
     // 件数は増えていない（新規追加になっていない）
     await expect(page.locator("#listSheets tr[data-id]")).toHaveCount(5);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("集計タブ: 紙の行をタップしても入力画面で直せる", async ({ page }) => {
+    const errors = await open(page);
+    await seed(page);
+
+    await goto(page, "ledger");
+    await page.locator("#listSheets tr[data-id]").first().click();
+    await expect(page.locator("#scr-input")).toBeVisible();
+    await expect(page.locator("#inputMode")).toHaveText("この売上を直す");
+    await expect(page.locator("#inName")).toHaveValue("田中");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
@@ -341,10 +377,14 @@ test.describe("飲み屋 売上管理", () => {
     const errors = await open(page);
     await seed(page);
 
-    await page.locator("#listSheets tr[data-id]").first().click();
+    await page.locator("#listRows [data-id]").first().click();
     await page.locator("#btnDelete").click();
     await page.locator("#mdYes").click();
+    // 消したら 一覧からも すぐ消える（見ている所で結果が分かる）
     await goto(page, "list");
+    await expect(page.locator("#listRows [data-id]")).toHaveCount(4);
+    await expect(page.locator("#tabListStrip .strip-v").nth(2)).toHaveText("¥74,000");
+    await goto(page, "ledger");
     await expect(page.locator("#listSheets tr[data-id]")).toHaveCount(4);
     await expect(page.locator("#listStrip .strip-v").nth(2)).toHaveText("¥74,000");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
@@ -419,6 +459,8 @@ test.describe("飲み屋 売上管理", () => {
   test("紙は同じ日付を繰り返さない（最初の行だけ日付を出す）", async ({ page }) => {
     const errors = await open(page);
     await seed(page);
+
+    await goto(page, "ledger"); // 売上帳は集計タブの中（2026-08-21）
     // 7/1が2件・7/2が2件・7/5が1件
     const dates = await page
       .locator("#listSheets tr[data-id] .c-d")
@@ -444,11 +486,8 @@ test.describe("飲み屋 売上管理", () => {
       receipt: false,
       memo: "ボトル入れ",
     });
-    await goto(page, "list");
-    await page.locator("#periodList .period-lb").click();
-    await page.locator("#mdFrom").fill("2026-07-01");
-    await page.locator("#mdTo").fill("2026-07-31");
-    await page.locator("#mdOk").click();
+    await goto(page, "ledger");
+    await setPeriod(page, "2026-07-01", "2026-07-31");
 
     // 備考は表の一番右の列
     const heads = await page.locator("#listSheets thead th").allInnerTexts();
@@ -603,11 +642,8 @@ test.describe("飲み屋 売上管理", () => {
     await addSale(page, { date: "2026-07-01", name: "田中", people: 2, amount: 8000, pay: "cash" });
 
     // ★紙に領収書の列は出さない（司さん指示）。中身は 振込=不要 / 現金=なし で持つ
-    await goto(page, "list");
-    await page.locator("#periodList .period-lb").click();
-    await page.locator("#mdFrom").fill("2026-07-01");
-    await page.locator("#mdTo").fill("2026-07-31");
-    await page.locator("#mdOk").click();
+    await goto(page, "ledger");
+    await setPeriod(page, "2026-07-01", "2026-07-31");
     await expect(page.locator("#listSheets .c-r")).toHaveCount(0);
     await expect(page.locator("#listSheets thead")).not.toContainText("領収書");
     expect(
@@ -662,11 +698,8 @@ test.describe("飲み屋 売上管理", () => {
       receipt: "later",
     });
     // 売上帳では空（まだ渡していない＝「なし」側）
-    await goto(page, "list");
-    await page.locator("#periodList .period-lb").click();
-    await page.locator("#mdFrom").fill("2026-07-01");
-    await page.locator("#mdTo").fill("2026-07-31");
-    await page.locator("#mdOk").click();
+    await goto(page, "ledger");
+    await setPeriod(page, "2026-07-01", "2026-07-31");
     // ★紙に領収書の列は無い。中身は「あとで渡す」のまま
     expect(await page.evaluate(() => window.__NOMIYA.sales[0].receipt)).toBe("later");
     // 「あとで渡す分」で絞れる
@@ -690,7 +723,7 @@ test.describe("飲み屋 売上管理", () => {
     expect(saved.receiptDate).toBe("2026-08-10"); // 発行日は入金日
     expect(saved.paidDate).toBe("2026-08-10");
 
-    await goto(page, "list");
+    await goto(page, "ledger");
     await page.locator("#filRec button[data-rec='yes']").click();
     // 発行済みになったので「領収書あり」で拾える（紙に列は出さない）
     await expect(page.locator("#listSheets tr[data-id]")).toHaveCount(1);
@@ -932,7 +965,7 @@ test.describe("飲み屋 売上管理", () => {
     await page.locator("#setBank").fill("伊予銀行 今治支店 普通 1234567");
     await page.locator("#btnSaveSet").click();
 
-    await goto(page, "list");
+    await goto(page, "ledger");
     await expect(page.locator("#listSheets .sh-store").first()).toHaveText("スナック ゼロ");
 
     // 税率8%に切り替え → 請求書の内訳が変わる（32,000 → 税2,370）
@@ -959,13 +992,13 @@ test.describe("飲み屋 売上管理", () => {
     expect(
       await page.evaluate(() => window.__NOMIYA.sales.filter((s) => !s.deletedAt).length)
     ).toBe(0);
-    await goto(page, "list");
+    await goto(page, "ledger");
     await expect(page.locator("#listSheets tr[data-id]")).toHaveCount(0);
 
     // 開き直してクラウドと同期しても、消したものは戻ってこない
     await page.reload({ waitUntil: "load" });
     await expect(page.locator("#acctInfo")).toContainText("同期済み");
-    await goto(page, "list");
+    await goto(page, "ledger");
     await expect(page.locator("#listSheets tr[data-id]")).toHaveCount(0);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
@@ -989,16 +1022,28 @@ test.describe("飲み屋 売上管理", () => {
       receipt: false,
     });
 
-    await goto(page, "list");
-    await page.locator("#periodList .period-lb").click();
-    await page.locator("#mdFrom").fill("2026-07-01");
-    await page.locator("#mdTo").fill("2026-07-31");
-    await page.locator("#mdOk").click();
+    await goto(page, "ledger");
+    await setPeriod(page, "2026-07-01", "2026-07-31");
     await expect(page.locator("#listSheets tr[data-id]")).toHaveCount(1);
 
-    // 範囲指定 → タップで月モードに戻す → 月送り
-    await page.locator("#periodList .period-lb").click();
-    await expect(page.locator("#periodList .period-lb")).toContainText("年");
+    // 範囲指定 → タップで月モードに戻す → ★◀▶で本当に月が動くか★
+    // ★2026-08-22：ここは名前に「◀▶が効く」と書いてあるのに ◀▶ を1回も押していなかった★
+    //   ＝名前だけの試験。押して、中身（並ぶ件数）が変わることまで見る。
+    const bar = page.locator(".period-lb:visible");
+    await bar.click();
+    await expect(bar).toContainText("年");
+    // いま何月を見ているかに関わらず、7月まで送って1件 → 8月へ進めて1件（別の売上）
+    const label = () => bar.innerText();
+    for (let i = 0; i < 24 && !(await label()).includes("2026年7月"); i++) {
+      await page.locator("#periodLedger .period-arrow[data-mv='-1']").click();
+    }
+    await expect(bar).toContainText("2026年7月");
+    await expect(page.locator("#listSheets tr[data-id]")).toHaveCount(1);
+    await expect(page.locator("#listSheets tr[data-id] .c-n")).toHaveText("田中");
+    await page.locator("#periodLedger .period-arrow[data-mv='1']").click();
+    await expect(bar).toContainText("2026年8月");
+    await expect(page.locator("#listSheets tr[data-id]")).toHaveCount(1);
+    await expect(page.locator("#listSheets tr[data-id] .c-n")).toHaveText("佐藤");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
@@ -1008,6 +1053,8 @@ test.describe("飲み屋 売上管理", () => {
   }) => {
     const errors = await open(page);
     await seed(page);
+
+    await goto(page, "ledger"); // 売上帳は集計タブの中（2026-08-21）
 
     // 売上帳
     const r = await expectPaper(page, "listSheets", "売上帳");
@@ -1024,6 +1071,8 @@ test.describe("飲み屋 売上管理", () => {
   test("★新しい窓を開けない端末は、PDFを保存する（ブラウザの印刷は使わない）", async ({ page }) => {
     const errors = await open(page);
     await seed(page);
+
+    await goto(page, "ledger"); // 売上帳は集計タブの中（2026-08-21）
     // 新しい窓を開けなくする（会社のiPadなどでよくある）
     const dl = [];
     page.on("download", (d) => dl.push(d.suggestedFilename()));
@@ -1283,7 +1332,7 @@ test.describe("飲み屋 売上管理", () => {
     await pickCompany(page, "株式会社山本商事");
     await expect(page.locator("#invSheets .iv-to")).toHaveText("株式会社山本商事　様");
     // 売上帳にも新しい名前で出る（件数は増えていない）
-    await goto(page, "list");
+    await goto(page, "ledger");
     await expect(page.locator("#listSheets tr[data-id]")).toHaveCount(5);
     await expect(page.locator("#listSheets")).toContainText("株式会社山本商事");
 
@@ -1423,11 +1472,8 @@ test.describe("飲み屋 売上管理", () => {
     expect(await page.evaluate(() => window.__NOMIYA.sales.length)).toBe(2);
     // 一覧は既定が「今月」。テストの売上は2026年7月なので範囲を明示して合わせる
     // （合わせないと、今日が7月でなくなった瞬間に落ちる＝時計の時限爆弾）
-    await goto(page, "list");
-    await page.locator("#periodList .period-lb").click();
-    await page.locator("#mdFrom").fill("2026-07-01");
-    await page.locator("#mdTo").fill("2026-07-31");
-    await page.locator("#mdOk").click();
+    await goto(page, "ledger");
+    await setPeriod(page, "2026-07-01", "2026-07-31");
     await expect(page.locator("#listSheets")).toContainText("佐藤");
 
     // 同じ売上を「別のスマホ」で新しく直す → 同期すると新しい方が残る
@@ -1890,7 +1936,10 @@ test.describe("飲み屋 売上管理", () => {
     // 数えていないと締められない（2026-08-19：押す前から灰色＋理由）
     await expect(page.locator("#btnClose"), "灰色になっていない").toBeDisabled();
     await expect(page.locator("#btnClose")).toContainText("数えた実数を入れてください");
-    await page.locator("#btnClose").click({ force: true }).catch(() => {});
+    await page
+      .locator("#btnClose")
+      .click({ force: true })
+      .catch(() => {});
     await expect(page.locator("#clState")).not.toContainText("締めました");
 
     await page.locator("#clCount").fill("8000");
@@ -1902,7 +1951,7 @@ test.describe("飲み屋 売上管理", () => {
     await expect(page.locator("#modalOv")).not.toHaveClass(/open/);
 
     // 売上を直すと「締め直してください」に変わる
-    await goto(page, "list");
+    await goto(page, "ledger");
     await page.locator("#listSheets tr[data-id]").first().click();
     await page.locator("#inAmount").fill("9000");
     await page.locator("#btnSave").click();
@@ -2364,11 +2413,8 @@ test.describe("飲み屋 売上管理", () => {
     await expect(page.locator("#clNoStaff")).toContainText("1 件");
 
     // 担当を付けたら消える
-    await goto(page, "list");
-    await page.locator("#periodList .period-lb").click();
-    await page.locator("#mdFrom").fill("2026-08-01");
-    await page.locator("#mdTo").fill("2026-08-31");
-    await page.locator("#mdOk").click();
+    await goto(page, "ledger");
+    await setPeriod(page, "2026-08-01", "2026-08-31");
     await page.locator("#listSheets tr[data-id]").first().click();
     await page.locator("#inStaff").selectOption({ label: "あかり" });
     await page.locator("#btnSave").click();
@@ -2784,19 +2830,23 @@ test.describe("飲み屋 売上管理", () => {
 
 /* =====================================================================
    ③ 設定は右上の歯車・マスタはそこにまとめる
-   下ナビ5つ＝一覧 / 請求書 / 入力(中央) / 締め / 給料
-   集計と税理士の紙は「一覧」の中。設定の中＝自社情報 / 会社 / 従業員 / 商品。
+   ★2026-08-21（司さん）＝下ナビ6つ＝集計 / 請求書 / 入力 / ★一覧★ / 給料 / 締め★
+   ＝毎日 打つ「入力」の となりに「一覧」（見て・直して・消す）。紙を作る「集計」は端。
+   売上帳・集計・税理士の紙は「集計」の中。設定の中＝自社情報 / 会社 / 従業員 / 商品 / アカウント。
    ★よく出るボトルの「押すボタン」は入力(出勤)に残す＝奥にしまわない。
    ===================================================================== */
 test.describe("③ 設定の歯車とマスタ", () => {
-  test("下ナビは5つ・入力が真ん中・設定は歯車で開いて戻れる", async ({ page }) => {
+  test("下ナビは6つ・入力の右が一覧・設定は歯車で開いて戻れる", async ({ page }) => {
     const errors = await open(page);
 
     const labels = await page.locator(".bottom-nav .nav-item .nav-lb").allInnerTexts();
-    expect(labels).toEqual(["一覧", "請求書", "入力", "給料", "締め"]);
-    // 真ん中＝3番目が入力（親指が届く位置）
+    // ★司さん 2026-08-21「一覧単独を入力の右側に置いて、いつでも確認や削除ができるように」★
+    expect(labels).toEqual(["集計", "請求書", "入力", "一覧", "給料", "締め"]);
+    // 打つ所（入力）と 見る所（一覧）は となり同士＝指がそのまま届く
     expect(labels[2]).toBe("入力");
-    for (const gone of ["set", "sum", "tax"]) {
+    expect(labels[3]).toBe("一覧");
+    // 設定・売上帳・税理士の紙は 下ナビに出さない（歯車と 集計タブの中）
+    for (const gone of ["set", "ledger", "tax"]) {
       await expect(page.locator(`.nav-item[data-scr='${gone}']`)).toHaveCount(0);
     }
 
@@ -2808,8 +2858,9 @@ test.describe("③ 設定の歯車とマスタ", () => {
     await expect(page.locator("#scr-set")).toBeHidden();
     await expect(page.locator("#scr-pay")).toBeVisible();
 
-    // 下ナビ5つが全部それぞれの画面に行く
+    // 下ナビ6つが全部それぞれの画面に行く
     for (const [scr, id] of [
+      ["sum", "#scr-sum"],
       ["list", "#scr-list"],
       ["inv", "#scr-inv"],
       ["input", "#scr-input"],
@@ -2822,31 +2873,40 @@ test.describe("③ 設定の歯車とマスタ", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
-  test("集計と税理士の紙は「一覧」の中の切替に入っている", async ({ page }) => {
+  test("売上帳・集計・税理士の紙は「集計」タブの中の切替に入っている", async ({ page }) => {
+    /* ★2026-08-21：一覧は「見て直す所」、集計は「紙を作る所」に分けた（司さん）★ */
     const errors = await open(page);
     await seed(page);
 
-    const segs = await page.locator("#listSeg .chip").allInnerTexts();
-    expect(segs).toEqual(["一覧", "集計", "税理士の紙"]);
+    const segs = await page.locator("#sumSeg .chip").allInnerTexts();
+    expect(segs).toEqual(["売上帳", "集計", "税理士の紙"]);
 
-    await goto(page, "list");
-    await expect(page.locator("#pane-list")).toBeVisible();
+    await goto(page, "ledger");
+    await expect(page.locator("#pane-ledger")).toBeVisible();
     await expect(page.locator("#pane-sum")).toBeHidden();
 
     // 集計へ。数字は今までどおり出る（売上5件 82,000円）
-    await page.locator("#listSeg [data-lseg='sum']").click();
+    await page.locator("#sumSeg [data-mseg='sum']").click();
     await expect(page.locator("#pane-sum")).toBeVisible();
-    await expect(page.locator("#pane-list")).toBeHidden();
+    await expect(page.locator("#pane-ledger")).toBeHidden();
     await expect(page.locator("#sumStrip")).toContainText("¥82,000");
 
     // 税理士の紙へ。紙が作られている
-    await page.locator("#listSeg [data-lseg='tax']").click();
+    await page.locator("#sumSeg [data-mseg='tax']").click();
     await expect(page.locator("#pane-tax")).toBeVisible();
     await expect(page.locator("#taxSheets .sh-title")).toHaveText("売 上 報 告 書");
 
     // 下ナビの「一覧」を押したら、いつでも一覧に戻る（迷子にしない）
+    // ★一覧は「集計の中の面」ではなく、独立した画面になった（#scr-list）★
     await page.locator(".nav-item[data-scr='list']").click();
-    await expect(page.locator("#pane-list")).toBeVisible();
+    await expect(page.locator("#scr-list")).toBeVisible();
+    await expect(page.locator("#scr-sum")).toBeHidden();
+    // 一覧には 紙も Excel も 絞り込みも 置かない（司さん「一覧にPDFはいらん」）
+    await expect(page.locator("#scr-list #btnPrintList")).toHaveCount(0);
+    await expect(page.locator("#scr-list #btnXlsxList")).toHaveCount(0);
+    await expect(page.locator("#scr-list #filPay")).toHaveCount(0);
+    await expect(page.locator("#scr-list #filRec")).toHaveCount(0);
+    await expect(page.locator("#scr-list #listSheets")).toHaveCount(0);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
@@ -3413,11 +3473,9 @@ test.describe("⑥ 調整", () => {
       if (s.rec) await page.locator('#recChips button[data-rec="issued"]').click();
       await page.locator("#btnSave").click();
     }
-    await goto(page, "list");
-    await page.locator("#periodList .period-lb").click();
-    await page.locator("#mdFrom").fill("2026-07-01");
-    await page.locator("#mdTo").fill("2026-07-31");
-    await page.locator("#mdOk").click();
+    // ★調整（領収書の絞り込み）は 売上帳＝集計タブの中★（2026-08-21 で一覧から移した）
+    await goto(page, "ledger");
+    await setPeriod(page, "2026-07-01", "2026-07-31");
   }
 
   test("なしの中から自分で選んだ分だけが、あり側に足される", async ({ page }) => {
@@ -3508,11 +3566,8 @@ test.describe("⑥ 調整", () => {
     await expect(page.locator("#listStrip")).toContainText("¥42,000");
 
     await page.reload({ waitUntil: "load" });
-    await goto(page, "list");
-    await page.locator("#periodList .period-lb").click();
-    await page.locator("#mdFrom").fill("2026-07-01");
-    await page.locator("#mdTo").fill("2026-07-31");
-    await page.locator("#mdOk").click();
+    await goto(page, "ledger");
+    await setPeriod(page, "2026-07-01", "2026-07-31");
     await page.locator('#filRec button[data-rec="adj"]').click();
     await expect(page.locator("#adjPick .li", { hasText: "田中" })).toContainText("☑");
     await expect(page.locator("#listStrip")).toContainText("¥42,000");
@@ -3561,11 +3616,8 @@ test.describe("紙に絞り込みの見出しを刷らない", () => {
       pay: "cash",
       receipt: true,
     });
-    await goto(page, "list");
-    await page.locator("#periodList .period-lb").click();
-    await page.locator("#mdFrom").fill("2026-07-01");
-    await page.locator("#mdTo").fill("2026-07-31");
-    await page.locator("#mdOk").click();
+    await goto(page, "ledger");
+    await setPeriod(page, "2026-07-01", "2026-07-31");
 
     // 見出し（紙の一番上）に、どう絞り込んだかを書かない。
     // ※紙の下の内訳（支払い方法別・領収書 あり/なし）は前からある物なので、そのまま。
@@ -3618,11 +3670,8 @@ test.describe("売上帳の下の内訳", () => {
       pay: "cash",
       receipt: true,
     });
-    await goto(page, "list");
-    await page.locator("#periodList .period-lb").click();
-    await page.locator("#mdFrom").fill("2026-07-01");
-    await page.locator("#mdTo").fill("2026-07-31");
-    await page.locator("#mdOk").click();
+    await goto(page, "ledger");
+    await setPeriod(page, "2026-07-01", "2026-07-31");
 
     // すべて＝出す
     await page.locator('#filRec button[data-rec="all"]').click();
@@ -3693,18 +3742,22 @@ test.describe("紙が枠からずれない", () => {
         [wrapId, sheetsId]
       );
       expect(m, `${name} の紙が出ていない`).not.toBeNull();
+      /* ★2026-08-22 追加：隠れている画面を測ると全部0になり、★何も見ていないのに緑★になる★
+         （売上帳を「一覧」で測っていたが、売上帳は集計タブへ移った＝画面は非表示＝0）。
+         ★幅が0なら赤★にして、測り先を間違えたら必ず気づくようにする。 */
+      expect(m.wrapW, `${name}: 枠の幅が0＝その画面が出ていない（測り先が違う）`).toBeGreaterThan(
+        0
+      );
+      expect(m.width, `${name}: 紙の幅が0＝紙が出ていない`).toBeGreaterThan(0);
       expect(m.left, `${name}: 紙が枠の左から ${m.left}px ずれている`).toBeLessThanOrEqual(1);
       expect(m.left, `${name}: 紙が枠の左より外に出ている`).toBeGreaterThanOrEqual(-1);
       expect(m.over, `${name}: 紙が枠の右から ${m.over}px はみ出している`).toBeLessThanOrEqual(1);
       expect(m.width, `${name}: 紙が枠の幅を超えている`).toBeLessThanOrEqual(m.wrapW + 1);
     };
 
-    await goto(page, "list");
-    await page.locator("#periodList .period-lb").click();
-    await page.locator("#mdFrom").fill("2026-07-01");
-    await page.locator("#mdTo").fill("2026-07-31");
-    await page.locator("#mdOk").click();
-    await check("売上帳", "list", "listScale", "listSheets");
+    await goto(page, "ledger");
+    await setPeriod(page, "2026-07-01", "2026-07-31");
+    await check("売上帳", "ledger", "listScale", "listSheets"); // 売上帳は集計タブの中（2026-08-21）
     await check("税理士の紙", "tax", "taxScale", "taxSheets");
     await check("請求書", "inv", "invScale", "invSheets");
     await check("日報（締め）", "close", "closeScale", "closeSheets");
@@ -5498,7 +5551,7 @@ test.describe("⑲ Castally", () => {
 
     await covering("A4の紙", 7, async (c) => {
       // 売上帳（字の色と見出しの帯まで見る代表）
-      await goto(page, "list");
+      await goto(page, "ledger");
       const list = await check(c, "売上帳", "#listSheets");
       expect(list.color, "紙の字が黒でない").toBe("rgb(0, 0, 0)");
       expect(list.band, "見出しの帯が濃紺でない").toBe("rgb(10, 17, 40)");
@@ -5908,6 +5961,8 @@ test.describe("㉒ 判子と印刷の窓", () => {
     const errors = await open(page);
     await seed(page);
 
+    await goto(page, "ledger"); // 売上帳は集計タブの中（2026-08-21）
+
     // 押すと、作ったPDFを新しい窓で開く
     const [pdfWin] = await Promise.all([
       context.waitForEvent("page"),
@@ -6013,24 +6068,40 @@ test.describe("㉔ 見本の中身・画面の頭出し・iPhoneの勝手な拡�
     const scrollDown = async () => {
       await page.evaluate(() => window.scrollTo(0, 600));
       await page.waitForTimeout(50);
-      expect(await y(), "そもそも下まで動いていない").toBeGreaterThan(100);
+      const hh = await page.evaluate(
+        () => document.documentElement.scrollHeight + "/" + window.innerHeight
+      );
+      expect(await y(), "そもそも下まで動いていない h=" + hh).toBeGreaterThan(100);
     };
+
+    /* ★2026-08-22：ここは「画面が動いただけ」で落ちていた（頭出しは壊れていない）★
+       一覧から 紙・Excel・絞り込みを外したので、一覧は ★実測 844/844＝1pxも縦に動かない★。
+       ＝「下まで動かしてから画面を変える」の“下まで動かす”が出来なくなっただけ。
+       ★長い画面（売上帳＝紙が載っている）から始めて、強さ（>100）はそのまま★ */
+    await goto(page, "ledger");
 
     // 下ナビで別の画面へ
     await scrollDown();
     await goto(page, "inv");
     expect(await y(), "画面を変えたのに前の位置のまま").toBe(0);
 
+    // 下ナビの「一覧」へ（毎日 使う道順）
+    await goto(page, "ledger");
+    await scrollDown();
+    await page.locator(".nav-item[data-scr='list']").click();
+    expect(await y(), "一覧に来たのに前の位置のまま").toBe(0);
+
     // 請求書の中の切替（請求書／未回収／入金）
+    await goto(page, "inv");
     await scrollDown();
     await page.locator("#invSeg [data-iseg='due']").click();
     expect(await y(), "中の切替で前の位置のまま").toBe(0);
 
-    // 一覧の中の切替（一覧／集計／税理士の紙）
-    await goto(page, "list");
+    // 集計タブの中の切替（売上帳／集計／税理士の紙）
+    await goto(page, "ledger");
     await scrollDown();
-    await page.locator("#listSeg [data-lseg='sum']").click();
-    expect(await y(), "一覧の中の切替で前の位置のまま").toBe(0);
+    await page.locator("#sumSeg [data-mseg='sum']").click();
+    expect(await y(), "集計の中の切替で前の位置のまま").toBe(0);
 
     // 右上の歯車
     await scrollDown();
@@ -6543,7 +6614,7 @@ test.describe("㉛ ファイルの渡し口", () => {
     await spyAnchors(page);
 
     // ① 一覧タブ →「Excelに書き出す」
-    await goto(page, "list");
+    await goto(page, "ledger");
     await page.locator("#btnXlsxList").click();
     await expect(page.locator("#modalOv")).toHaveClass(/open/);
     await page.locator("#xlOk").click();
@@ -6593,7 +6664,7 @@ test.describe("㉛ ファイルの渡し口", () => {
       };
     });
 
-    await goto(page, "list");
+    await goto(page, "ledger");
     await page.locator("#btnPrintList").click();
     await expect.poll(async () => (await anchors(page)).length, { timeout: 25000 }).toBe(1);
 

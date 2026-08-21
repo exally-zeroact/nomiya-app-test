@@ -125,7 +125,7 @@ var UI = {
   closeYmd: "", // 締めはその日1枚（起動時に今日が入る）
   exported: false, // ★この画面を開いてから1回でも書き出したか★（全部消すの手前に置く鍵）
   payYmd: "", // 給料はその日の出勤を見る
-  listSeg: "list", // 一覧の中の切替 list/sum/tax
+  sumSeg: "ledger", // 集計タブの中の切替 ledger(売上帳)/sum(集計)/tax(税理士の紙)
   invSeg: "inv", // 請求書の中の切替 inv/due/paid
   dueOrder: "old", // 未回収の並び old=古い順 / due=期限が近い順
   setSeg: "self", // 設定の中の切替 self/partner/staff/item
@@ -1006,7 +1006,7 @@ function periodSales() {
 }
 
 function renderPeriodBars() {
-  ["periodList", "periodSum", "periodTax"].forEach(function (id) {
+  ["periodList", "periodLedger", "periodSum", "periodTax"].forEach(function (id) {
     var el = $(id);
     if (!el) return;
     var isMonth = UI.period.mode === "month";

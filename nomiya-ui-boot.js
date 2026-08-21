@@ -38,15 +38,18 @@ document.addEventListener("visibilitychange", function () {
   if (!document.hidden) setTimeout(resnap, 50);
 });
 function showScreen(name) {
-  if (name === "sum" || name === "tax") {
-    UI.listSeg = name;
-    name = "list";
-  } else if (name === "list") {
-    UI.listSeg = "list";
+  /* ★一覧＝見て直す所／集計＝紙を作る所★（司さん 2026-08-21 で分けた）
+     「集計」「税理士の紙」は 集計タブの中の面。 */
+  if (name === "tax") {
+    UI.sumSeg = "tax";
+    name = "sum";
+  } else if (name === "ledger") {
+    UI.sumSeg = "ledger";
+    name = "sum";
   }
   if (name !== "set") UI.backTo = name;
   UI.screen = name;
-  ["input", "list", "inv", "close", "pay", "set"].forEach(function (n) {
+  ["input", "list", "sum", "inv", "close", "pay", "set"].forEach(function (n) {
     $("scr-" + n).classList.toggle("active", n === name);
   });
   document.querySelectorAll(".nav-item").forEach(function (b) {
@@ -71,7 +74,7 @@ function showScreen(name) {
 // 画面の中の切替（一覧＝一覧/集計/税理士の紙、設定＝自社情報/会社/従業員/商品）
 function syncPanes() {
   [
-    ["listSeg", "data-lseg", UI.listSeg, ["list", "sum", "tax"]],
+    ["sumSeg", "data-mseg", UI.sumSeg, ["ledger", "sum", "tax"]],
     ["invSeg", "data-iseg", UI.invSeg, ["inv", "due", "paid"]],
     ["setSeg", "data-sseg", UI.setSeg, ["self", "partner", "staff", "item", "acct"]],
   ].forEach(function (x) {
@@ -85,8 +88,8 @@ function syncPanes() {
     });
   });
 }
-function setListSeg(seg) {
-  UI.listSeg = seg;
+function setSumSeg(seg) {
+  UI.sumSeg = seg;
   syncPanes();
   fitAll();
   toTop();
@@ -220,6 +223,7 @@ function renderAll() {
   renderPeriodBars();
   renderDay();
   renderList();
+  renderLedger();
   renderSum();
   renderTax();
   renderInv();
@@ -557,11 +561,11 @@ function init() {
   $("btnAdmin").onclick = function () {
     location.href = "castally-admin.html";
   };
-  $("listSeg")
-    .querySelectorAll("[data-lseg]")
+  $("sumSeg")
+    .querySelectorAll("[data-mseg]")
     .forEach(function (b) {
       b.onclick = function () {
-        setListSeg(b.getAttribute("data-lseg"));
+        setSumSeg(b.getAttribute("data-mseg"));
       };
     });
   $("invSeg")

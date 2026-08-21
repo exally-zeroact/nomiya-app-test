@@ -52,11 +52,11 @@ async function addSale(page, { pay, name, amount }) {
 test.describe("入れたばかりの店（できない物は押す前に分かる）", () => {
   test("★一覧：0件のときは 紙もExcelも灰色＋理由／売上を入れたら黒に戻る★", async ({ page }) => {
     const errors = await open(page);
-    await page.locator(".nav-item[data-scr='list']").click();
+    await page.locator(".nav-item[data-scr='sum']").click(); // 売上帳は集計タブ（2026-08-21）
     await gray(page, "btnPrintList", "この期間に売上がありません");
     await gray(page, "btnXlsxList", "この期間に売上がありません");
     await addSale(page, { pay: "cash", name: "田中さん", amount: 22000 });
-    await page.locator(".nav-item[data-scr='list']").click();
+    await page.locator(".nav-item[data-scr='sum']").click(); // 売上帳は集計タブ（2026-08-21）
     await expect(page.locator("#btnPrintList")).toBeEnabled();
     await expect(page.locator("#btnXlsxList")).toBeEnabled();
     await expect(page.locator("#btnXlsxList")).toHaveText("📊 Excelに書き出す");
