@@ -218,7 +218,11 @@ function onDelete() {
   var id = UI.editId;
   openModal(
     "この売上を消す",
-    '<div class="hint">消すと売上帳・集計から外れます。取り消せません。</div>' +
+    /* ★2026-08-22 指示役 裁定1-③：窓の言葉を実態に合わせる★
+       「取り消せません」は嘘だった。★書き出したファイルを読み込めば戻せる★（restorePlan）。
+       ＝この画面には戻す道が無い、という本当のことを書く。 */
+    '<div class="hint">消すと売上帳・集計から外れます。<b>この画面からは戻せません。</b><br>' +
+      "書き出したファイルが在れば、設定＞アカウント＞「読み込む」で戻せます。</div>" +
       '<div class="btn-right" style="margin-top:14px">' +
       '<button class="btn btn-ghost btn-sm" id="mdNo">やめる</button>' +
       '<button class="btn btn-ghost btn-danger btn-sm" id="mdYes">消す</button></div>'

@@ -81,10 +81,16 @@ test.describe("設定：お店の情報と、アカウント・データを分�
     const body = page.locator("#modalBody");
     await expect(body, "消える数が出ていない").toContainText("売上 2 件");
     await expect(body, "残る物が書いていない").toContainText("残るもの");
-    await expect(body).toContainText("取り消せません");
+    // ★2026-08-22 裁定1-③：ここは「取り消せません」を求めていた＝嘘を試験で固定していた★
+    await expect(body, "クラウドの分も消える事を書いていない").toContainText(
+      "クラウドの分も消えます"
+    );
+    await expect(body, "戻し方が書いていない").toContainText("読み込む");
     // やめる を押したら 1件も消えない
     await page.locator("#mdNo").click();
-    expect(await page.evaluate(() => window.__NOMIYA.sales.filter((s) => !s.deletedAt).length)).toBe(2);
+    expect(
+      await page.evaluate(() => window.__NOMIYA.sales.filter((s) => !s.deletedAt).length)
+    ).toBe(2);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
@@ -115,6 +121,60 @@ test.describe("設定：お店の情報と、アカウント・データを分�
     expect(Array.isArray(data.payments), "★書き出しに入金が入っていない★").toBe(true);
     expect(data.payments.length, "入金が1件も書き出されていない").toBe(1);
     expect(data.payments[0].amount).toBe(20000);
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  /* ★2026-08-22 指示役 裁定1-③：窓に書いた言葉が本当かどうかを、押して確かめる★
+     前は「取り消せません」と書いてあった。実際は 書き出したファイルを読み込めば戻る。
+     ★言葉だけ直すと また嘘になるので、戻せることを実際に押して確かめる★ */
+  test("★消す窓の言葉が本当か：書き出す→消す→読み込む で戻る★", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, 8000);
+
+    // 1) 書き出す（ファイルを受け取る）
+    await page.locator("#btnGear").click();
+    await page.locator("#setSeg [data-sseg='acct']").click();
+    const dl = await Promise.all([
+      page.waitForEvent("download"),
+      page.locator("#btnExport").click(),
+    ]);
+    const file = await dl[0].path();
+
+    // 2) 売上を消す。窓の言葉は「この画面からは戻せません」＋戻し方（嘘を書かない）
+    await page.locator(".nav-item[data-scr='list']").click();
+    await page.locator("#listRows [data-id]").first().click();
+    await page.locator("#btnDelete").click();
+    const md = page.locator("#modalBody");
+    await expect(md).toContainText("この画面からは戻せません");
+    await expect(md).toContainText("読み込む");
+    await expect(md, "戻せるのに『取り消せません』と書いている").not.toContainText(
+      "取り消せません"
+    );
+    await page.locator("#mdYes").click();
+    await expect(page.locator("#listRows [data-id]")).toHaveCount(0);
+
+    // 3) 窓に書いたとおりに戻す（読み込む → 足す）
+    await page.locator("#btnGear").click();
+    await page.locator("#setSeg [data-sseg='acct']").click();
+    await page.locator("#fileImport").setInputFiles(file);
+    await page.locator("#mdAdd").click();
+    await page.locator(".nav-item[data-scr='list']").click();
+    await expect(page.locator("#listRows [data-id]"), "窓に書いた戻し方で戻らない").toHaveCount(1);
+    await expect(page.locator("#tabListStrip")).toContainText("¥8,000");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  test("★「全部消す」の窓も、戻し方を書く（取り消せません と書かない）★", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, 8000);
+    await page.locator("#btnGear").click();
+    await page.locator("#setSeg [data-sseg='acct']").click();
+    await Promise.all([page.waitForEvent("download"), page.locator("#btnExport").click()]);
+    await page.locator("#btnWipe").click();
+    const md = page.locator("#modalBody");
+    await expect(md).toContainText("この画面からは戻せません");
+    await expect(md).toContainText("読み込む");
+    await expect(md).not.toContainText("取り消せません");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });

@@ -284,7 +284,11 @@ function onWipe() {
       nPt +
       "</b> 件 ／ 請求書番号 <b>" +
       nInv +
-      "</b> 件<br>クラウドの分も消えます。取り消せません。</div>" +
+      /* ★2026-08-22 指示役 裁定1-③：窓の言葉を実態に合わせる★
+         押す前に1回 書き出させている＝そのファイルを読み込めば戻せる。
+         「取り消せません」と書くと、戻せる物まで諦めさせてしまう。 */
+      "</b> 件<br>クラウドの分も消えます。<b>この画面からは戻せません。</b><br>" +
+      "いま書き出したファイルを「読み込む」で戻せます。</div>" +
       '<div class="hint">残るもの：スタッフ ' +
       nStaff +
       " 人 ／ 出勤 " +
@@ -504,8 +508,9 @@ function openOut(id, ymd) {
       return x.id === id;
     })[0] || null;
   openModal(
-    (C.isIsoDate(UI.closeYmd) ? C.mdShort(UI.closeYmd) + "（" + C.weekday(UI.closeYmd) + "）の " : "") +
-      (cur ? "出金を直す" : "出金を足す"),
+    (C.isIsoDate(UI.closeYmd)
+      ? C.mdShort(UI.closeYmd) + "（" + C.weekday(UI.closeYmd) + "）の "
+      : "") + (cur ? "出金を直す" : "出金を足す"),
     '<div class="frow"><span class="flabel">種類</span><div class="chips" id="outKind">' +
       C.OUT_KINDS.map(function (k) {
         return (
