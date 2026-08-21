@@ -66,7 +66,7 @@ test.describe("設定：お店の情報と、アカウント・データを分�
     ]);
     expect(dl.suggestedFilename()).toContain(".json");
     await expect(wipe, "書き出したのに押せないまま").toBeEnabled();
-    await expect(wipe).toHaveText("全部消す");
+    await expect(wipe).toHaveText("売上を全部消す"); // ★名前を実態に合わせた（裁定3・2026-08-22）★
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
@@ -175,6 +175,38 @@ test.describe("設定：お店の情報と、アカウント・データを分�
     await expect(md).toContainText("この画面からは戻せません");
     await expect(md).toContainText("読み込む");
     await expect(md).not.toContainText("取り消せません");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
+  /* ★名前が実態と合っているか（指示役 2026-08-22 裁定3）★
+     「全部消す」と書いてあるのに スタッフ・出勤・入金・レジ締めは残る＝名前が嘘だった。
+     ★名前を直したら、その名前どおりに消える／残ることを 押して数える★ */
+  test("★「売上を全部消す」は、名前のとおりに消えて 名前のとおりに残る★", async ({ page }) => {
+    const errors = await open(page);
+    await addSale(page, 22000);
+    // スタッフを1人 足す（残る側の代表）
+    await page.locator("#btnGear").click();
+    await page.locator("#setSeg [data-sseg='staff']").click();
+    await page.locator("#btnStaffAdd").click();
+    await page.locator("#st_name").fill("あかり");
+    await page.locator("#st_hourly").fill("1500");
+    await page.locator("#st_ok").click();
+
+    await page.locator("#setSeg [data-sseg='acct']").click();
+    await Promise.all([page.waitForEvent("download"), page.locator("#btnExport").click()]);
+    await page.locator("#btnWipe").click();
+    await expect(page.locator("#modalTitle")).toHaveText("売上を全部消す（宛先と請求書番号も）");
+    await page.locator("#mdYes").click();
+
+    const left = await page.evaluate(() => ({
+      sales: window.__NOMIYA.sales.filter((s) => !s.deletedAt).length,
+      staff: (window.__NOMIYA.staff || []).filter((s) => !s.deletedAt).length,
+    }));
+    expect(left.sales, "売上が消えていない").toBe(0);
+    expect(left.staff, "スタッフまで消えている（名前と違う）").toBe(1);
+    // 画面でも、スタッフは残っている（設定は開いたまま。面だけ替える）
+    await page.locator("#setSeg [data-sseg='staff']").click();
+    await expect(page.locator("#pane-staff")).toContainText("あかり");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });

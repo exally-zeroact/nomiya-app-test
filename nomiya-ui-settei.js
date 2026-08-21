@@ -51,7 +51,7 @@ function renderSettings() {
   /* ★戻せない物を作らない★（指示役 2026-08-21）
      この画面を開いてから1回も書き出していないうちは「全部消す」を押せない。
      押せない理由は ボタンの中に書く（さっき決めた形と同じ）。 */
-  gateBtn("btnWipe", !UI.exported, "全部消す", "先に書き出してください");
+  gateBtn("btnWipe", !UI.exported, "売上を全部消す", "先に書き出してください");
   renderPayRules();
   renderMasters();
 }
@@ -260,8 +260,10 @@ function finishImport(data) {
 
 function onWipe() {
   /* ★押す前に「何が」「いくつ」消えるかを数で見せる★（指示役 2026-08-21）
-     ＝「全部消す」と書いてあるのに、消えない物が在る（スタッフ・出勤・入金・締め）。
-     数と、残る物を はっきり出す。 */
+     ★2026-08-22 裁定3：名前も実態に合わせた★
+       消えるのは 売上・宛先（会社）・請求書番号 の3つだけ。
+       スタッフ・出勤・入金・レジ締め・お店の情報は残るのに「全部消す」と書いていた
+       ＝名前が嘘をつくと、押した人は「もう何も無い」と思って別の物を探しに行く。 */
   var nSales = SALES.filter(function (s) {
     return !s.deletedAt;
   }).length;
@@ -277,7 +279,7 @@ function onWipe() {
     return !p.deletedAt;
   }).length;
   openModal(
-    "全部消す",
+    "売上を全部消す（宛先と請求書番号も）",
     '<div class="hint">★消えるもの★<br>売上 <b>' +
       nSales +
       "</b> 件 ／ 宛先（会社） <b>" +
@@ -298,7 +300,7 @@ function onWipe() {
       " 件 ／ レジ締め ／ お店の情報</div>" +
       '<div class="btn-right" style="margin-top:14px">' +
       '<button class="btn btn-ghost btn-sm" id="mdNo">やめる</button>' +
-      '<button class="btn btn-ghost btn-danger btn-sm" id="mdYes">全部消す</button></div>'
+      '<button class="btn btn-ghost btn-danger btn-sm" id="mdYes">売上を全部消す</button></div>'
   );
   $("mdNo").onclick = closeModal;
   $("mdYes").onclick = function () {

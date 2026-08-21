@@ -566,7 +566,10 @@
           </div>
           <input type="file" id="fileImport" accept="application/json" style="display: none" />
           <div class="btn-right">
-            <button class="btn btn-ghost btn-danger btn-sm" id="btnWipe">全部消す</button>
+            <!-- ★名前を実態に合わせた（指示役 2026-08-22 裁定3）★
+                 消えるのは 売上・宛先（会社）・請求書番号だけ。
+                 スタッフ・出勤・入金・レジ締め・お店の情報は残るのに「全部消す」と書いていた。 -->
+            <button class="btn btn-ghost btn-danger btn-sm" id="btnWipe">売上を全部消す</button>
           </div>
         </div>
       </div>
@@ -934,7 +937,7 @@
     <script defer src="nomiya-ui-uriage.js?v=ae730178"></script>
     <script defer src="nomiya-ui-kaishu.js?v=53cff47e"></script>
     <script defer src="nomiya-ui-kami.js?v=2e2b05c8"></script>
-    <script defer src="nomiya-ui-settei.js?v=21998b3f"></script>
+    <script defer src="nomiya-ui-settei.js?v=5cf276ab"></script>
     <script defer src="nomiya-ui-kyuryo.js?v=711a2d8a"></script>
     <script defer src="nomiya-ui-boot.js?v=9ec96d33"></script>
   </body>
