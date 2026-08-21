@@ -325,6 +325,15 @@ function init() {
       renderClose();
     };
   });
+  /* ★入力タブからの出金★＝入力タブで選んでいる日に付ける（窓の題に日付が出る） */
+  $("btnInOutAdd").onclick = function () {
+    var d = $("inDate").value;
+    if (!C.isIsoDate(d)) {
+      toast("先に日付を入れてください");
+      return;
+    }
+    openOut("", d);
+  };
   $("btnOutAdd").onclick = function () {
     if (closeInput(UI.closeYmd).closedAt) {
       toast("締めた日です。直すなら「締め直す」を押してください");
