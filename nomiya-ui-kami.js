@@ -610,6 +610,8 @@ function renderInv() {
   renderInvLook();
   var isSample = !UI.invName;
   $("invSample").style.display = isSample ? "" : "none";
+  /* ★見本には「入金済みにする」物が無い★（押してから気づかせない） */
+  gateBtn("btnPaid", isSample, "この請求分を入金済みにする", "先に請求する相手を選んでください");
   $("invSheets").innerHTML = invoiceSheetHtml(isSample ? sampleInvoice() : currentInvoice());
   $("invSkin").textContent = invoiceSkinCss();
   fitSheets("invScale", "invSheets");

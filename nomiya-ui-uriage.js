@@ -252,6 +252,15 @@ function renderDay() {
     stripItem("組数", C.comma(sum.count), "組") +
     stripItem("人数", C.comma(sum.people), "人") +
     stripItem("売上", C.yen(sum.amount));
+  /* ★その日の出金★（司さん 2026-08-21「入力タブからしか入力しないと思う」）
+     出す物も押した先も、締めタブとまったく同じ（drawOuts / openOut）。 */
+  var inp = closeInput(d);
+  var shimeta = !!inp.closedAt;
+  $("inOutLabel").textContent =
+    (C.isIsoDate(d) ? C.jpDate(d) + "（" + C.weekday(d) + "）" : "この日") + " の出金";
+  drawOuts("inOuts", inp.outs, d, shimeta);
+  gateBtn("btnInOutAdd", shimeta, "＋ 出金を足す", "この日はもう締めています");
+
   $("dayList").innerHTML = rows.length
     ? rows.map(saleLi).join("")
     : '<div class="empty">まだありません</div>';
@@ -478,6 +487,12 @@ function renderList() {
     stripItem("のべ人数", C.comma(sum.people), "人") +
     stripItem("売上", C.yen(sum.amount));
 
+  /* ★0件のときに紙やExcelを作らせない★（白紙を作って渡すのが、いちばん分かりにくい） */
+  gateBtn("btnPrintList", !rows.length, "🖨 印刷 / PDFにする", "この期間に売上がありません");
+  gateBtn("btnXlsxList", !rows.length, "📊 Excelに書き出す", "この期間に売上がありません");
+
+  /* ★出す物が無いときは、紙の下絵も出さない★（白紙を見せると「壊れている」に見える） */
+  $("listScale").hidden = !rows.length;
   $("listSheets").innerHTML = ledgerSheetsHtml(rows);
   bindSheetRows($("listSheets"));
   fitSheets("listScale", "listSheets");

@@ -30,6 +30,8 @@ function renderSettings() {
   $("logoPrev").innerHTML = SETTINGS.logo
     ? '<img src="' + esc(SETTINGS.logo) + '" alt="ロゴ">'
     : "なし";
+  // 入れていない物を「外す」は、出すだけで迷わせる（大きさの行と同じ考え方）
+  $("btnLogoClear").hidden = !SETTINGS.logo;
   $("setHankoSize")
     .querySelectorAll("[data-hs]")
     .forEach(function (b) {
@@ -37,6 +39,7 @@ function renderSettings() {
     });
   // 判子を入れていない店に、大きさだけ聞いても仕方がない
   $("rowHankoSize").style.display = SETTINGS.hanko ? "" : "none";
+  $("btnHankoClear").hidden = !SETTINGS.hanko;
   $("hankoPrev").innerHTML = SETTINGS.hanko
     ? '<img src="' + esc(SETTINGS.hanko) + '" alt="判子">'
     : "なし";
@@ -351,7 +354,13 @@ function renderClose() {
   ["clOpen", "clCount", "clMemo"].forEach(function (id) {
     $(id).readOnly = locked;
   });
-  $("btnClose").textContent = locked ? "締め直す" : "この日を締める";
+  /* ★数えた実数を入れるまでは押せない★（押してから「入れてください」は遅い） */
+  gateBtn(
+    "btnClose",
+    !locked && String($("clCount").value).trim() === "",
+    locked ? "締め直す" : "この日を締める",
+    "数えた実数を入れてください"
+  );
   $("clState").textContent = !locked
     ? "数えた実数を入れて「この日を締める」を押すと、この日は動かなくなります。"
     : d.needsRedo
@@ -380,35 +389,7 @@ function renderClose() {
         " 件あります。このままだと、その分の歩合が付きません（一覧からタップで直せます）"
       : "";
   // 出金の一覧
-  $("clOuts").innerHTML = d.outs.length
-    ? d.outs
-        .map(function (o) {
-          return (
-            '<div class="li" data-out="' +
-            esc(o.id) +
-            '"><div class="li-main"><div class="li-nm">' +
-            esc(C.outKindLabel(o.kind)) +
-            (o.staff ? "　" + esc(o.staff) : "") +
-            '</div><div class="li-sub">' +
-            esc(o.memo || "") +
-            '</div></div><div class="li-amt">−' +
-            C.yen(o.amount) +
-            "</div></div>"
-          );
-        })
-        .join("")
-    : '<div class="empty">ありません。買い出し・送り・日払いで金庫から出したら足してください。</div>';
-  $("clOuts")
-    .querySelectorAll("[data-out]")
-    .forEach(function (el) {
-      el.onclick = function () {
-        if (locked) {
-          toast("締めた日です。直すなら「締め直す」を押してください");
-          return;
-        }
-        openOut(el.getAttribute("data-out"));
-      };
-    });
+  drawOuts("clOuts", d.outs, UI.closeYmd, locked);
   // 現金以外
   var o = d.other;
   $("clOther").innerHTML =
@@ -429,14 +410,58 @@ function renderClose() {
 }
 
 // 出金の追加・修正
-function openOut(id) {
+/** ★出金の一覧は ここ1か所で描く★（締めタブと入力タブの両方が呼ぶ）
+ *  2か所に書くと、必ずどちらかが古くなる。押した先も同じ窓（openOut）。 */
+function drawOuts(boxId, outs, ymd, locked) {
+  var box = $(boxId);
+  if (!box) return;
+  box.innerHTML = outs.length
+    ? outs
+        .map(function (o) {
+          return (
+            '<div class="li" data-out="' +
+            esc(o.id) +
+            '"><div class="li-main"><div class="li-nm">' +
+            esc(C.outKindLabel(o.kind)) +
+            (o.staff ? "　" + esc(o.staff) : "") +
+            '</div><div class="li-sub">' +
+            esc(o.memo || "") +
+            '</div></div><div class="li-amt">−' +
+            C.yen(o.amount) +
+            "</div></div>"
+          );
+        })
+        .join("")
+    : '<div class="empty">ありません。買い出し・送り・日払いで金庫から出したら足してください。</div>';
+  box.querySelectorAll("[data-out]").forEach(function (el) {
+    el.onclick = function () {
+      if (locked) {
+        toast("締めた日です。直すなら「締め直す」を押してください");
+        return;
+      }
+      openOut(el.getAttribute("data-out"), ymd);
+    };
+  });
+}
+
+/** 出金の窓。★どの日に付くかを、押す前に窓の中に出す★
+ *  ymd を渡すと その日に付ける（入力タブから開いたとき）。渡さなければ 締めタブの日。 */
+function openOut(id, ymd) {
+  /* ★付ける日は1つ★＝先に締めの日を合わせてから開く。
+     ここを合わせないと、入力タブで 8/21 を見ているのに 締めタブの日（8/19）に付く。 */
+  if (ymd && ymd !== UI.closeYmd) {
+    UI.closeYmd = ymd;
+    renderClosePeriod();
+    renderClose();
+  }
   var inp = closeInput(UI.closeYmd);
   var cur =
     inp.outs.filter(function (x) {
       return x.id === id;
     })[0] || null;
   openModal(
-    cur ? "出金を直す" : "出金を足す",
+    (C.isIsoDate(UI.closeYmd) ? C.mdShort(UI.closeYmd) + "（" + C.weekday(UI.closeYmd) + "）の " : "") +
+      (cur ? "出金を直す" : "出金を足す"),
     '<div class="frow"><span class="flabel">種類</span><div class="chips" id="outKind">' +
       C.OUT_KINDS.map(function (k) {
         return (
@@ -500,6 +525,7 @@ function openOut(id) {
     writeClose({ outs: outs });
     closeModal();
     renderClose();
+    renderDay(); // 入力タブの「この日の出金」も出し直す
     toast("✅ 出金を入れました");
   };
   if ($("outDel")) {
@@ -511,6 +537,7 @@ function openOut(id) {
       });
       closeModal();
       renderClose();
+      renderDay();
       toast("🗑 出金を消しました");
     };
   }

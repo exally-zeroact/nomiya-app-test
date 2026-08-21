@@ -191,11 +191,14 @@ test.describe("Excelに書き出す（一覧タブ）", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
-  test("売上が1件も無い期間では、空のファイルを作らずに理由を出す", async ({ page }) => {
+  test("売上が1件も無い期間では、★押す前から灰色＋理由★（空のファイルを作らない）", async ({ page }) => {
+    /* 2026-08-19 に変えた：前は押してからトーストで理由が出ていた＝遅い。 */
     const errors = await open(page);
     await page.locator(".nav-item[data-scr='list']").click();
-    await page.locator("#btnXlsxList").click();
-    await expect(page.locator("#toast")).toContainText("売上がありません");
+    const b = page.locator("#btnXlsxList");
+    await expect(b, "灰色になっていない").toBeDisabled();
+    await expect(b, "理由がボタンの中に無い").toContainText("この期間に売上がありません");
+    await b.click({ force: true }).catch(() => {});
     await expect(page.locator("#modalOv")).not.toHaveClass(/open/);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });

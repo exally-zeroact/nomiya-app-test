@@ -132,6 +132,16 @@ test.describe("紙の書体（明朝がそろってから写す）", () => {
     await page.reload({ waitUntil: "load" });
     await expect(page.locator("#scr-input")).toBeVisible();
 
+    /* ★売上を1件 入れてから測る★（2026-08-19）
+       0件のときは紙の下絵を出さない決まりにした（白紙を見せない）ので、
+       「その紙が使う書体」を聞くには 紙が在る状態にする。 */
+    await page.locator(".nav-item[data-scr='input']").click();
+    await page.locator("#inName").fill("田中さん");
+    await page.locator("#inPeople").fill("2");
+    await page.locator("#inAmount").fill("12000");
+    await page.locator("#btnSave").click();
+    await expect(page.locator("#inErr")).toHaveText("");
+
     // 売上帳（明朝を使わない紙）へ。★ここに来ただけで明朝を読み始めないこと★
     await page.locator(".nav-item[data-scr='list']").click();
     await expect(page.locator("#scr-list")).toBeVisible();
@@ -308,6 +318,16 @@ test.describe("紙の書体（明朝がそろってから写す）", () => {
     await page.evaluate(() => localStorage.clear());
     await page.reload({ waitUntil: "load" });
     await expect(page.locator("#scr-input")).toBeVisible();
+
+    /* ★売上を1件 入れてから測る★（2026-08-19）
+       0件のときは「🖨 印刷 / PDFにする」が ★灰色＋理由★ になった＝白紙を作らせない決まり。
+       この試験が見たいのは「窓が頼む書体」なので、紙が出る状態を先に作る。 */
+    await page.locator(".nav-item[data-scr='input']").click();
+    await page.locator("#inName").fill("田中さん");
+    await page.locator("#inPeople").fill("2");
+    await page.locator("#inAmount").fill("12000");
+    await page.locator("#btnSave").click();
+    await expect(page.locator("#inErr")).toHaveText("");
 
     // PDFを作れない端末のふり（＝紙だけの窓に落ちる道）
     await page.route(/vendor\/(html2canvas|jspdf)/, (r) => r.abort());

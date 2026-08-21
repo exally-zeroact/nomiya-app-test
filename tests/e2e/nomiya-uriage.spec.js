@@ -1882,8 +1882,10 @@ test.describe("飲み屋 売上管理", () => {
     await setCloseDay(page, "2026-07-01");
     await page.locator("#clOpen").fill("0");
 
-    // 数えていないと締められない
-    await page.locator("#btnClose").click();
+    // 数えていないと締められない（2026-08-19：押す前から灰色＋理由）
+    await expect(page.locator("#btnClose"), "灰色になっていない").toBeDisabled();
+    await expect(page.locator("#btnClose")).toContainText("数えた実数を入れてください");
+    await page.locator("#btnClose").click({ force: true }).catch(() => {});
     await expect(page.locator("#clState")).not.toContainText("締めました");
 
     await page.locator("#clCount").fill("8000");
@@ -4202,11 +4204,15 @@ test.describe("⑩ 消す", () => {
 
 /* 誰も選べない状態で出勤を入れさせない（入れても画面から消えて迷子になるだけ）。 */
 test.describe("⑪ スタッフがいないときの出勤", () => {
-  test("スタッフが1人もいなければ、出勤の画面は開かずに理由が出る", async ({ page }) => {
+  test("スタッフが1人もいなければ、出勤のボタンは★押す前から灰色＋理由★", async ({ page }) => {
+    /* 2026-08-19 に変えた：前は「押したら理由が出る」＝押してからでないと分からなかった。
+       いまは できない事は 押す前に ボタンの中に書く（請求書の Excel と同じ形）。 */
     const errors = await open(page);
     await goto(page, "pay");
-    await page.locator("#btnWorkAdd").click();
-    await expect(page.locator(".toast")).toContainText("先にスタッフを足してください");
+    const b = page.locator("#btnWorkAdd");
+    await expect(b, "灰色になっていない").toBeDisabled();
+    await expect(b, "理由がボタンの中に無い").toContainText("先にスタッフを足してください");
+    await b.click({ force: true }).catch(() => {});
     await expect(page.locator("#modalOv")).not.toHaveClass(/open/);
     expect(await page.evaluate(() => window.__NOMIYA.works.length)).toBe(0);
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);

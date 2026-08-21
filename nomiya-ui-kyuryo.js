@@ -126,6 +126,7 @@ function renderPay() {
 
   // この日に渡す人（人ごとの締め方から数える）
   var plan = C.payPlan(STAFF, WORKS, SALES, UI.payYmd, { settings: SETTINGS });
+  $("payDueBox").hidden = !plan.length;
   $("payDue").innerHTML = plan.length
     ? plan
         .map(function (x) {
@@ -236,6 +237,16 @@ function renderPay() {
     .filter(function (x) {
       return x.t.days > 0;
     });
+  /* ★先にスタッフが要る事・その月の紙が作れない事を、押す前に出す★ */
+  gateBtn("btnWorkAdd", !C.aliveStaff(STAFF).length, "＋ 出勤を入れる", "先にスタッフを足してください");
+  gateBtn("btnPrintPay", !sums.length, "🖨 印刷 / PDFにする", "この月はまだ出勤がありません");
+
+  /* ★中身が無い箱は出さない★（2026-08-19）
+     入れたばかりの店に「まだありません」の箱が4つ並ぶのが、いちばん分かりにくかった。
+     最初の一歩（この日の出勤＋出勤を入れる）だけ残して、あとは中身が入ってから出す。 */
+  $("payMonthBox").hidden = !sums.length;
+  $("payScale").hidden = !sums.length;
+
   $("payMonth").innerHTML = sums.length
     ? '<div class="hint" style="margin-bottom:8px">' +
       esc(C.jpMonth(ym)) +
@@ -277,6 +288,7 @@ function renderPay() {
   var logTotal = log.reduce(function (a, x) {
     return a + x.amount;
   }, 0);
+  $("payLogBox").hidden = !log.length;
   $("payLog").innerHTML = log.length
     ? '<div class="hint" style="margin-bottom:8px">' +
       esc(C.jpMonth(ym)) +

@@ -255,6 +255,19 @@ function saveSettings(keepAt) {
   if (!keepAt) queuePush();
   return true;
 }
+/** ★その時できない事は、押す前に分かるようにする★
+ *  押してから「⚠️ ありません」と出るのは遅い（司さん実機「押しても何も起きない」2026-08-17）。
+ *  請求書の「📊 Excelに書き出す（書く場所が決まっていません）」で決めた形に、全部そろえる。
+ *    ng=true … 灰色にして、できない理由を ★ボタンの中★ に書く
+ *  ※ここ1か所だけが「押せない見た目」を作る。画面ごとに書くと、必ずどれかが古くなる。
+ */
+function gateBtn(id, ng, base, why) {
+  var b = $(id);
+  if (!b) return;
+  b.disabled = !!ng;
+  b.textContent = ng ? base + "（" + why + "）" : base;
+}
+
 /** 作ったファイルを端末に渡す。
  *  ★target=_blank は必ず付ける★（ホーム画面から開いたアプリだと、同じ窓でファイルが開いて
  *  戻れなくなる。全アプリ共通の決まり） */

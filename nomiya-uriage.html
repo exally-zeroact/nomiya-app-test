@@ -42,7 +42,7 @@
       href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="nomiya-uriage.css?v=09a07c4c" />
+    <link rel="stylesheet" href="nomiya-uriage.css?v=6d689554" />
     <!-- A4用紙のスタイル（画面プレビューと印刷用の新しい窓で同じものを使う＝見た目のズレを作らない） -->
     <style id="sheetCss"></style>
     <!-- 店の色・書体の上書き（設定で選んだときだけ中身が入る） -->
@@ -147,6 +147,18 @@
         <div class="btn-row" id="editArea" style="display: none; margin-top: 8px">
           <button class="btn btn-ghost btn-danger" id="btnDelete">この売上を消す</button>
           <button class="btn btn-ghost" id="btnCancelEdit">編集をやめる</button>
+        </div>
+      </div>
+
+      <!-- ★打つ物は「入力」に在る★（司さん 2026-08-21
+           「入力ってタブがあったらそこからしか入力しないって思うのがほとんどやないか？」）
+           出金は締めタブにもあるが、窓は1つ・付く日も1つ（下の hint に日付を出す）。 -->
+      <div class="card" id="inOutBox">
+        <div class="card-label" id="inOutLabel">この日の出金</div>
+        <div class="hint">買い出し・送りのタクシー代など、レジから出したお金。</div>
+        <div id="inOuts"></div>
+        <div class="btn-row" style="margin-top: 10px">
+          <button class="btn btn-ghost btn-sm" type="button" id="btnInOutAdd">＋ 出金を足す</button>
         </div>
       </div>
 
@@ -782,7 +794,7 @@
       </div>
 
       <!-- 締め方は人ごと。誰にいつ渡すかは、アプリが数える（手で数えさせない） -->
-      <div class="card">
+      <div class="card" id="payDueBox">
         <div class="card-label">この日に渡す人</div>
         <div id="payDue"></div>
       </div>
@@ -799,13 +811,13 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" id="payMonthBox">
         <div class="card-label">この月のまとめ</div>
         <div id="payMonth"></div>
       </div>
 
       <!-- いつ・誰に・いくら渡したか。渡した時の額で残す（あとで決め方を直しても動かない） -->
-      <div class="card">
+      <div class="card" id="payLogBox">
         <div class="card-label">渡した記録</div>
         <div id="payLog"></div>
       </div>
@@ -895,12 +907,12 @@
     <script defer src="hanko.js?v=d1d32621"></script>
     <script defer src="nomiya-core.js?v=f0399771"></script>
     <!-- ★画面のJS。読み込む順番が命（起動は最後）。tests/app-source.mjs が食い違いを見張る -->
-    <script defer src="nomiya-ui-base.js?v=9d03610e"></script>
-    <script defer src="nomiya-ui-uriage.js?v=18d0b02e"></script>
+    <script defer src="nomiya-ui-base.js?v=a247a133"></script>
+    <script defer src="nomiya-ui-uriage.js?v=0795c5e3"></script>
     <script defer src="nomiya-ui-kaishu.js?v=53cff47e"></script>
-    <script defer src="nomiya-ui-kami.js?v=870b8129"></script>
-    <script defer src="nomiya-ui-settei.js?v=82acc9d4"></script>
-    <script defer src="nomiya-ui-kyuryo.js?v=1b52a0dd"></script>
-    <script defer src="nomiya-ui-boot.js?v=9d7617e4"></script>
+    <script defer src="nomiya-ui-kami.js?v=8f73e48a"></script>
+    <script defer src="nomiya-ui-settei.js?v=81ee79d6"></script>
+    <script defer src="nomiya-ui-kyuryo.js?v=711a2d8a"></script>
+    <script defer src="nomiya-ui-boot.js?v=c03eb0ea"></script>
   </body>
 </html>
