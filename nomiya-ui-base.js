@@ -123,6 +123,7 @@ var UI = {
   invName: "",
   invYm: "", // 請求書は「◯月分」で1枚（起動時に今月が入る）
   closeYmd: "", // 締めはその日1枚（起動時に今日が入る）
+  exported: false, // ★この画面を開いてから1回でも書き出したか★（全部消すの手前に置く鍵）
   payYmd: "", // 給料はその日の出勤を見る
   listSeg: "list", // 一覧の中の切替 list/sum/tax
   invSeg: "inv", // 請求書の中の切替 inv/due/paid

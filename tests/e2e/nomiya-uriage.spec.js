@@ -948,7 +948,11 @@ test.describe("飲み屋 売上管理", () => {
   test("設定タブ: 全部消すが効く", async ({ page }) => {
     const errors = await open(page);
     await seed(page);
-    await gotoSet(page, "self");
+    /* 2026-08-21：アカウント・データは別の面。さらに ★1回 書き出すまで「全部消す」は押せない★
+       （戻せない物を作らない）。ここでは、決まりの通り 書き出してから消す。 */
+    await gotoSet(page, "acct");
+    await Promise.all([page.waitForEvent("download"), page.locator("#btnExport").click()]);
+    await expect(page.locator("#btnWipe")).toBeEnabled();
     await page.locator("#btnWipe").click();
     await page.locator("#mdYes").click();
     // 消した印が付く（クラウドにも「消した」を伝えるため、控えとしては残る）
@@ -1370,7 +1374,7 @@ test.describe("飲み屋 売上管理", () => {
       pay: "cash",
       receipt: false,
     });
-    await gotoSet(page, "self");
+    await gotoSet(page, "acct"); // ログアウトはアカウントの面（2026-08-21）
     await page.locator("#btnLogout").click();
     await expect(page.locator("#loginOv")).toHaveClass(/open/);
 
@@ -1595,7 +1599,7 @@ test.describe("飲み屋 売上管理", () => {
       receipt: false,
       memo: "ボトル入れ",
     });
-    await gotoSet(page, "self");
+    await gotoSet(page, "acct"); // 書き出す・読み込む・全部消すは アカウントの面（2026-08-21）
     await expect(page.locator("#acctInfo")).toContainText("同期済み");
 
     // 書き出す（ファイルを受け取る）
@@ -1700,6 +1704,7 @@ test.describe("飲み屋 売上管理", () => {
     await expect(page.locator("#acctInfo")).toContainText("同期済み");
 
     // B店（別のアカウント）で入り直す
+    await gotoSet(page, "acct"); // ログアウトはアカウントの面（2026-08-21）
     await page.locator("#btnLogout").click();
     await expect(page.locator("#loginOv")).toHaveClass(/open/);
     await page.locator("#loginEmail").fill("betten@snack.example");
@@ -1753,7 +1758,7 @@ test.describe("飲み屋 売上管理", () => {
       pay: "cash",
       receipt: false,
     });
-    await gotoSet(page, "self");
+    await gotoSet(page, "acct"); // ログアウトはアカウントの面（2026-08-21）
     await expect(page.locator("#acctInfo")).toContainText("同期済み");
     await page.locator("#btnLogout").click();
     await expect(page.locator("#loginOv")).toHaveClass(/open/);
@@ -2845,7 +2850,9 @@ test.describe("③ 設定の歯車とマスタ", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
-  test("設定の中は 自社情報 / 会社 / 従業員 / 商品 の4つ", async ({ page }) => {
+  test("設定の中は 自社情報 / 会社 / 従業員 / 商品 / アカウント の5つ", async ({ page }) => {
+    /* 2026-08-21：アカウントとデータ（全部消す）は お店の情報と同じ面に置かない、
+       という裁定で5つ目を足した（危ない物を毎日 触る物と混ぜない）。 */
     const errors = await open(page);
 
     await goto(page, "set");
@@ -2854,6 +2861,7 @@ test.describe("③ 設定の歯車とマスタ", () => {
       "会社",
       "従業員",
       "商品",
+      "アカウント",
     ]);
     // 開いた直後は自社情報
     await expect(page.locator("#pane-self")).toBeVisible();
@@ -6495,6 +6503,7 @@ test.describe("㉚ 管理画面への入口", () => {
     await page.reload({ waitUntil: "load" });
     await page.waitForTimeout(900);
     await goto(page, "set");
+    await gotoSet(page, "acct"); // 管理の入口はアカウントの面（2026-08-21）
     await expect(page.locator("#adminRow"), "管理者なのに入口が出ない").toBeVisible();
     await page.locator("#btnAdmin").click();
     await page.waitForURL(/castally-admin\.html/, { timeout: 8000 });
@@ -6540,8 +6549,10 @@ test.describe("㉛ ファイルの渡し口", () => {
     await page.locator("#xlOk").click();
     await expect.poll(async () => (await anchors(page)).length, { timeout: 20000 }).toBe(1);
 
-    // ② 設定 →「書き出す」（端末の控えを丸ごとJSONで渡す）
+    // ② 設定＞アカウント →「書き出す」（端末の控えを丸ごとJSONで渡す）
+    //    2026-08-21：アカウント・データは お店の情報とは別の面にした
     await goto(page, "set");
+    await gotoSet(page, "acct");
     await page.locator("#btnExport").click();
     await expect.poll(async () => (await anchors(page)).length, { timeout: 10000 }).toBe(2);
 
