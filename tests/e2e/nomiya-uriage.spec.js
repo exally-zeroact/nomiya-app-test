@@ -1068,6 +1068,42 @@ test.describe("飲み屋 売上管理", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
+  /* ★紙(PDF)の名前★（指示役 2026-08-22 裁定2）
+     窓を開く作りは変えない＝窓のPDFは blob の uuid になり 名前を持てない。
+     だから ★押した時に「この名前で保存してください」を出し、保存する時はその名前を使う★。 */
+  test("★紙の名前は 店名・紙の種類・期間から作る（押した時に出る）★", async ({ page }) => {
+    const errors = await open(page);
+    await gotoSet(page, "self");
+    await page.locator("#setStore").fill("スナック ゼロ");
+    await page.locator("#btnSaveSet").click();
+    await seed(page);
+
+    const dl = [];
+    page.on("download", (d) => dl.push(d.suggestedFilename()));
+    await page.evaluate(() => {
+      window.open = function () {
+        return null;
+      };
+    });
+
+    // 売上帳＝集計タブの期間
+    await goto(page, "ledger");
+    await page.locator("#btnPrintList").click();
+    // ★押した瞬間に、付ける名前が出る（出口は toast ただ1つ）★
+    await expect(page.locator("#toast")).toContainText(
+      "スナックゼロ_売上帳_2026年7月1日〜2026年7月31日.pdf"
+    );
+    await expect.poll(() => dl.length, { timeout: 20000 }).toBe(1);
+    expect(dl[0], "売上帳の名前").toBe("スナックゼロ_売上帳_2026年7月1日〜2026年7月31日.pdf");
+
+    // 請求書＝請求書タブの月（紙ごとに、その画面が見ている期間を使う）
+    await goto(page, "inv");
+    await page.locator("#btnPrintInv").click();
+    await expect.poll(() => dl.length, { timeout: 20000 }).toBe(2);
+    expect(dl[1], "請求書の名前").toBe("スナックゼロ_請求書_2026年7月.pdf");
+    expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
+  });
+
   test("★新しい窓を開けない端末は、PDFを保存する（ブラウザの印刷は使わない）", async ({ page }) => {
     const errors = await open(page);
     await seed(page);
@@ -1083,7 +1119,8 @@ test.describe("飲み屋 売上管理", () => {
     });
     await page.locator("#btnPrintList").click();
     await expect.poll(() => dl.length, { timeout: 20000 }).toBe(1);
-    expect(dl[0], "保存する名前が違う").toBe("売上帳.pdf");
+    // ★2026-08-22 裁定2：名前は「店名_紙の種類_期間」から作る（ここは店名を入れていない）★
+    expect(dl[0], "保存する名前が違う").toBe("売上帳_2026年7月1日〜2026年7月31日.pdf");
     // ★ブラウザの印刷は使わない（使うと足跡が出る）
     expect(await page.evaluate(() => window.__printed), "ブラウザの印刷を使っている").toBe(0);
     await expect(page.locator("#printArea .sheet")).toHaveCount(0);

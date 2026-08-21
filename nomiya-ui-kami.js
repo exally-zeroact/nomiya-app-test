@@ -1694,13 +1694,35 @@ async function buildPaperPdf(inner) {
   }
 }
 
-function printSheets(innerId, title) {
+/** ★紙の保存名の案（中身から作る）★ 例: Castally_売上帳_2026年8月.pdf
+ *  指示役 2026-08-22 裁定2。
+ *  ★窓を開く作りは変えない★（ホーム画面のアプリで同じ窓に開くと戻れなくなる）。
+ *  ただし 窓に開いたPDFの名前は blob の uuid になり、人が名前を付けられない。
+ *  そこで ★名前の案を先に出し、窓の題にも同じ名前を入れる★。
+ *  （Excelの xlsxSuggestName と同じ作り方。作り直していない） */
+function paperName(title, when) {
+  var shop = (SETTINGS && SETTINGS.store) || "";
+  var parts = [];
+  if (shop) parts.push(shop);
+  parts.push(title);
+  if (when) parts.push(when);
+  return (
+    parts
+      .join("_")
+      .replace(/\s+/g, "")
+      .replace(/[\\/:*?"<>|]/g, "-") + ".pdf"
+  );
+}
+
+function printSheets(innerId, title, when) {
   var inner = $(innerId);
   if (!inner || !inner.innerHTML.trim()) {
     toast("⚠️ 印刷するものがありません");
     return;
   }
-  toast("📄 " + title + "を作っています…");
+  var name = paperName(title, when);
+  // ★刷る前に、付ける名前を出す★（出口は toast ただ1つ）
+  toast("📄 " + name + " を作っています…");
   buildPaperPdf(inner)
     .then(function (blob) {
       var url = URL.createObjectURL(blob);
@@ -1709,10 +1731,11 @@ function printSheets(innerId, title) {
         // 新しい窓を開けない端末は、その場で保存する
         // ★渡し口は saveAsFile ただ1つ★（target=_blank が付く。ホーム画面から開いたアプリで
         //   同じ窓にPDFが開くと、戻る導線が無くて閉じ込められる）
-        saveAsFile(blob, title + ".pdf");
-        toast("📄 " + title + " を保存しました。開いて印刷してください");
+        saveAsFile(blob, name);
+        toast("📄 " + name + " を保存しました。開いて印刷してください");
       } else {
-        toast("📄 " + title + " を開きました。共有／プリントから印刷できます");
+        // 窓のPDFは名前を持てない（blobのuuid）＝★保存するときの名前をここで渡す★
+        toast("📄 開きました。「" + name + "」の名前で保存してください");
       }
       setTimeout(function () {
         URL.revokeObjectURL(url);
@@ -1722,18 +1745,20 @@ function printSheets(innerId, title) {
       // 何で作れなかったかを残す（端末で困ったときに聞けるように）
       window.__PDF_ERR__ = String((e && e.message) || e);
       // PDFが作れない端末＝いままでどおり「紙だけの窓」を開いて刷る
-      printSheetsFallback(innerId, title);
+      printSheetsFallback(innerId, title, when);
     });
 }
 
-function printSheetsFallback(innerId, title) {
+function printSheetsFallback(innerId, title, when) {
   var inner = $(innerId);
   if (!inner || !inner.innerHTML.trim()) {
     toast("⚠️ 印刷するものがありません");
     return;
   }
+  // ★窓の題＝付けてほしい名前★（この窓から「PDFとして保存」すると、この題が名前の案になる）
+  var name = paperName(title, when);
   // ★その紙が実際に使う書体だけを、新しい窓にも頼む（クラス名では見分けない）★
-  var html = printableHtml(inner.innerHTML, title, fontsUsedIn(inner));
+  var html = printableHtml(inner.innerHTML, name.replace(/\.pdf$/, ""), fontsUsedIn(inner));
   var pw = null;
   try {
     pw = window.open("", "_blank");
@@ -1742,14 +1767,14 @@ function printSheetsFallback(innerId, title) {
   }
   if (!pw || !pw.document) {
     // ポップアップが開けない端末＝今までどおり同じ画面で印刷する
-    toast("🖨 PDFにするときは、この画面で「PDFとして保存」を選んでください");
+    toast("🖨 「" + name + "」の名前で保存してください（この画面で「PDFとして保存」）");
     $("printArea").innerHTML = inner.innerHTML;
     _printTitle = document.title;
-    document.title = title;
+    document.title = name.replace(/\.pdf$/, "");
     window.print();
     return;
   }
-  toast("🖨 新しい画面が開きます。PDFにするときは「PDFとして保存」を選んでください");
+  toast("🖨 新しい画面が開きます。「" + name + "」の名前で保存してください");
   pw.document.open();
   pw.document.write(html);
   pw.document.close();

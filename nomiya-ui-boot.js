@@ -283,8 +283,10 @@ function init() {
     clearForm(true);
   };
 
+  /* ★紙の名前は「いま その画面が見ている期間」から作る★（指示役 2026-08-22 裁定2）
+     期間を持っているのは押した側なので、押した側が渡す（紙の名前で場合分けしない）。 */
   $("btnPrintList").onclick = function () {
-    printSheets("listSheets", "売上帳");
+    printSheets("listSheets", "売上帳", periodLabel());
   };
   $("btnXlsxList").onclick = exportListXlsx;
   $("sumRecTabs")
@@ -314,10 +316,10 @@ function init() {
       };
     });
   $("btnPrintTax").onclick = function () {
-    printSheets("taxSheets", "売上報告書");
+    printSheets("taxSheets", "売上報告書", periodLabel());
   };
   $("btnPrintInv").onclick = function () {
-    printSheets("invSheets", "請求書");
+    printSheets("invSheets", "請求書", C.jpMonth(UI.invYm));
   };
 
   ["clOpen", "clCount", "clMemo"].forEach(function (id) {
@@ -375,20 +377,20 @@ function init() {
     openWork("");
   };
   $("btnPrintPay").onclick = function () {
-    printSheets("paySheets", "給与一覧");
+    printSheets("paySheets", "給与一覧", C.jpDate(UI.payYmd));
   };
   $("btnPrintLog").onclick = function () {
-    printSheets("logSheets", "渡した記録");
+    printSheets("logSheets", "渡した記録", C.jpDate(UI.payYmd));
   };
   $("btnPrintCast").onclick = function () {
-    printSheets("castSheets", "給与明細");
+    printSheets("castSheets", "給与明細", C.jpDate(UI.payYmd));
   };
   $("btnCastClose").onclick = function () {
     $("castBox").style.display = "none";
     $("castSheets").innerHTML = "";
   };
   $("btnPrintClose").onclick = function () {
-    printSheets("closeSheets", "日報");
+    printSheets("closeSheets", "日報", C.jpDate(UI.closeYmd));
   };
   $("btnPartners").onclick = function () {
     openPartnerList();
