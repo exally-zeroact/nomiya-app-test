@@ -447,15 +447,15 @@ function guessAndSave(TL, book, si, why) {
   if (why === "repair")
     toast(
       n
-        ? "✅ 書く場所が入っていなかったので、★" + n + "コ 当てておきました★"
+        ? "✅ 書く場所が入っていなかったので、" + n + "コ 当てておきました"
         : "⚠️ この紙からは書く場所を当てられませんでした。「書く場所をたしかめる」から決めてください"
     );
   else
     toast(
       n
-        ? "✅ Excelを入れました。★書く場所も " +
+        ? "✅ Excelを入れました。書く場所も " +
             n +
-            "コ 当てておきました★。「書く場所をたしかめる」で見てください"
+            "コ 当てておきました。「書く場所をたしかめる」で見てください"
         : "✅ Excelを入れました。次に「書く場所をたしかめる」を押してください"
     );
   return { n: n, saved: true };
@@ -562,10 +562,10 @@ function openCellPlacer() {
 
       openModal(
         "書く場所をたしかめる",
-        '<div class="hint">★場所は こちらで当てておきました★（紙に刷ってある言葉から）。<br>' +
-          "下の紙を見て、★違う所だけ★ 直してください。" +
-          "直し方は、上の言葉を押してから、紙の ★入れたいマス★ を押す。<br>" +
-          "判子は ★指でつまんで動かせます★（動かした分は、出すExcelにも入ります）。</div>" +
+        '<div class="hint"><b>場所は こちらで当てておきました</b>（紙に刷ってある言葉から）。<br>' +
+          "下の紙を見て、<b>違う所だけ</b> 直してください。" +
+          "直し方は、上の言葉を押してから、紙の <b>入れたいマス</b> を押す。<br>" +
+          "判子は <b>指でつまんで動かせます</b>（動かした分は、出すExcelにも入ります）。</div>" +
           '<div class="hint" id="xlCount"></div>' +
           '<div id="xlFields">' +
           chips +
@@ -623,16 +623,16 @@ function wireCellPlacer(TL, book, cells, labels, si) {
     });
     if (onF.length)
       msgs.push(
-        "★計算式のマスに入れます（" +
+        "計算式のマスに入れます（" +
           onF
             .map(function (k) {
               return labels[k] + " " + cells[k];
             })
             .join("・") +
-          "）＝その式は消えます★"
+          "）＝その式は消えます"
       );
     if (TL.detailCols(cells).length && !start)
-      msgs.push("★明細の列が別々の行を指しています（同じ行のマスを選んでください）★");
+      msgs.push("明細の列が別々の行を指しています（同じ行のマスを選んでください）");
     else if (start)
       msgs.push("明細は " + start + " 行目から" + (cap ? "・" + cap + " 行ぶん" : ""));
     note.innerHTML = esc(msgs.join(" / "));
@@ -969,7 +969,7 @@ function exportOwnXlsx() {
       if (+(SETTINGS.ownStamp || {}).dx || 0 || +(SETTINGS.ownStamp || {}).dy || 0)
         msgs.push("判子の位置も動かします");
       if (made.overwritten.length)
-        msgs.push("★計算式を消して値を入れます：" + made.overwritten.join("・") + "★");
+        msgs.push("計算式を消して値を入れます：" + made.overwritten.join("・"));
       if (made.skipped.length)
         msgs.push("計算式のマス（" + made.skipped.join("・") + "）には入れていません");
       var suggest = ownXlsxSuggestName(d);
@@ -996,12 +996,12 @@ function exportOwnXlsx() {
           '"></div>' +
           '<div class="hint">' +
           esc(SETTINGS.ownXlsxName || "テンプレ") +
-          " の ★" +
+          " の <b>" +
           made.wrote +
-          "マス★ に入れます（決めてある書く場所は " +
+          "マス</b> に入れます（決めてある書く場所は " +
           Object.keys(TL.normalizeCells(SETTINGS.ownCells)).length +
-          "コ。そのうち、この請求で中身が在る分）。★元のファイルは変わりません★" +
-          (msgs.length ? "<br>★" + esc(msgs.join(" / ")) + "★" : "") +
+          "コ。そのうち、この請求で中身が在る分）。<b>元のファイルは変わりません</b>" +
+          (msgs.length ? "<br>" + esc(msgs.join(" / ")) : "") +
           "</div>" +
           mergedHtml +
           '<div style="margin-top:12px"><button class="btn btn-primary" id="oxOk">書き出す</button></div>'
@@ -1275,8 +1275,8 @@ function renderOwnTplRow() {
           kb2 +
           "KB）。" +
           (n
-            ? "書く場所は ★" + n + "コ 当ててあります★。"
-            : "★書く場所がまだ決まっていません★。") +
+            ? "書く場所は " + n + "コ 当ててあります。"
+            : "書く場所が まだ決まっていません。") +
           "元のファイルは変えません。"
       );
     /* 直し方への入口は ★畳みの外（#ownXlsxWhy）★ に1つだけ置く（ここには置かない） */

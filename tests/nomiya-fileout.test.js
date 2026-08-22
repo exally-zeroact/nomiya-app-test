@@ -107,7 +107,10 @@ describe("ファイルの渡し口（ホーム画面アプリで閉じ込めら�
    実UIの側は tests/e2e/own-template-repair.spec.js の④が押して測る。 */
 describe("人に見せるボタンの言葉", () => {
   const HTML_AND_JS = [
-    { file: "nomiya-uriage.html", text: fs.readFileSync(path.join(ROOT, "nomiya-uriage.html"), "utf8") },
+    {
+      file: "nomiya-uriage.html",
+      text: fs.readFileSync(path.join(ROOT, "nomiya-uriage.html"), "utf8"),
+    },
   ].concat(SRC);
   const ALL = HTML_AND_JS.map((s) => s.text).join("\n");
   /* ★コメントを外すのは「ファイルごと」★
@@ -143,16 +146,22 @@ describe("人に見せるボタンの言葉", () => {
   it("★正しい言い方が、要る所ぜんぶに在る（消しただけになっていない）★", () => {
     // Excelを受け取るボタンは2か所（一覧の売上帳／請求書のお店の様式）＝同じ言葉で始まる
     const n = (ALL.match(/Excelに書き出す/g) || []).length;
-    expect(n, "「Excelに書き出す」が足りない（一覧と請求書の2か所に要る）").toBeGreaterThanOrEqual(3);
+    expect(n, "「Excelに書き出す」が足りない（一覧と請求書の2か所に要る）").toBeGreaterThanOrEqual(
+      3
+    );
     expect(ALL.includes("Excelに書き出す（お店の様式）"), "請求書側の言葉が無い").toBe(true);
     expect(ALL.includes("お店の様式を"), "読み込み側の言葉が無い").toBe(true);
     expect(ALL.includes("印刷 / PDFにする"), "印刷の言葉が変わっている").toBe(true);
   });
 
   it("★同じ動きの言い方を数える（増えたら気づく）★", () => {
-    const 書き出し = ["Excelに書き出す", "Excelにする", "Excelで出す", "Excelを作る", "入れて出す"].filter(
-      (w) => CODE.includes(w)
-    );
+    const 書き出し = [
+      "Excelに書き出す",
+      "Excelにする",
+      "Excelで出す",
+      "Excelを作る",
+      "入れて出す",
+    ].filter((w) => CODE.includes(w));
     const 読み込み = ["お店の様式を", "テンプレを選ぶ", "様式を選ぶ", "紙を選ぶ"].filter((w) =>
       CODE.includes(w)
     );
@@ -165,7 +174,9 @@ describe("人に見せるボタンの言葉", () => {
     /* ★当てた結果の言い方も1通りにする★＝「当てておきました」「当て直しました」「で決めました」は
        どれも ★「書く場所を ○コ」★ で始める。数え方が2通りになるのを、増えた瞬間に赤くする。 */
     const 場所 = ["書く場所", "割り当て", "入れる所", "書き込み先"].filter((w) => CODE.includes(w));
-    expect(場所, "★書く場所の言い方が2通り以上ある: " + 場所.join("・") + "★").toEqual(["書く場所"]);
+    expect(場所, "★書く場所の言い方が2通り以上ある: " + 場所.join("・") + "★").toEqual([
+      "書く場所",
+    ]);
   });
 
   /* ★同じ物を2通りで数えたら、どちらが本当か分からなくなる★（指示役 2026-08-18 ②）
@@ -173,6 +184,10 @@ describe("人に見せるボタンの言葉", () => {
      ★言葉の中で結び付いていないと「12と言われた直後に10」になる★。 */
   it("★書き出す前の断り書きは、2つの数を結び付けて出す★", () => {
     const src = SRC.map((s) => s.text).join(String.fromCharCode(10));
-    expect(src.includes("マス★ に入れます（決めてある書く場所は "), "マスの数と書く場所の数が結び付いていない").toBe(true);
+    // ★2026-08-22：飾り（前は ★）を当てにしない＝飾りを変えても この決まりは残る
+    expect(
+      src.includes("に入れます（決めてある書く場所は "),
+      "マスの数と書く場所の数が結び付いていない"
+    ).toBe(true);
   });
 });

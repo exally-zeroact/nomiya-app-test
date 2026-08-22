@@ -280,7 +280,7 @@ function onWipe() {
   }).length;
   openModal(
     "売上を全部消す（宛先と請求書番号も）",
-    '<div class="hint">★消えるもの★<br>売上 <b>' +
+    '<div class="hint"><b>消えるもの</b><br>売上 <b>' +
       nSales +
       "</b> 件 ／ 宛先（会社） <b>" +
       nPt +

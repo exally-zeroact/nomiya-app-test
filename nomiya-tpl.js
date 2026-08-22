@@ -340,10 +340,10 @@
         warn.push(
           "明細が " +
             over +
-            " 件 入りきりません（★名前か備考の列を決めれば「ほか ◯件」にまとめます★）"
+            " 件 入りきりません（名前か備考の列を決めれば「ほか ◯件」にまとめます）"
         );
     } else if (detailCols(c).length) {
-      warn.push("明細の列が ★別々の行★ を指しています。同じ行のセルを選んでください");
+      warn.push("明細の列が 別々の行 を指しています。同じ行のセルを選んでください");
     }
     return { edits: edits, over: over, merged: merged, warn: warn };
   }
