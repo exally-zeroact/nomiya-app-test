@@ -6,3 +6,5 @@ package-lock.json
 hyperformula.full.min.js
 # ★book.html は 5,998行/243KB の巨大ファイル。一括整形は巨大diff+破損リスクのため除外。
 book.html
+# ★借り物（正本＝Rakually）。整形すると「同じ物か」を sha で確かめられなくなる＝書き直さない
+scripts/tests-registered.mjs

@@ -34,6 +34,15 @@ jobs:
       - name: check-kit の自己確認（依存ゼロ）
         run: npm run selftest
 
+      # ★試験は 登録するまで 1本も走らない★（指示役 2026-08-22・正本は Rakually／★書き直さない借り物★）
+      #   「在る試験」と「走っている試験」を突き合わせる。--self-test も必ず載せる
+      #   （見張り自身が嘘をついた事が4回あるので、毎回 わざと壊して赤になるか まで見る）
+      - name: 試験が登録されているか（在る＝走る か）
+        run: node scripts/tests-registered.mjs
+
+      - name: 試験の登録を数える道具の自己確認
+        run: node scripts/tests-registered.mjs --self-test
+
       - name: Lint (eslint)
         run: npm run lint
 
