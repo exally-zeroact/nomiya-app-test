@@ -216,34 +216,28 @@ function startEdit(id) {
 function onDelete() {
   if (!UI.editId) return;
   var id = UI.editId;
-  openModal(
-    "この売上を消す",
-    /* ★2026-08-22 指示役 裁定1-③：窓の言葉を実態に合わせる★
-       「取り消せません」は嘘だった。★書き出したファイルを読み込めば戻せる★（restorePlan）。
-       ＝この画面には戻す道が無い、という本当のことを書く。 */
-    '<div class="hint">消すと売上帳・集計から外れます。<b>この画面からは戻せません。</b><br>' +
-      "書き出したファイルが在れば、設定＞アカウント＞「読み込む」で戻せます。</div>" +
-      '<div class="btn-right" style="margin-top:14px">' +
-      '<button class="btn btn-ghost btn-sm" id="mdNo">やめる</button>' +
-      '<button class="btn btn-ghost btn-danger btn-sm" id="mdYes">消す</button></div>'
-  );
-  $("mdNo").onclick = closeModal;
-  $("mdYes").onclick = function () {
-    for (var i = 0; i < SALES.length; i++) {
-      if (SALES[i].id === id) {
-        var _now = new Date().toISOString();
-        SALES[i] = Object.assign({}, SALES[i], {
-          deletedAt: _now,
-          updatedAt: _now,
-        });
+  /* ★窓は confirmDelete ただ1つから出す★（指示役 2026-08-28 裁定2）
+     言葉は 2026-08-22 の裁定1-③のまま（測った通り＝書き出した物から戻せる） */
+  confirmDelete({
+    title: "この売上を消す",
+    body: restoreNote("売上帳・集計", ""),
+    yes: "消す",
+    onYes: function () {
+      for (var i = 0; i < SALES.length; i++) {
+        if (SALES[i].id === id) {
+          var _now = new Date().toISOString();
+          SALES[i] = Object.assign({}, SALES[i], {
+            deletedAt: _now,
+            updatedAt: _now,
+          });
+        }
       }
-    }
-    saveSales();
-    closeModal();
-    clearForm(true);
-    renderAll();
-    toast("🗑 消しました");
-  };
+      saveSales();
+      clearForm(true);
+      renderAll();
+      toast("🗑 消しました");
+    },
+  });
 }
 
 /** ★「見ている日」は1つ★（入力タブと締めタブが 別々の日を持たない）

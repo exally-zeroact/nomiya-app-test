@@ -1078,7 +1078,49 @@ function openModal(title, html) {
   $("modalOv").classList.add("open");
 }
 function closeModal() {
+  $("modalX").hidden = false; // 隠していたら必ず戻す（次の窓で「閉じる」が消えたままにしない）
   $("modalOv").classList.remove("open");
+}
+
+/* ★消す前の確かめは この1つの部品から出す★（指示役 2026-08-28 裁定2）
+   ------------------------------------------------------------------------------
+   3か所（売上・出金・出勤）に別々に書くと、直す時に1つ 直し忘れる＝
+   「同じアプリなのに 消し方が2通り」になる。呼ぶ側は ★言葉と やる事だけ★ 渡す。
+
+   ★出口は「やめる」1つ★（窓の×と2つ在ると、どちらが取り消しか 分からない）
+   ★文言は 測ってから書く★（2026-08-28 実測：書き出す→消す→読み込む で
+     売上・出金・出勤とも 戻った。ただし 出金と出勤は ★書き出した時点に戻る★
+     ＝後から足した分は消える。だから そこまで書く） */
+function confirmDelete(o) {
+  openModal(
+    o.title,
+    '<div class="hint">' +
+      o.body +
+      "</div>" +
+      '<div class="btn-right" style="margin-top:14px">' +
+      '<button class="btn btn-ghost btn-sm" id="mdNo">やめる</button>' +
+      '<button class="btn btn-ghost btn-danger btn-sm" id="mdYes">' +
+      esc(o.yes || "消す") +
+      "</button></div>"
+  );
+  $("modalX").hidden = true;
+  $("mdNo").onclick = closeModal;
+  $("mdYes").onclick = function () {
+    closeModal();
+    o.onYes();
+  };
+}
+
+/** 消した物の戻し方（測った通りの言い方）。where＝どこの計算から外れるか。 */
+function restoreNote(where, snapshot) {
+  return (
+    "消すと " +
+    where +
+    "から外れます。<b>この画面からは戻せません。</b><br>" +
+    "書き出したファイルが在れば、設定＞アカウント＞「読み込む」で戻せます" +
+    (snapshot ? "（" + snapshot + "は 書き出した時点に戻ります）" : "") +
+    "。"
+  );
 }
 
 /* 判子の余白を切る。

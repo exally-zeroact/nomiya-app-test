@@ -278,9 +278,11 @@ function onWipe() {
   var nPay = (PAYMENTS || []).filter(function (p) {
     return !p.deletedAt;
   }).length;
-  openModal(
-    "売上を全部消す（宛先と請求書番号も）",
-    '<div class="hint"><b>消えるもの</b><br>売上 <b>' +
+  confirmDelete({
+    title: "売上を全部消す（宛先と請求書番号も）",
+    yes: "売上を全部消す",
+    body:
+      "<b>消えるもの</b><br>売上 <b>" +
       nSales +
       "</b> 件 ／ 宛先（会社） <b>" +
       nPt +
@@ -290,39 +292,34 @@ function onWipe() {
          押す前に1回 書き出させている＝そのファイルを読み込めば戻せる。
          「取り消せません」と書くと、戻せる物まで諦めさせてしまう。 */
       "</b> 件<br>クラウドの分も消えます。<b>この画面からは戻せません。</b><br>" +
-      "いま書き出したファイルを「読み込む」で戻せます。</div>" +
-      '<div class="hint">残るもの：スタッフ ' +
+      "いま書き出したファイルを「読み込む」で戻せます。<br>" +
+      "残るもの：スタッフ " +
       nStaff +
       " 人 ／ 出勤 " +
       nWork +
       " 件 ／ 入金 " +
       nPay +
-      " 件 ／ レジ締め ／ お店の情報</div>" +
-      '<div class="btn-right" style="margin-top:14px">' +
-      '<button class="btn btn-ghost btn-sm" id="mdNo">やめる</button>' +
-      '<button class="btn btn-ghost btn-danger btn-sm" id="mdYes">売上を全部消す</button></div>'
-  );
-  $("mdNo").onclick = closeModal;
-  $("mdYes").onclick = function () {
-    // クラウドにも「消した」を伝える＝端末だけ空にすると、次の同期で戻ってくる
-    var nowIso = new Date().toISOString();
-    SALES = SALES.map(function (s) {
-      return Object.assign({}, s, { deletedAt: nowIso, updatedAt: nowIso });
-    });
-    Object.keys(PARTNERS).forEach(function (k) {
-      PARTNERS[k] = Object.assign({}, PARTNERS[k], {
-        deletedAt: nowIso,
-        updatedAt: nowIso,
+      " 件 ／ レジ締め ／ お店の情報",
+    onYes: function () {
+      // クラウドにも「消した」を伝える＝端末だけ空にすると、次の同期で戻ってくる
+      var nowIso = new Date().toISOString();
+      SALES = SALES.map(function (s) {
+        return Object.assign({}, s, { deletedAt: nowIso, updatedAt: nowIso });
       });
-    });
-    INVOICES = [];
-    saveSales();
-    savePartners();
-    saveInvoices();
-    closeModal();
-    renderAll();
-    toast("🗑 消しました");
-  };
+      Object.keys(PARTNERS).forEach(function (k) {
+        PARTNERS[k] = Object.assign({}, PARTNERS[k], {
+          deletedAt: nowIso,
+          updatedAt: nowIso,
+        });
+      });
+      INVOICES = [];
+      saveSales();
+      savePartners();
+      saveInvoices();
+      renderAll();
+      toast("🗑 消しました");
+    },
+  });
 }
 
 /* ===================================================================
@@ -580,16 +577,25 @@ function openOut(id, ymd) {
     toast("✅ 出金を入れました");
   };
   if ($("outDel")) {
+    /* ★消す前に確かめる★（指示役 2026-08-28 裁定1）
+       前は ★押した瞬間に消えていた★＝売上だけ窓が在って、消し方が2通りだった。
+       窓は confirmDelete ただ1つから出す（裁定2）。 */
     $("outDel").onclick = function () {
-      writeClose({
-        outs: inp.outs.filter(function (x) {
-          return x.id !== cur.id;
-        }),
+      confirmDelete({
+        title: "この出金を消す",
+        body: restoreNote("レジ締めの計算", "出金"),
+        yes: "消す",
+        onYes: function () {
+          writeClose({
+            outs: inp.outs.filter(function (x) {
+              return x.id !== cur.id;
+            }),
+          });
+          renderClose();
+          renderDay();
+          toast("🗑 出金を消しました");
+        },
       });
-      closeModal();
-      renderClose();
-      renderDay();
-      toast("🗑 出金を消しました");
     };
   }
 }

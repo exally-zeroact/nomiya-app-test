@@ -4071,6 +4071,8 @@ test.describe("⑨ 渡す・消すでレジが合わなくならない", () => {
     await setPayDay(page, "2026-08-05");
     await page.locator("#payDayList .li").click();
     await page.locator("#wk_del").click();
+    // ★2026-08-28：出勤にも 消す前の確かめが付いた（指示役 裁定1）
+    await page.locator("#mdYes").click();
     await setCloseDay(page, "2026-08-05");
     await expect(page.locator("#clOut")).toHaveText("¥0");
     await expect(page.locator("#clOuts")).not.toContainText("あかり");
@@ -4273,6 +4275,8 @@ test.describe("⑩ 消す", () => {
     await expect(page.locator("#clOut")).toHaveText("−¥3,000");
     await page.locator("#clOuts .li").click();
     await page.locator("#outDel").click();
+    // ★2026-08-28：出金にも 消す前の確かめが付いた（指示役 裁定1）
+    await page.locator("#mdYes").click();
     await expect(page.locator("#clOut")).toHaveText("¥0");
     await expect(page.locator("#clOuts")).not.toContainText("氷を買った");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);

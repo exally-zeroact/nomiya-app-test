@@ -238,7 +238,12 @@ function renderPay() {
       return x.t.days > 0;
     });
   /* ★先にスタッフが要る事・その月の紙が作れない事を、押す前に出す★ */
-  gateBtn("btnWorkAdd", !C.aliveStaff(STAFF).length, "＋ 出勤を入れる", "先にスタッフを足してください");
+  gateBtn(
+    "btnWorkAdd",
+    !C.aliveStaff(STAFF).length,
+    "＋ 出勤を入れる",
+    "先にスタッフを足してください"
+  );
   gateBtn("btnPrintPay", !sums.length, "🖨 印刷 / PDFにする", "この月はまだ出勤がありません");
 
   /* ★中身が無い箱は出さない★（2026-08-19）
@@ -1652,7 +1657,22 @@ function openWork(id) {
     };
   }
   if ($("wk_del")) {
+    /* ★消す前に確かめる★（指示役 2026-08-28 裁定1）
+       前は ★押した瞬間に消えていた★。窓は confirmDelete ただ1つから出す（裁定2）。
+       ★渡した分が レジ締めの出金からも外れる★のは、消す前に言う（後で気づくと レジが合わない）。 */
     $("wk_del").onclick = function () {
+      confirmDelete({
+        title: "この出勤を消す",
+        body:
+          restoreNote("給料の計算", "出勤") +
+          (cur && cur.paidAt ? "<br>この出勤で渡した分は、レジ締めの出金からも外れます。" : ""),
+        yes: "消す",
+        onYes: function () {
+          delWork();
+        },
+      });
+    };
+    var delWork = function () {
       var nowIso2 = new Date().toISOString();
       WORKS = WORKS.map(function (x) {
         return x.id === cur.id
@@ -1664,7 +1684,6 @@ function openWork(id) {
       //   残すと、金庫から出していないのに出したことになってレジが合わない。
       CLOSES = C.removePayouts(CLOSES, ["pay_" + cur.id], nowIso2);
       saveCloses();
-      closeModal();
       renderAll();
       toast("🗑 消しました");
     };

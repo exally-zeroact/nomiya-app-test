@@ -82,6 +82,8 @@ test.describe("入力タブから出金を打つ", () => {
 
     await page.locator("#inOuts [data-out]").first().click();
     await page.locator("#outDel").click();
+    // ★2026-08-28：出金にも 消す前の確かめが付いた（指示役 裁定1）＝窓で「消す」を押すまで消えない
+    await page.locator("#mdYes").click();
     await expect(page.locator("#inOuts")).toContainText("ありません");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
