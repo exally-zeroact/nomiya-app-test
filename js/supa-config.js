@@ -7,6 +7,9 @@
  *   （payslip-app / payslip-app-test と同じやり方）
  */
 window.SUPA = {
+  /* ★この配信の名札★（テスト環境の帯は これだけを見て出す・ホスト名では決めない）
+     本番の supa-config.js は env を "prod" にする＝本番には帯が出ない */
+  env: "test",
   url: "https://khawdrnvssdenumbiwfg.supabase.co",
   key: "sb_publishable_UrRIobyVFbaJI_85RBxBOA_GZ4OUxPm",
 };

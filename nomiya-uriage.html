@@ -928,7 +928,11 @@
       referrerpolicy="no-referrer"
     ></script>
     <!-- ★どの倉庫に繋ぐかは、このファイル1本だけが決める（本番repoとテストrepoの唯一の違い） -->
-    <script defer src="js/supa-config.js?v=ba3902e3"></script>
+    <script defer src="js/supa-config.js?v=4062fba5"></script>
+    <!-- ★テスト環境の帯★（js/supa-config.js の env が "test" の時だけ出る。
+         本番の supa-config.js は env:"prod" なので 本番には出ない）
+         ★必ず supa-config より後で読む★（先だと名札が無くて判定できない） -->
+    <script defer src="js/env-badge.js?v=d1a1db15"></script>
     <script defer src="exally-login.js?v=203814e6"></script>
     <script defer src="hanko.js?v=d1d32621"></script>
     <script defer src="nomiya-core.js?v=f0399771"></script>

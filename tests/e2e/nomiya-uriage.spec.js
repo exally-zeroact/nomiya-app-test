@@ -6239,10 +6239,20 @@ test.describe("㉕ 画面の一番上に空白を作らない（ホーム画面�
       await goto(page, s);
       await page.evaluate(() => window.scrollTo(0, 0));
       await page.waitForTimeout(50);
-      const top = await page.evaluate(() =>
-        Math.round(document.querySelector(".app-header").getBoundingClientRect().top)
+      /* ★2026-08-28：テスト環境の帯が付いた★
+         帯は画面の一番上に固定するので、ヘッダーは ★帯の真下★ に来るのが正しい。
+         見るのは「上に空白が無いか」＝★帯の下端とヘッダーの上端が一致するか★。
+         本番には帯が出ない（env:"prod"）ので、そのときは 0 と比べる＝同じ1本で両方 見られる。 */
+      const m = await page.evaluate(() => {
+        const bar = document.getElementById("envbar");
+        return {
+          barBottom: bar ? Math.round(bar.getBoundingClientRect().bottom) : 0,
+          top: Math.round(document.querySelector(".app-header").getBoundingClientRect().top),
+        };
+      });
+      expect(m.top, `「${s}」でヘッダーの上に空白がある（帯の下端=${m.barBottom}）`).toBe(
+        m.barBottom
       );
-      expect(top, `「${s}」でヘッダーの上に空白がある`).toBe(0);
     }
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });

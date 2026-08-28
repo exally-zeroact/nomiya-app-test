@@ -20,6 +20,7 @@
     "compare": "node scripts/compare-repos.mjs",
     "measure": "node scripts/measure-start.mjs",
     "selftest": "node tests/check-kit.selftest.mjs",
+    "envbadge": "node tests/env-badge.test.mjs",
     "check:deployed": "node scripts/check-deployed-version.mjs"
   },
   "devDependencies": {

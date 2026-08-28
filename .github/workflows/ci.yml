@@ -43,6 +43,14 @@ jobs:
       - name: 試験の登録を数える道具の自己確認
         run: node scripts/tests-registered.mjs --self-test
 
+      # ★テスト環境の帯★（本番に「テスト環境」と出るのが 一番 危ない）
+      #   仕組みの正本は Rakually。飲み屋は 色と言葉だけ自分の物にしている。
+      - name: テスト環境の帯（本番に出ない・1画面も漏れない）
+        run: npm run envbadge
+
+      - name: 帯の見張りの自己確認
+        run: node tests/env-badge.test.mjs --self-test
+
       - name: Lint (eslint)
         run: npm run lint
 
