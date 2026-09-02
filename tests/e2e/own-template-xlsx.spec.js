@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { useInvMonth } from "./_clock.js";
 import fs from "node:fs";
 import path from "node:path";
 import { covering } from "../lib/check-kit.mjs";
@@ -54,12 +55,18 @@ async function addSale(page, { date, name, amount, people = 2, memo = "" }) {
 async function pickCompany(page, name) {
   await page.locator(".nav-item[data-scr='inv']").click();
   await expect(page.locator("#scr-inv")).toBeVisible();
+  // ★2026-09-02：請求書は「今月」を見る。この試験の売上は 2026-08 なので 先に月を合わせる
+  //   （合わせないと 月が変わった瞬間に 相手が選べず 落ちる＝試験が時計に依存していた）
+  await useInvMonth(page, "2026-08");
   await page.locator("#invName").selectOption(name);
 }
 
 async function openLook(page) {
   await page.locator(".nav-item[data-scr='inv']").click();
   await expect(page.locator("#scr-inv")).toBeVisible();
+  // ★2026-09-02：請求書は「今月」を見る。この試験は 2026-08 の売上を使うので、月を合わせる
+  //   （合わせないと 月が変わった瞬間に 相手が選べず 落ちる＝試験が時計に依存していた）
+  await useInvMonth(page, "2026-08");
   const sum = page.locator("summary", { hasText: "見た目を変える" });
   if (await sum.count()) await sum.first().click();
 }
@@ -376,7 +383,9 @@ test.describe("自社テンプレ（お店のExcel）", () => {
   /* ★枠に入りきらない月は「ほか ◯件」の1行にまとめる★（指示役の裁定(c)・2026-08-16）
      ★紙の明細を足した額 ＝ 請求額★ でなければ、客が明細を足して合わないと言ってくる。
      ここは ★書き出した本物のExcelを読み戻して★ 足し算で確かめる（画面の中の値では見ない）。 */
-  test("★明細があふれた月：ほか◯件にまとめ、紙の明細を足すと請求額に合う★", async ({ page }, info) => {
+  test("★明細があふれた月：ほか◯件にまとめ、紙の明細を足すと請求額に合う★", async ({
+    page,
+  }, info) => {
     const errors = await open(page);
     // 4件（合計 110,000円）を、明細3行しか無いテンプレに入れる
     await addSale(page, { date: "2026-08-01", name: "山田商事", amount: 44000 });
@@ -429,7 +438,9 @@ test.describe("自社テンプレ（お店のExcel）", () => {
     const sum = paid.reduce((a, b) => a + b, 0);
     expect(paid[2], "「ほか」の金額が違う").toBe(33000);
     expect(sum, "★紙の明細を足した額 ≠ 請求額★").toBe(110000);
-    expect(Number(String(T.cellText(book, s, "E33")).replace(/,/g, "")), "合計欄が違う").toBe(110000);
+    expect(Number(String(T.cellText(book, s, "E33")).replace(/,/g, "")), "合計欄が違う").toBe(
+      110000
+    );
 
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });

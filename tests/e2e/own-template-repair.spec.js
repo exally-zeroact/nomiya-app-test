@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { useInvMonth } from "./_clock.js";
 
 /* ★司さんの実機で出た「押しても何も起きない」の4件（指示役 2026-08-17 の①〜④）★
  * ------------------------------------------------------------------------------
@@ -52,7 +53,7 @@ async function makeLegacyState(page) {
     localStorage.setItem(k, JSON.stringify(s));
     // 倉庫の側も同じ形にする（開いたときに倉庫から戻ってきても当てが無い）
     const db = JSON.parse(localStorage.getItem("__fake_supa_db__") || "{}");
-    const rows = ((db.tables || {}).nomiya_settings || []);
+    const rows = (db.tables || {}).nomiya_settings || [];
     if (rows[0] && rows[0].config) {
       delete rows[0].config.ownCells;
       delete rows[0].config.ownNoGuess;
@@ -77,6 +78,9 @@ async function addSaleAndPick(page, name) {
   await page.locator("#btnSave").click();
   await expect(page.locator("#inErr"), "保存できていない").toHaveText("");
   await page.locator(".nav-item[data-scr='inv']").click();
+  // ★2026-09-02：請求書は「今月」を見る。売上は 2026-08-01 に入れているので、月を合わせる
+  //   （合わせないと 9月に入った瞬間、相手が選べず 落ちる＝試験が時計に依存していた）
+  await useInvMonth(page, "2026-08");
   await page.locator("#invName").selectOption(name);
 }
 
@@ -290,7 +294,9 @@ test.describe("テンプレは在るのに当てが無い（司さんの実機�
     await page.locator("#btnOwnXlsx").click();
     await expect(page.locator("#oxName")).toBeVisible({ timeout: 60000 });
     const hint = await page.evaluate(() => document.getElementById("modalBody").innerText);
-    expect(hint, "★マスの数と書く場所の数が結び付いていない★").toContain("決めてある書く場所は " + n + "コ");
+    expect(hint, "★マスの数と書く場所の数が結び付いていない★").toContain(
+      "決めてある書く場所は " + n + "コ"
+    );
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 });

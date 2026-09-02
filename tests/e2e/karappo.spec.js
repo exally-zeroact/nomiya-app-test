@@ -31,16 +31,34 @@ async function gray(page, id, why) {
   await expect(b, id + " に理由が書いていない").toContainText(why);
 }
 
+/** きょうの日付（★ローカル時刻★／toISOString は UTC で前日になるので使わない） */
+async function todayYmd(page) {
+  return await page.evaluate(() => {
+    const d = new Date();
+    const p2 = (n) => String(n).padStart(2, "0");
+    return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate());
+  });
+}
+
 async function addSale(page, { pay, name, amount }) {
   await page.locator(".nav-item[data-scr='input']").click();
-  await page.locator("#inDate").fill("2026-08-18");
+  /* ★2026-09-02：ここに月を直書きしていた（"2026-08-18"）★
+     売上帳・請求書は ★今月★ を見る作りなので、★9/1になった瞬間 0件になり 赤★ になった
+     （中身も画面も壊れていない＝試験が時計に依存していただけ）。
+     ⇒ ★画面が見ている月と 同じ月＝きょう★ に入れる。どの月に走らせても同じ結果になる。 */
+  await page.locator("#inDate").fill(await todayYmd(page));
   await page.locator(`#payChips button[data-pay="${pay}"]`).click();
   if (pay === "invoice") {
     await page.locator("#inNameSel").selectOption("__new");
     await page.locator("#ptName").fill(name);
     await page.locator("#ptOk").click();
     await page.locator("#inNameSel").selectOption(name);
-  } else if (await page.locator("#inName").isVisible().catch(() => false)) {
+  } else if (
+    await page
+      .locator("#inName")
+      .isVisible()
+      .catch(() => false)
+  ) {
     await page.locator("#inName").fill(name);
   }
   await page.locator("#inPeople").fill("2");

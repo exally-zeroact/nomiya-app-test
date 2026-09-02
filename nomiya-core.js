@@ -2283,10 +2283,15 @@
       if (from && w.ymd < from) return w;
       if (to && w.ymd > to) return w;
       // 渡した額をその場で固める（渡した記録が、あとの設定変更で動かないように）
+      /* ★2026-09-02 実測して直した★
+         前は updatedAt にも iso（＝画面で見ている日）を入れていた。
+         過去の日を見ながら渡すと ★updatedAt が過去になり、クラウドの行の方が新しくなる★
+         ＝次の同期で ★渡した印が黙って消える★（9/2に 8/31を見て渡して 実際に消えた）。
+         ★paidAt は業務の日（見ている日）でよい。updatedAt は同期のための時刻＝いつも本物の今★。 */
       return Object.assign({}, w, {
         paidAt: iso,
         paidAmount: _int(amt[w.id]),
-        updatedAt: iso,
+        updatedAt: nowIso(),
       });
     });
   }
@@ -2304,7 +2309,8 @@
       if (!w || w.deletedAt || w.staffId !== staffId) return w;
       if (String(w.paidAt || "").slice(0, 10) !== paidYmd) return w;
       ids.push(w.id);
-      return Object.assign({}, w, { paidAt: null, paidAmount: 0, updatedAt: iso });
+      /* ★updatedAt は いつも本物の今★（上と同じ理由＝過去の日を入れると同期で負ける） */
+      return Object.assign({}, w, { paidAt: null, paidAmount: 0, updatedAt: nowIso() });
     });
     return { works: next, workIds: ids };
   }

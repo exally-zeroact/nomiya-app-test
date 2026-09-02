@@ -3280,3 +3280,49 @@ describe("入金で埋まった売上に「入金済み」の印を付ける（�
     expect(d.collected).toBe(12000);
   });
 });
+
+describe("渡した印は、過去の日を見ながら押しても 同期で消えない（2026-09-02 実測）", () => {
+  /* ★実際に起きた事★ 9/2に 8/31の締め分を「渡した」→ 開き直すと ★印が消えていた★。
+     原因＝markPaidRange が updatedAt にも「見ている日(8/31)」を入れていたので、
+     クラウドに在る行（updatedAt=9/2）の方が新しくなり、同期で上書きされていた。 */
+  it("paidAt は見ている日・updatedAt は今（過去の日で押しても updatedAt は過去にならない）", () => {
+    const before = new Date().toISOString();
+    const w = [
+      C.normalizeWork(
+        { id: "w1", staffId: "s1", ymd: "2026-08-03", inAt: "20:00", outAt: "01:00" },
+        "2026-08-03T12:00:00.000Z"
+      ),
+    ];
+    const next = C.markPaidRange(w, "s1", "2026-08-01", "2026-08-31", "2026-08-31T10:00:00.000Z", {
+      w1: 5000,
+    });
+    const row = next[0];
+    expect(row.paidAt, "渡した日は「見ている日」のまま").toBe("2026-08-31T10:00:00.000Z");
+    expect(row.paidAmount).toBe(5000);
+    expect(
+      row.updatedAt >= before,
+      "updatedAt が過去のまま＝同期でクラウドの古い行に負けて 印が消える"
+    ).toBe(true);
+  });
+
+  it("取り消しも同じ（updatedAt は今）", () => {
+    const before = new Date().toISOString();
+    const w = [
+      C.normalizeWork(
+        {
+          id: "w1",
+          staffId: "s1",
+          ymd: "2026-08-03",
+          inAt: "20:00",
+          outAt: "01:00",
+          paidAt: "2026-08-31T10:00:00.000Z",
+          paidAmount: 5000,
+        },
+        "2026-08-31T10:00:00.000Z"
+      ),
+    ];
+    const r = C.unmarkPaid(w, "s1", "2026-08-31", "2026-08-31T11:00:00.000Z");
+    expect(r.works[0].paidAt).toBe(null);
+    expect(r.works[0].updatedAt >= before, "updatedAt が過去のまま").toBe(true);
+  });
+});

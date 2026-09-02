@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { usePeriod } from "./_clock.js";
 import { covering } from "../lib/check-kit.mjs";
 
 /* ★Excel書き出しを、実際に押して・出来た物を開き直して確かめる★
@@ -103,6 +104,8 @@ test.describe("Excelに書き出す（一覧タブ）", () => {
     });
 
     await page.locator(".nav-item[data-scr='sum']").click(); // 売上帳は集計タブ（2026-08-21）
+    // ★2026-09-02：売上帳は「今月」を見る。種まきは2026-08なので 期間を合わせる（時計に依存させない）
+    await usePeriod(page, "2026-08-01", "2026-08-31");
     await expect(page.locator("#scr-sum")).toBeVisible();
 
     // ★押す道順を実際になぞる★
@@ -177,6 +180,8 @@ test.describe("Excelに書き出す（一覧タブ）", () => {
     });
 
     await page.locator(".nav-item[data-scr='sum']").click(); // 売上帳は集計タブ（2026-08-21）
+    // ★2026-09-02：売上帳は「今月」を見る。種まきは2026-08なので 期間を合わせる（時計に依存させない）
+    await usePeriod(page, "2026-08-01", "2026-08-31");
     // 現金だけに絞る
     await page.locator("#filPay [data-fp='cash']").click();
     await page.locator("#btnXlsxList").click();
@@ -191,10 +196,14 @@ test.describe("Excelに書き出す（一覧タブ）", () => {
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
-  test("売上が1件も無い期間では、★押す前から灰色＋理由★（空のファイルを作らない）", async ({ page }) => {
+  test("売上が1件も無い期間では、★押す前から灰色＋理由★（空のファイルを作らない）", async ({
+    page,
+  }) => {
     /* 2026-08-19 に変えた：前は押してからトーストで理由が出ていた＝遅い。 */
     const errors = await open(page);
     await page.locator(".nav-item[data-scr='sum']").click(); // 売上帳は集計タブ（2026-08-21）
+    // ★2026-09-02：売上帳は「今月」を見る。種まきは2026-08なので 期間を合わせる（時計に依存させない）
+    await usePeriod(page, "2026-08-01", "2026-08-31");
     const b = page.locator("#btnXlsxList");
     await expect(b, "灰色になっていない").toBeDisabled();
     await expect(b, "理由がボタンの中に無い").toContainText("この期間に売上がありません");
@@ -211,6 +220,8 @@ test.describe("Excelに書き出す（一覧タブ）", () => {
     expect(before, "起動の時点で Excel の部品を読んでいる").toBe(false);
     await addSale(page, { date: "2026-08-07", name: "客", people: 1, amount: 100, pay: "cash" });
     await page.locator(".nav-item[data-scr='sum']").click(); // 売上帳は集計タブ（2026-08-21）
+    // ★2026-09-02：売上帳は「今月」を見る。種まきは2026-08なので 期間を合わせる（時計に依存させない）
+    await usePeriod(page, "2026-08-01", "2026-08-31");
     await page.locator("#btnXlsxList").click();
     await Promise.all([page.waitForEvent("download"), page.locator("#xlOk").click()]);
     const after = await page.evaluate(() =>
