@@ -14,13 +14,20 @@ import { test, expect } from "@playwright/test";
  */
 const PAGE = "/nomiya-uriage.html";
 
-/** supa-config.js を「本番の名札」に差し替えて配る（倉庫の向き先は変えない） */
-async function serveProdConfig(page) {
+/** supa-config.js を 好きな名札に差し替えて配る（倉庫の向き先は変えない）
+ *  ★2026-09-02：この1本は テスト線と本番の両方で走る★ ので、
+ *  「この repo がどちらか」に頼らず ★両方向とも 差し替えて確かめる★。
+ *  （前は「テストの名札なら出る」を repo 任せにしていて、本番repoで赤になった） */
+async function serveConfig(page, env) {
   await page.route(/js\/supa-config\.js.*/, (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/javascript; charset=utf-8",
-      body: 'window.SUPA = { env: "prod", url: "https://example.supabase.co", key: "dummy" };\n',
+      body:
+        'window.SUPA = { env: "' +
+        env +
+        '", url: "https://example.supabase.co", key: "dummy" };' +
+        String.fromCharCode(10),
     })
   );
 }
@@ -31,7 +38,7 @@ test.describe("テスト環境の帯（実物の画面で見る）", () => {
     page.on("pageerror", (e) => errors.push(String(e)));
     await page.setViewportSize({ width: 390, height: 844 });
     await page.route(/cdn\.jsdelivr\.net/, (r) => r.abort());
-    await serveProdConfig(page);
+    await serveConfig(page, "prod");
     await page.goto(PAGE, { waitUntil: "load" });
     await page.waitForTimeout(600);
 
@@ -55,7 +62,8 @@ test.describe("テスト環境の帯（実物の画面で見る）", () => {
     page.on("pageerror", (e) => errors.push(String(e)));
     await page.setViewportSize({ width: 390, height: 844 });
     await page.route(/cdn\.jsdelivr\.net/, (r) => r.abort());
-    await page.goto(PAGE, { waitUntil: "load" }); // この repo の名札は "test"
+    await serveConfig(page, "test"); // ★repo の名札に頼らない（本番repoでも同じ結果）★
+    await page.goto(PAGE, { waitUntil: "load" });
     await page.waitForTimeout(600);
 
     const m = await page.evaluate(() => {
