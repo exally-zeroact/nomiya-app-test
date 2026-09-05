@@ -2297,13 +2297,14 @@
   }
 
   /**
-   * unmarkPaid(works, staffId, paidYmd, now)
+   * unmarkPaid(works, staffId, paidYmd)
    *  「渡した」を取り消す。その人・その渡した日の分だけ、印と固めた額を外す。
+   *  ★now は受け取らない★（2026-09-06）。前は画面で見ている日を受け取っていたが、
+   *  2026-09-02 の直しで updatedAt は いつも本物の今（nowIso()）になり、使い道が無くなった。
    *  返り = { works: 新しい配列, workIds: 外した出勤のid }
    *  （workIds は、締めの出金を一緒に外すために使う）
    */
-  function unmarkPaid(works, staffId, paidYmd, now) {
-    var iso = now || nowIso();
+  function unmarkPaid(works, staffId, paidYmd) {
     var ids = [];
     var next = (works || []).map(function (w) {
       if (!w || w.deletedAt || w.staffId !== staffId) return w;

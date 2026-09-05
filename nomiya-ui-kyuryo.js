@@ -353,7 +353,7 @@ function renderPay() {
         );
         $("mdUndoYes").onclick = function () {
           var nowIso3 = new Date().toISOString();
-          var r = C.unmarkPaid(WORKS, sid, ymd, nowIso3);
+          var r = C.unmarkPaid(WORKS, sid, ymd);
           WORKS = r.works;
           saveWorks();
           CLOSES = C.removePayouts(

@@ -63,10 +63,21 @@ jobs:
       - name: E2E (playwright)
         run: npm run test:e2e
 
-      - name: Upload Playwright report on failure
-        if: failure()
+      # ★たまに赤の 記録係★（2026-09-06）
+      #  ・前は `if: failure()` だった＝★やり直しで通った回（flaky）は 何も残らない★
+      #    ＝赤の中身が 次の回で上書きされ、「重かったから」で片づけるしかなくなる。
+      #  ・置き場も間違っていた＝reporter は "list" なので `playwright-report/` は
+      #    そもそも作られない。★中身が在るのは `test-results/`★（trace: on-first-retry・
+      #    screenshot: only-on-failure がここに落ちる）。
+      #  ・`always()` + `if-no-files-found: ignore` ＝★1本も落ちなければ 何も上げない★
+      #    （全部 緑の回は test-results/ が空なので 重くならない）
+      - name: 落ちた回の中身を残す（flaky も／test-results）
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 7
+          name: playwright-test-results
+          path: |
+            test-results/
+            !test-results/.last-run.json
+          if-no-files-found: ignore
+          retention-days: 14

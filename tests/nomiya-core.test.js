@@ -2850,7 +2850,7 @@ describe("渡したのを取り消す・出金を外す", () => {
       w({ id: "w2", ymd: "2026-08-02", paidAt: "2026-08-31T05:00:00.000Z", paidAmount: 7000 }),
       w({ id: "w3", ymd: "2026-08-03" }), // まだ渡していない
     ];
-    const r = C.unmarkPaid(works, "s1", "2026-08-31", "2026-09-01T00:00:00.000Z");
+    const r = C.unmarkPaid(works, "s1", "2026-08-31");
     expect(r.workIds.sort()).toEqual(["w1", "w2"]);
     expect(r.works.filter((x) => x.paidAt).length).toBe(0);
     expect(r.works.map((x) => x.paidAmount)).toEqual([0, 0, 0]);
@@ -2870,7 +2870,7 @@ describe("渡したのを取り消す・出金を外す", () => {
         deletedAt: "2026-08-31T06:00:00.000Z",
       }),
     ];
-    const r = C.unmarkPaid(works, "s1", "2026-08-31", "2026-09-01T00:00:00.000Z");
+    const r = C.unmarkPaid(works, "s1", "2026-08-31");
     expect(r.workIds).toEqual(["w1"]);
     expect(r.works.find((x) => x.id === "w2").paidAmount).toBe(6000);
     expect(r.works.find((x) => x.id === "w3").paidAmount).toBe(7000);
@@ -2924,7 +2924,7 @@ describe("渡したのを取り消す・出金を外す", () => {
     const st = C.normalizeStaff({ id: "s1", name: "あかり", hourly: 1000 });
     const works = [w({ id: "w1", paidAt: "2026-08-31T05:00:00.000Z", paidAmount: 5000 })];
     expect(C.payoutLog([st], works, [], {}).length).toBe(1);
-    const r = C.unmarkPaid(works, "s1", "2026-08-31", "2026-09-01T00:00:00.000Z");
+    const r = C.unmarkPaid(works, "s1", "2026-08-31");
     expect(C.payoutLog([st], r.works, [], {}).length).toBe(0);
   });
 });
@@ -3321,7 +3321,7 @@ describe("渡した印は、過去の日を見ながら押しても 同期で消
         "2026-08-31T10:00:00.000Z"
       ),
     ];
-    const r = C.unmarkPaid(w, "s1", "2026-08-31", "2026-08-31T11:00:00.000Z");
+    const r = C.unmarkPaid(w, "s1", "2026-08-31");
     expect(r.works[0].paidAt).toBe(null);
     expect(r.works[0].updatedAt >= before, "updatedAt が過去のまま").toBe(true);
   });
