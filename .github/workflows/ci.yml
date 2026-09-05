@@ -76,8 +76,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-test-results
+          # ★上げるのは「落ちた証拠」だけ★（2026-09-06 実測で 直した）
+          #  test-results/ を丸ごとにしたら、★全部 緑の回でも 20,882バイト 上がった★＝
+          #  中身は 試験が書き出した out.xlsx / over.xlsx（testInfo.outputPath の物）だった。
+          #  ＝★「緑の回は 1件も上げない」は 嘘になっていた★ので、拾う物を 名指しにする。
           path: |
-            test-results/
-            !test-results/.last-run.json
+            test-results/**/*.png
+            test-results/**/*.zip
+            test-results/**/error-context.md
           if-no-files-found: ignore
           retention-days: 14
