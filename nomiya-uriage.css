@@ -855,24 +855,32 @@ body {
   cursor: pointer;
 }
 
-/* ===== TOAST ===== */
+/* ===== TOAST =====
+   ★濃い色でベタ塗りしない★（司さん 2026-09-10「絶対これがええ」）
+   前は 濃紺(--c-text)で 全面を塗り、白字・錠剤型(999px)・中央寄せだった。
+   ＝★箱の中が ほぼ全部 暗い＝画面の中で 重たい★。
+   いまの形＝白地・柔らかい黒の字・細い枠、★左に5pxだけ 飲み屋の濃紺★。
+   丸みは 12px（20px以上は 錠剤に見えて 字が詰まる）／字は 左寄せ。 */
 .toast {
   position: fixed;
   bottom: 86px;
   left: 50%;
   transform: translateX(-50%) translateY(10px);
-  background: var(--c-text);
-  color: var(--c-on-dark);
+  background: var(--c-card);
+  color: var(--c-flabel);
+  border: 1px solid var(--c-line);
+  border-left: 5px solid var(--c-hd);
+  box-shadow: 0 8px 28px rgba(15, 23, 40, 0.22);
   font-size: 12.5px;
   font-weight: 700;
   padding: 10px 16px;
-  border-radius: 999px;
+  border-radius: 12px;
   opacity: 0;
   transition: all 0.2s;
   z-index: 200;
   pointer-events: none;
   max-width: 88vw;
-  text-align: center;
+  text-align: left;
 }
 .toast.show {
   opacity: 1;

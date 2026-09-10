@@ -27,6 +27,7 @@
         --c-text: #0f1728;
         --c-label: #5a6480;
         --c-line: #cfd5e2;
+        --c-flabel: #333333; /* 本文の字＝柔らかい黒（売上管理と同じ名前・同じ値） */
         --c-line-soft: #e1e4eb;
         --c-btn: #e7ecf5;
         --c-btn-t: #1b2740;
@@ -210,16 +211,22 @@
         font-size: 13px;
         padding: 24px;
       }
+      /* ★濃い色でベタ塗りしない★（司さん 2026-09-10）＝売上管理と同じ形にそろえる。
+         前は 濃紺(--c-hd)で 全面を塗って 白字だった。 */
       .toast {
         position: fixed;
         left: 50%;
         bottom: 18px;
         transform: translateX(-50%);
-        background: var(--c-hd);
-        color: var(--c-card);
+        background: var(--c-card);
+        color: var(--c-flabel);
+        border: 1px solid var(--c-line);
+        border-left: 5px solid var(--c-hd);
+        box-shadow: 0 8px 28px rgba(15, 23, 40, 0.22);
         padding: 10px 16px;
-        border-radius: 10px;
+        border-radius: 12px;
         font-size: 13px;
+        text-align: left;
         opacity: 0;
         transition: opacity 0.2s;
         pointer-events: none;
@@ -414,7 +421,9 @@
           list = list.filter(function (r) {
             var n = (NAMES[r.account_id] || {}).store || "";
             return (
-              String(r.email || "").toLowerCase().indexOf(q) >= 0 || n.toLowerCase().indexOf(q) >= 0
+              String(r.email || "")
+                .toLowerCase()
+                .indexOf(q) >= 0 || n.toLowerCase().indexOf(q) >= 0
             );
           });
         }
@@ -484,9 +493,15 @@
         }
         var name = (NAMES[acct] || {}).store || row.email || "この店";
         toast(
-          plan === "disabled" ? "⛔ " + name + " を止めました" : "✅ " + name + " を" + PLANS.filter(function (p) {
-            return p.key === plan;
-          })[0].label + "にしました"
+          plan === "disabled"
+            ? "⛔ " + name + " を止めました"
+            : "✅ " +
+                name +
+                " を" +
+                PLANS.filter(function (p) {
+                  return p.key === plan;
+                })[0].label +
+                "にしました"
         );
       }
 
