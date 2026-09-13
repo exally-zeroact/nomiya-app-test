@@ -51,6 +51,14 @@ jobs:
       - name: 帯の見張りの自己確認
         run: node tests/env-badge.test.mjs --self-test
 
+      # ★repo の 素性と 倉庫の 向き先★（2026-09-12 Rakunally で 本番が テスト倉庫を 指した）
+      #   env だけ 見ると 丸ごと 入れ替わった時に 辻褄が 合う ⇒ git の origin と 突き合わせる。
+      - name: repoの素性と倉庫の向き先が合っているか
+        run: npm run supacfg
+
+      - name: 向き先の見張りの自己確認
+        run: node tests/supa-config-env-matches-repo.test.mjs --self-test
+
       - name: Lint (eslint)
         run: npm run lint
 

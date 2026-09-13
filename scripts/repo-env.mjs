@@ -29,19 +29,79 @@ import { fileURLToPath } from "node:url";
 
 const Q = String.fromCharCode(39); /* ' … 入れ子で書かないための逃がし場 */
 
-/* ★中身(window.SUPA = { ... })だけを見る★＝覚書に書いた名札は拾わない */
-export function envOf(src) {
+/* ★window.SUPA の 中身だけ★を 切り出す（覚書は この外に在るので 拾わない） */
+export function supaBody(src) {
   const s = String(src == null ? "" : src);
   const i = s.indexOf("window.SUPA");
   if (i < 0) return "";
   const close = s.indexOf("}", i);
-  const body = s.slice(i, close < 0 ? s.length : close);
+  return s.slice(i, close < 0 ? s.length : close);
+}
+
+/* ★中身(window.SUPA = { ... })だけを見る★＝覚書に書いた名札は拾わない */
+export function envOf(src) {
+  /* ★切り出しは supaBody 1か所★＝同じ事を 2通りで 書くと 片方だけ 直し忘れる */
+  const body = supaBody(src);
   /* ★飲み屋だけの直し（2026-08-28）★ 正本(Rakually)は ' だけを見る。
      この repo は prettier が二重引用符に揃えるので ★どちらの囲みでも読む★ ようにした。
      （囲みは字で書かず 文字コードから作る＝tests-registered の字読みを壊さない） */
   const D = String.fromCharCode(34);
   const m = body.match(new RegExp("env\\s*:\\s*[" + Q + D + "]([a-z]+)[" + Q + D + "]"));
   return m ? m[1] : "";
+}
+
+/* ★倉庫の ref★＝url(https://<ref>.supabase.co) の <ref> だけを返す。
+   ★覚書の中の ref は 拾わない★＝本番の supa-config.js の頭には
+   テスト倉庫の ref が 説明として 書いてある（2026-09-14 実測）。
+   素朴に字を拾うと ★本番から テストの ref も 当たる＝偽の赤★ になる。
+   ⇒ envOf と同じく window.SUPA の中身だけを見る。 */
+export function refOf(src) {
+  const body = supaBody(src);
+  if (body.indexOf("url") < 0) return "";
+  const atama = "https://", oshiri = ".supabase.co";
+  const a = body.indexOf(atama);
+  if (a < 0) return "";
+  const b = body.indexOf(oshiri, a);
+  if (b < 0) return "";
+  const ref = body.slice(a + atama.length, b);
+  return /^[a-z0-9]+$/.test(ref) ? ref : "";
+}
+
+/* ★公開鍵★（中身だけ）。JWT の時は 中に ref が入っているので 突き合わせに使う */
+export function keyOf(src) {
+  const body = supaBody(src);
+  const ki = body.indexOf("key");
+  if (ki < 0) return "";
+  const c = body.indexOf(":", ki);
+  if (c < 0) return "";
+  const D = String.fromCharCode(34);
+  let k = -1,
+    kako = "";
+  for (let n = c + 1; n < body.length; n++) {
+    const ch = body.charAt(n);
+    if (ch === Q || ch === D) {
+      k = n;
+      kako = ch;
+      break;
+    }
+    if (ch !== " " && ch !== String.fromCharCode(10) && ch !== String.fromCharCode(13)) return "";
+  }
+  if (k < 0) return "";
+  const e = body.indexOf(kako, k + 1);
+  return e < 0 ? "" : body.slice(k + 1, e);
+}
+
+/* JWT(3つに ピリオドで 割れる)の 真ん中に 入っている ref。JWT でなければ 空＝見ない */
+export function refInKey(key) {
+  const k = String(key == null ? "" : key);
+  const part = k.split(".");
+  if (part.length !== 3) return "";
+  try {
+    const j = JSON.parse(Buffer.from(part[1], "base64").toString("utf8"));
+    return String(j.ref || "");
+  } catch {
+    return "";
+  }
 }
 
 export function repoEnv(root) {
@@ -110,6 +170,28 @@ if (IS_MAIN && process.argv.includes("--self-test")) {
     threw = 1;
   }
   S(1, threw, "★知らない名札は 赤にする★");
+  /* ── ★倉庫の ref を 読む口★（2026-09-14 追加）─────────────────────── */
+  const D2 = String.fromCharCode(34);
+  const cfgU = (e, ref) =>
+    "window.SUPA = {" + nl + "  env: " + Q + e + Q + "," + nl +
+    "  url: " + D2 + "https://" + ref + ".supabase.co" + D2 + "," + nl + "};";
+  /* ★本番の紙の 頭には テスト倉庫の ref が 説明として 書いてある（実物と同じ形）★ */
+  const noteRef = (ref) => "/* テスト用DB(" + ref + ")とは別の倉庫を指す */";
+  S("tnfwipbgfgjaymlszeid", refOf(cfgU("prod", "tnfwipbgfgjaymlszeid")), "url の ref が読める");
+  S(
+    "tnfwipbgfgjaymlszeid",
+    refOf(noteRef("khawdrnvssdenumbiwfg") + nl + cfgU("prod", "tnfwipbgfgjaymlszeid")),
+    "★覚書に書いた 相手の ref に 釣られない★"
+  );
+  S("", refOf("window.SUPA = { env: " + Q + "prod" + Q + " };"), "url が無ければ 空（勝手に決めない）");
+  S("", refOf(""), "空なら 空");
+  /* ★公開鍵の 中の ref★＝url だけ差し替えた 事故を 捕まえる為 */
+  const mkJwt = (ref) =>
+    "aaa." + Buffer.from(JSON.stringify({ ref: ref })).toString("base64") + ".bbb";
+  S("tnfwipbgfgjaymlszeid", refInKey(mkJwt("tnfwipbgfgjaymlszeid")), "JWT の中の ref が読める");
+  S("", refInKey("sb_publishable_xxxxx"), "JWT でない鍵は 空＝見ない（狼少年にしない）");
+  S("", refInKey(""), "鍵が空でも 落ちない");
+
   const here = repoEnv(ROOT);
   S(
     true,
@@ -125,7 +207,7 @@ if (IS_MAIN && process.argv.includes("--self-test")) {
       encoding: "utf8",
       stdio: "pipe",
     });
-  } catch (e) {
+  } catch {
     out = String((e.stdout || "") + (e.stderr || ""));
   }
   S(
