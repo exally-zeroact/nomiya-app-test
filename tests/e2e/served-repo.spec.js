@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
+import { PROD_WAREHOUSE, TEST_WAREHOUSE } from "../kura.mjs";
 
 /* ★E2Eが「別のrepoのファイル」を試していないことを確かめる。
  *
@@ -9,8 +10,9 @@ import path from "node:path";
  * 画面のテストは全部この確認のあとに意味を持つので、ここを最初に置く。
  */
 const PKG = JSON.parse(fs.readFileSync(path.resolve("package.json"), "utf8"));
-const PROD = "tnfwipbgfgjaymlszeid";
-const DBTEST = "khawdrnvssdenumbiwfg";
+/* ★倉庫の 名前は 写さない★＝tests/supa-from-config.mjs が 正（2026-09-14 1か所に まとめた） */
+const PROD = PROD_WAREHOUSE;
+const DBTEST = TEST_WAREHOUSE;
 const EXPECT = PKG.name === "nomiya-app" ? PROD : DBTEST;
 
 test.describe("配信しているのは、このrepoの物か", () => {

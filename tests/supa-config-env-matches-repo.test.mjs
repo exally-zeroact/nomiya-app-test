@@ -26,11 +26,28 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { envOf, refOf, keyOf, refInKey } from "../scripts/repo-env.mjs";
+/* ★本番倉庫の 名前は ここが 正★＝同じ値を 2か所に 書かない（写し間違いが 出る）。
+   tests/supa-from-config.mjs は 「本番倉庫では 検証を 走らせない」為の 番人で、前から 在る。 */
+import { PROD_WAREHOUSE, TEST_WAREHOUSE } from "./supa-from-config.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /* ★この線が 向く べき 倉庫★（公開鍵と同じく 客の画面に 出ている 値＝隠し事では ない） */
-export const KURA = { prod: "tnfwipbgfgjaymlszeid", test: "khawdrnvssdenumbiwfg" };
+export const KURA = { prod: PROD_WAREHOUSE, test: TEST_WAREHOUSE };
+
+/* ★物差しそのものを 疑う★
+   期待値を 1か所に まとめると、★その1か所を 取り違えた時に 門が「取り違えた側」を 正として 通す★。
+   一番 有りそうな 取り違え＝★prod と test を 入れ替える★（2026-09-12 の 事故と 同じ 手つき）。
+   ⇒ 使う前に 定数そのものを 見る。 */
+export function teisuu(prod, test) {
+  if (!prod || !test) return { ok: false, naze: "★倉庫の 名前が 空★（定数が 消えている）" };
+  if (prod === test)
+    return { ok: false, naze: "★本番と テストの 倉庫が 同じ★＝入れ替え か 写し間違い" };
+  const katachi = (r) => /^[a-z0-9]{20}$/.test(r);
+  if (!katachi(prod) || !katachi(test))
+    return { ok: false, naze: "★倉庫の 名前の 形が 違う★（英小文字と数字で 20字）: " + prod + " / " + test };
+  return { ok: true };
+}
 
 /* ★origin の 名前★（.git を 落とす）。読めなければ 空 */
 export function originName(root) {
@@ -102,6 +119,14 @@ if (process.argv.includes("--self-test")) {
   iu("★鍵の中の 倉庫だけ 違う … 赤★", !au("nomiya-app", "prod", KURA.prod, KURA.test).ok);
   iu("鍵が JWT で ない(空) … 見ない＝緑", au("nomiya-app-test", "test", KURA.test, "").ok);
 
+  /* ── ★期待値そのもの★（1か所に まとめた分、そこを 取り違えたら 全部 通る）───── */
+  iu("いま の 定数 … 緑", teisuu(KURA.prod, KURA.test).ok);
+  iu("★PROD_WAREHOUSE を test の ref に すり替えたら 赤★", !teisuu(KURA.test, KURA.test).ok);
+  iu("★prod と test を 入れ替えても 同じ物なら 赤★", !teisuu(KURA.prod, KURA.prod).ok);
+  iu("定数が 空 … 赤", !teisuu("", KURA.test).ok);
+  iu("形が 違う(19字) … 赤", !teisuu("tnfwipbgfgjaymlszei", KURA.test).ok);
+  iu("形が 違う(大文字) … 赤", !teisuu("TNFWIPBGFGJAYMLSZEID", KURA.test).ok);
+
   /* ── ②本物の 紙を 使って（★覚書に 相手の ref が 在る 紙★で 偽の赤が 出ないか）──── */
   const honmono = fs.readFileSync(path.join(ROOT, "js", "supa-config.js"), "utf8");
   const nakami = honmono.indexOf("window.SUPA");
@@ -143,6 +168,15 @@ if (process.argv.includes("--self-test")) {
 
   console.log(ng ? "★自己確認 " + ng + "件 おかしい★" : "自己確認 OK（わざと 壊すと 赤に なる）");
   process.exit(ng ? 1 : 0);
+}
+
+/* ★使う前に 物差しを 見る★＝定数が 壊れていたら ここで 赤（黙って 通さない） */
+const t = teisuu(KURA.prod, KURA.test);
+if (!t.ok) {
+  console.log("[supa-config-env-matches-repo] ★期待値そのものが おかしい★");
+  console.log("  NG " + t.naze);
+  console.log("    ★直し方★ tests/supa-from-config.mjs の PROD_WAREHOUSE と この紙の KURA.test を 見る。");
+  process.exit(1);
 }
 
 const name = originName(ROOT);

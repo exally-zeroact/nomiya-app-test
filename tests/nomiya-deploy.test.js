@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { PROD_WAREHOUSE, TEST_WAREHOUSE } from "./supa-from-config.mjs";
 
 /* 「テストはテスト、本番は本番」を機械で縛る。
  *
@@ -31,8 +32,9 @@ const LIVE = R("tests/live-nomiya.mjs");
 const LIVEUI = R("tests/live-nomiya-ui.mjs");
 const PKG = JSON.parse(R("package.json"));
 
-const PROD = "tnfwipbgfgjaymlszeid"; // 本番倉庫
-const DBTEST = "khawdrnvssdenumbiwfg"; // テスト用DB
+/* ★倉庫の 名前は 写さない★＝tests/supa-from-config.mjs が 正（2026-09-14 1か所に まとめた） */
+const PROD = PROD_WAREHOUSE; // 本番倉庫
+const DBTEST = TEST_WAREHOUSE; // テスト用DB
 // このrepoが向いているべき倉庫（名前で決まる。名前を変えたら向き先も変える）
 const IS_PROD_REPO = PKG.name === "nomiya-app";
 const MUST = IS_PROD_REPO ? PROD : DBTEST;
@@ -140,7 +142,16 @@ describe("飲み屋アプリ 倉庫の向き先（テストはテスト・本番
     }
     // その readSupaConfig が、本番倉庫なら本当に止めること
     const gate = R("tests/supa-from-config.mjs");
-    expect(gate).toContain('PROD_WAREHOUSE = "' + PROD + '"');
+    /* ★倉庫の 字が 残っているかを 見る 行＝1か所化の 最後の 砦。消さない★
+       2026-09-14 に 値を tests/kura.mjs へ 分けた（画面の試験が import.meta を 読めない為）。
+       ⇒ ★字は kura.mjs で 見て、家が そこから 借りている事も 見る★（鎖を 切らない）。 */
+    expect(R("tests/kura.mjs"), "倉庫の字が kura.mjs から 消えている").toContain(
+      'PROD_WAREHOUSE = "' + PROD + '"'
+    );
+    expect(R("tests/kura.mjs"), "テスト倉庫の字が kura.mjs から 消えている").toContain(
+      'TEST_WAREHOUSE = "' + DBTEST + '"'
+    );
+    expect(gate, "家が kura.mjs から 借りていない").toContain('from "./kura.mjs"');
     expect(gate, "本番倉庫でも止まらない").toMatch(
       /if \(url\.includes\(PROD_WAREHOUSE\)\)[\s\S]{0,400}?process\.exit\(1\)/
     );

@@ -9,7 +9,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const PROD_WAREHOUSE = "tnfwipbgfgjaymlszeid"; // 本番倉庫＝ここでは絶対に走らせない
+/* ★値は tests/kura.mjs が 正★＝ここでは 借りて そのまま 配る（前からの 取り込み先を 壊さない）。
+   分けた 訳は kura.mjs の 頭に 書いた（playwright は import.meta を 読めない）。 */
+export { PROD_WAREHOUSE, TEST_WAREHOUSE } from "./kura.mjs";
+import { PROD_WAREHOUSE } from "./kura.mjs";
 
 export function readSupaConfig() {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
