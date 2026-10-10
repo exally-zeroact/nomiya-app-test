@@ -124,8 +124,8 @@ export const GATE = ".githooks/pre-push-kinshi.mjs";
 export const FINGER = ".githooks/kinshi-finger";
 /* hook の 中の 自己確認の 床＝★ci.yml の 床と 揃える★（自己確認を 0/0 に した 本体が 枝へ 緑で 出た＝10-11 taiketsu 実測） */
 export const FLOOR = {
-  [BODY]: { groups: 29, checks: 234 },
-  [GATE]: { groups: 12, checks: 26 },
+  [BODY]: { groups: 29, checks: 239 },
+  [GATE]: { groups: 12, checks: 27 },
 };
 export function selfOk(stdout, floor) {
   const m = /^自己確認: (\d+)\/(\d+)$/m.exec(stdout || "");
@@ -486,9 +486,16 @@ function selfTest() {
     const wv = commit2("wv");
     const s = gate(w1, wv);
     must(s.status === 1 && said(s).includes("床"), "床 未満の 自己確認で 通った: " + said(s));
-    must(selfOk("自己確認: 29/29\n確かめた 回数: 234\n", FLOOR[BODY]), "床 ちょうどが 赤");
-    must(!selfOk("自己確認: 29/29\n確かめた 回数: 233\n", FLOOR[BODY]), "回数 1 足りないのが 緑");
-    must(!selfOk("自己確認: 28/29\n確かめた 回数: 300\n", FLOOR[BODY]), "1 組 落ちたのが 緑");
+    /* 床の 境（数は FLOOR から 作る＝床を 上げても 試しが 古い 数に 残らない） */
+    const F = FLOOR[BODY];
+    const say = (g, n, c) => "自己確認: " + g + "/" + n + "\n確かめた 回数: " + c + "\n";
+    must(selfOk(say(F.groups, F.groups, F.checks), F), "床 ちょうどが 赤");
+    must(!selfOk(say(F.groups, F.groups, F.checks - 1), F), "回数 1 足りないのが 緑");
+    must(!selfOk(say(F.groups - 1, F.groups, F.checks + 66), F), "1 組 落ちたのが 緑");
+    must(
+      !selfOk(say(F.groups - 1, F.groups - 1, F.checks + 66), F),
+      "組の 数 だけ 床 未満（全部 通った）が 緑"
+    );
     g2("reset", "-q", "--hard", w1);
   });
   T("門が 変わった push は 門の 自己確認を 床で 見る・一時 dir を 残さない", () => {

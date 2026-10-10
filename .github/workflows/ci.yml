@@ -77,12 +77,12 @@ jobs:
 
       - name: 実在の字の見張りの自己確認
         timeout-minutes: 10
-        # 全部 通って、しかも 29 組 以上・確かめた 回数 234 以上の 時だけ 緑（組の 中の 歯を 消しても 割れる）
+        # 全部 通って、しかも 29 組 以上・確かめた 回数 239 以上の 時だけ 緑（組の 中の 歯を 消しても 割れる）
         shell: bash
         run: |
           node tests/kinshi-ji.test.mjs --self-test | tee kinshi-self.out
           awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 29) ok = 1 } END { exit !ok }' kinshi-self.out
-          awk '/^確かめた 回数: /{ if ($3 + 0 >= 234) ok = 1 } END { exit !ok }' kinshi-self.out
+          awk '/^確かめた 回数: /{ if ($3 + 0 >= 239) ok = 1 } END { exit !ok }' kinshi-self.out
 
       # ★commit の メールを 公開 repo に 出さない 門（.githooks/pre-push）の 自己確認★（2026-10-11）
       #   門は 手元の push で 走る（git config --local core.hooksPath .githooks）。ここでは 門 自身が 壊れていないかを 見る。
@@ -99,7 +99,7 @@ jobs:
         run: |
           node .githooks/pre-push-kinshi.mjs --self-test | tee push-self.out
           awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 12) ok = 1 } END { exit !ok }' push-self.out
-          awk '/^確かめた 回数: /{ if ($3 + 0 >= 26) ok = 1 } END { exit !ok }' push-self.out
+          awk '/^確かめた 回数: /{ if ($3 + 0 >= 27) ok = 1 } END { exit !ok }' push-self.out
 
       - name: Lint (eslint)
         run: npm run lint
@@ -162,11 +162,11 @@ jobs:
         run: |
           node tests/kinshi-ji.test.mjs --self-test | tee kinshi24-self.out
           awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 29) ok = 1 } END { exit !ok }' kinshi24-self.out
-          awk '/^確かめた 回数: /{ if ($3 + 0 >= 234) ok = 1 } END { exit !ok }' kinshi24-self.out
+          awk '/^確かめた 回数: /{ if ($3 + 0 >= 239) ok = 1 } END { exit !ok }' kinshi24-self.out
       # 押す commit の 中身の 門も node 24 で（手元の 機械の node は 24・2026-10-11）
       - name: 押す commit の 中身の 門の自己確認（node 24）
         shell: bash
         run: |
           node .githooks/pre-push-kinshi.mjs --self-test | tee push24-self.out
           awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 12) ok = 1 } END { exit !ok }' push24-self.out
-          awk '/^確かめた 回数: /{ if ($3 + 0 >= 26) ok = 1 } END { exit !ok }' push24-self.out
+          awk '/^確かめた 回数: /{ if ($3 + 0 >= 27) ok = 1 } END { exit !ok }' push24-self.out
