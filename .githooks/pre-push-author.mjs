@@ -145,6 +145,18 @@ function selfTest() {
       fs.readFileSync(path.join(gd, "index")),
       fs.readFileSync(path.join(gd, "config")),
     ];
+    const gd2 = gd;
+    /* GIT_DIR だけを 付けた 形（worktree から 押した 時の 型＝親の config に core.bare が 書かれた 前例） */
+    const before2 = fs.readFileSync(path.join(gd2, "config"));
+    const r2 = spawnSync(process.execPath, [fileURLToPath(import.meta.url), "--self-test"], {
+      env: { ...process.env, GIT_DIR: gd2, MAIL_SELFTEST_NESTED: "1" },
+      encoding: "utf8",
+    });
+    must(r2.status === 0, "GIT_DIR だけ 付けると 自己確認が 赤");
+    must(
+      before2.equals(fs.readFileSync(path.join(gd2, "config"))),
+      "GIT_DIR だけ で 親の config を 書き換えた"
+    );
     fs.rmSync(parent, { recursive: true, force: true });
     must(
       r.status === 0,

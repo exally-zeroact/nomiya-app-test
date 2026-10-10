@@ -609,7 +609,7 @@ const TABLE_PART = /(^|\/)xl\/tables\/[^/]+\.xml$/i;
 const NAME_TAGS =
   /<(?:[\w.-]+:)?(creator|lastModifiedBy|Company|Manager|initial-creator|author)\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?\1>)/gi;
 const NAME_ATTRS =
-  /\s(?:[\w-]+:)?(author|displayName|initials|userName|userId|refreshedBy)\s*=\s*(["'])([\s\S]*?)\2/gi;
+  /\s(?:[\w.-]+:)?(author|displayName|initials|userName|userId|refreshedBy)\s*=\s*(["'])([\s\S]*?)\2/gi;
 const NAME_ELEM_ATTR =
   /<(?:[\w.-]+:)?(cmAuthor|userInfo|fileSharing|absPath|customWorkbookView)\b[^>]*?\s(name|url)\s*=\s*(["'])([\s\S]*?)\3/gi;
 const CUSTOM_VAL = /<vt:(?:lpwstr|lpstr|bstr)>([\s\S]*?)<\/vt:(?:lpwstr|lpstr|bstr)>/g;
@@ -618,7 +618,7 @@ export function nameFields(partName, xml) {
   for (const m of xml.matchAll(NAME_TAGS))
     out.push([
       m[1],
-      (m[2] || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/<[^>]*>/g, ""),
+      (m[2] || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>|<[^>]*>/g, (x, cd) => cd ?? ""),
     ]);
   for (const m of xml.matchAll(NAME_ATTRS)) out.push([m[1], m[3]]);
   for (const m of xml.matchAll(NAME_ELEM_ATTR)) out.push([m[1] + "@" + m[2], m[4]]);
@@ -710,12 +710,14 @@ export function scan({ root, files, words }) {
         const text = xmlText(part.data);
         if (/(^|\/)docProps\/core\.xml$/i.test(part.name) && !/coreProperties/.test(text))
           notes.push(pl + ": 作者の 欄の 部品を 読めない（未測定）");
-        if (/(^|\/)docProps\/(core|app)\.xml$/i.test(part.name)) {
+        if (/(^|\/)(docProps\/(core|app)|meta)\.xml$/i.test(part.name)) {
           const said = (
-            text.match(/<(?!\/)[^>!?]*?(creator|lastModifiedBy|Company|Manager)\b/gi) || []
+            text.match(
+              /<(?!\/)[^>!?]*?(initial-creator|creator|lastModifiedBy|Company|Manager)\b/gi
+            ) || []
           ).length;
           const got = nameFields(part.name, text).filter(([k]) =>
-            /^(creator|lastModifiedBy|Company|Manager)$/i.test(k)
+            /^(initial-creator|creator|lastModifiedBy|Company|Manager)$/i.test(k)
           ).length;
           if (said > got)
             notes.push(
@@ -858,8 +860,9 @@ export function scan({ root, files, words }) {
             const ws = wideStrings(rc.data)
               .filter((x) => /[^\u0000-\u001f]/.test(x))
               .sort((a, b) => b.length - a.length);
-            if (ws.length) checkName(label, BIFF12_PERSON.get(rc.type), ws[0]);
-            else if (rc.data.length > 16)
+            const odd = ws.find((x) => !OK_NAMES.has(normJa(x)));
+            if (ws.length) checkName(label, BIFF12_PERSON.get(rc.type), odd ?? ws[0]);
+            else if (rc.data.length > 4)
               notes.push(label + ": " + BIFF12_PERSON.get(rc.type) + " の 字を 読めない（未測定）");
           }
       } else if (!isDevmode(label, buf)) {
@@ -1095,7 +1098,7 @@ export function run({
       " 個・字として 読めない " +
       r.c.unreadable +
       " 本・未測定 " +
-      (r.notes.length + r.c.shiroNotes) +
+      (r.notes.length + r.c.shiroNotes + r.reds.filter((x) => x.includes("未測定")).length) +
       " 件（うち 白名簿に 名指しして 通した " +
       r.c.shiroNotes +
       " 件）"
@@ -2359,6 +2362,18 @@ function selfTest() {
       fs.readFileSync(path.join(gd, "index")),
       fs.readFileSync(path.join(gd, "config")),
     ];
+    const gd2 = gd;
+    /* GIT_DIR だけを 付けた 形（worktree から 押した 時の 型＝親の config に core.bare が 書かれた 前例） */
+    const before2 = fs.readFileSync(path.join(gd2, "config"));
+    const r2 = spawnSync(process.execPath, [SELF, "--self-test"], {
+      env: { ...process.env, GIT_DIR: gd2, KINSHI_SELFTEST_NESTED: "1" },
+      encoding: "utf8",
+    });
+    must(r2.status === 0, "GIT_DIR だけ 付けると 自己確認が 赤");
+    must(
+      before2.equals(fs.readFileSync(path.join(gd2, "config"))),
+      "GIT_DIR だけ で 親の config を 書き換えた"
+    );
     fs.rmSync(parent, { recursive: true, force: true });
     must(
       r.status === 0,
@@ -2371,6 +2386,75 @@ function selfTest() {
     must(before[0].equals(after[0]), "親の index を 書き換えた");
     must(before[1].equals(after[1]), "親の config を 書き換えた");
   });
+  T(
+    "CDATA の 中の タグ・xlsb の 人の 記録の 短い 名前・属性の 接頭辞の 点・meta.xml の 読み損ね・短い 人の 記録",
+    () => {
+      must(
+        go([
+          put(
+            "cd2.xlsx",
+            makeZip([
+              [
+                "docProps/core.xml",
+                "<cp:coreProperties><dc:creator><![CDATA[<x>]]>見本</dc:creator></cp:coreProperties>",
+              ],
+            ])
+          ),
+        ]).code === 1,
+        "CDATA の 中の タグを 剥がして 緑"
+      );
+      const rec = (t1, t2, parts) => {
+        const body = Buffer.concat(
+          parts.map((txt) => {
+            const b = Buffer.alloc(4 + 2 * txt.length);
+            b.writeUInt32LE(txt.length, 0);
+            b.write(txt, 4, "utf16le");
+            return b;
+          })
+        );
+        return Buffer.concat([Buffer.from([t1, t2, body.length]), body]);
+      };
+      const xb = (bin) =>
+        makeZip([
+          ["docProps/core.xml", core("見本")],
+          ["xl/comments1.bin", bin],
+        ]);
+      must(
+        go([put("sn.xlsb", xb(rec(0xf8, 0x04, ["見本", "他"])))]).code === 1,
+        "見本と 並べた 短い 名前を 見落とした"
+      );
+      must(
+        go([
+          put(
+            "at.xlsx",
+            makeZip([
+              ["docProps/core.xml", core("見本")],
+              ["word/comments.xml", '<w:comment d.x:author="他人"/>'],
+            ])
+          ),
+        ]).code === 1,
+        "接頭辞に 点の 属性が 緑"
+      );
+      must(
+        go([
+          put(
+            "m.ods",
+            makeZip([
+              [
+                "meta.xml",
+                "<office:meta><meta:initial-creator>見本</meta:initial-creatorX></office:meta>",
+              ],
+            ])
+          ),
+        ]).code === 1,
+        "meta.xml の 読み損ねが 緑"
+      );
+      must(
+        go([put("sr.xlsb", xb(Buffer.from([0xf8, 0x04, 6, 1, 2, 3, 4, 5, 6])))]).code === 1,
+        "字の 拾えない 短い 人の 記録が 緑"
+      );
+    }
+  );
   T("手元に 無い 追跡物・フォルダ（submodule の 形）・LFS の 指し札は 赤", () => {
     must(go(["nai/nai.txt"]).code === 1, "無いのに 緑");
     fs.mkdirSync(path.join(tmp, "sub"), { recursive: true });
