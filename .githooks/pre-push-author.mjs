@@ -8,6 +8,13 @@
  *                              git config --local user.email 271668854+exally-zeroact@users.noreply.github.com
  *   過去の commit は 書き換えない（決め7）＝見るのは これから 押す 物だけ。
  *
+ *   ★門の 外（この 門では 止まらない＝紙に 書いて 人が 気を付ける）★
+ *     ・--no-verify で 押す／core.hooksPath を 置いていない clone や 別の 機械で 押す
+ *     ・GitHub の 画面の merge・squash・編集（作者の 欄は アカウントの 設定で 決まる）
+ *     ・注釈付きの tag の tagger の 欄／commit の 本文に 書いた メール（Signed-off-by 等）
+ *     ・remote が 2つ 以上 ある 時の 新しい 枝の 初回 push（--not --remotes の 範囲）
+ *   CI は この 門の 自己確認だけを する（遠くに 出た commit の メールは 数えていない）。
+ *
  *   使い方（git が 呼ぶ）: 標準入力に「<手元の ref> <手元の sha> <遠くの ref> <遠くの sha>」の 行
  *   自分で 確かめる:       node .githooks/pre-push-author.mjs --self-test
  */

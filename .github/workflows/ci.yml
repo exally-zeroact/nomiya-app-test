@@ -86,7 +86,10 @@ jobs:
       # ★commit の メールを 公開 repo に 出さない 門（.githooks/pre-push）の 自己確認★（2026-10-11）
       #   門は 手元の push で 走る（git config --local core.hooksPath .githooks）。ここでは 門 自身が 壊れていないかを 見る。
       - name: commit のメールの門の自己確認
-        run: node .githooks/pre-push-author.mjs --self-test
+        shell: bash
+        run: |
+          node .githooks/pre-push-author.mjs --self-test | tee mail-self.out
+          awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 4) ok = 1 } END { exit !ok }' mail-self.out
 
       - name: Lint (eslint)
         run: npm run lint
