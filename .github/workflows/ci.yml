@@ -81,8 +81,7 @@ jobs:
         shell: bash
         run: |
           node tests/kinshi-ji.test.mjs --self-test | tee kinshi-self.out
-          awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 29) ok = 1 } END { exit !ok }' kinshi-self.out
-          awk '/^確かめた 回数: /{ if ($3 + 0 >= 239) ok = 1 } END { exit !ok }' kinshi-self.out
+          sh scripts/ci-yuka.sh kinshi-self.out 29 239
 
       # ★commit の メールを 公開 repo に 出さない 門（.githooks/pre-push）の 自己確認★（2026-10-11）
       #   門は 手元の push で 走る（git config --local core.hooksPath .githooks）。ここでは 門 自身が 壊れていないかを 見る。
@@ -90,7 +89,7 @@ jobs:
         shell: bash
         run: |
           node .githooks/pre-push-author.mjs --self-test | tee mail-self.out
-          awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 5) ok = 1 } END { exit !ok }' mail-self.out
+          sh scripts/ci-yuka.sh mail-self.out 5
 
       # ★押す commit の 中身の 門（.githooks/pre-push-kinshi.mjs）の 自己確認★（2026-10-11）
       #   門 自身は 手元の push で 走る。ここでは 門が 壊れていないか（入れて 消した 字を 赤に する 等）を 見る。
@@ -98,8 +97,14 @@ jobs:
         shell: bash
         run: |
           node .githooks/pre-push-kinshi.mjs --self-test | tee push-self.out
-          awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 12) ok = 1 } END { exit !ok }' push-self.out
-          awk '/^確かめた 回数: /{ if ($3 + 0 >= 27) ok = 1 } END { exit !ok }' push-self.out
+          sh scripts/ci-yuka.sh push-self.out 12 27
+
+      # ★床の 物差し（scripts/ci-yuka.sh）の 自己確認＝ubuntu の awk で 233・234x 等が 赤に なるか★（2026-10-11）
+      - name: 床の物差しの自己確認
+        shell: bash
+        run: |
+          sh scripts/ci-yuka.sh --self-test | tee yuka-self.out
+          sh scripts/ci-yuka.sh yuka-self.out 20
 
       - name: Lint (eslint)
         run: npm run lint
@@ -149,6 +154,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      # ★床の 物差し（scripts/ci-yuka.sh）の 自己確認＝ubuntu の awk で 233・234x 等が 赤に なるか★（2026-10-11）
+      - name: 床の物差しの自己確認（node 24 の job）
+        shell: bash
+        run: |
+          sh scripts/ci-yuka.sh --self-test | tee yuka-self.out
+          sh scripts/ci-yuka.sh yuka-self.out 20
+
       - name: 実在の字が戻っていないか（node 24）
         shell: bash
         run: |
@@ -161,12 +173,10 @@ jobs:
         shell: bash
         run: |
           node tests/kinshi-ji.test.mjs --self-test | tee kinshi24-self.out
-          awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 29) ok = 1 } END { exit !ok }' kinshi24-self.out
-          awk '/^確かめた 回数: /{ if ($3 + 0 >= 239) ok = 1 } END { exit !ok }' kinshi24-self.out
+          sh scripts/ci-yuka.sh kinshi24-self.out 29 239
       # 押す commit の 中身の 門も node 24 で（手元の 機械の node は 24・2026-10-11）
       - name: 押す commit の 中身の 門の自己確認（node 24）
         shell: bash
         run: |
           node .githooks/pre-push-kinshi.mjs --self-test | tee push24-self.out
-          awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 12) ok = 1 } END { exit !ok }' push24-self.out
-          awk '/^確かめた 回数: /{ if ($3 + 0 >= 27) ok = 1 } END { exit !ok }' push24-self.out
+          sh scripts/ci-yuka.sh push24-self.out 12 27
