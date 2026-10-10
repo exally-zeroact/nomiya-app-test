@@ -17,6 +17,8 @@
  *   ・git が 追跡している 全部の ファイル。1行ずつ・行を またいで つないだ 字・タグを 外して つないだ 字
  *   ・zip（PK で 始まる 物。拡張子では 選ばない）は 全部 ほどく。中の zip も（3段まで・越えたら 赤）
  *   ・PNG の 字の 塊（tEXt・zTXt・iTXt）／PDF の /Author と XMP の creator（「空か 見本」だけ 通す）
+ *   ・PDF は 流れを ほどき 字の 塊を つないで 当てる。★字を 引けない 書体（CID・ToUnicode・Type3・Differences）・
+ *     字の 中の 絵・名前の # 逃がし が あれば その PDF は 未測定★（読み解かず 止める 方に 倒す）
  *   ・字の 読み分け：BOM → UTF-8 → NUL を 含む 物は UTF-16（LE・BE）でも → 読めない 物は 壊れた 字を 飛ばして 読む
  *   ・揃え方：&#..; → NFKC → 幅の 無い 字・異体字の 印・向きの 印を 消す → ハイフンの 仲間と「ー」を - に
  *       日本語の 語 … 空白を 全部 消し、カタカナを ひらがなに 揃えて 含むか
@@ -25,7 +27,7 @@
  *   ・作者・会社・利用者の 欄（creator・lastModifiedBy・author・Company・Manager・userName・userId・
  *     displayName・initials・cmAuthor/userInfo/fileSharing の name・absPath の url・custom.xml の 値）は「空か 見本」だけ
  *   ・ほどけない／鍵の かかった zip・読めない 追跡物・submodule・LFS の 指し札・作者の 欄が 読めない core.xml は 赤
- *   ・★見られない 物（絵・EXIF 等）は「未測定」＝赤★。通すのは tests/kinshi-ji-shiro.txt に「道<TAB>種類（未測定 か 当たりN）<TAB>訳」で 名指しした 道だけ
+ *   ・★見られない 物（絵・EXIF 等）は「未測定」＝赤★。通すのは tests/kinshi-ji-shiro.txt に「道<TAB>種類（未測定N か 当たりN）<TAB>中身の sha256 頭16字<TAB>訳」で 名指しした 道だけ（中身・件数が 変われば 赤）
  * 見ない所（★未測定★）:
  *   ・絵（PNG・JPEG 等）の 画素の 中の 字・PDF の 中の 絵（＝未測定＝赤。目で 見て 白名簿に 名指しする）
  *   ・base64・\uXXXX・%XX（%20 以外）・字の つなぎ（'名'+'前'）・絵の 中の 字
@@ -430,78 +432,20 @@ export function pdfStreams(buf) {
   return { streams, problems, errors, images };
 }
 
-/* ToUnicode の 表（bfchar・bfrange）＝字形の 番号 → 字 */
-export function cmapOf(text) {
-  const map = new Map();
-  const h2s = (h) => utf16be(Buffer.from(h, "hex"));
-  for (const blk of text.matchAll(/beginbfchar([\s\S]*?)endbfchar/g))
-    for (const x of blk[1].matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g))
-      map.set(x[1].toLowerCase(), h2s(x[2]));
-  for (const blk of text.matchAll(/beginbfrange([\s\S]*?)endbfrange/g))
-    for (const x of blk[1].matchAll(
-      /<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(?:<([0-9A-Fa-f]+)>|\[([^\]]*)\])/g
-    )) {
-      const lo = parseInt(x[1], 16);
-      const hi = parseInt(x[2], 16);
-      if (!(hi >= lo) || hi - lo > 65535) continue;
-      const arr = x[4] ? [...x[4].matchAll(/<([0-9A-Fa-f]+)>/g)].map((y) => y[1]) : null;
-      for (let k = 0; k <= hi - lo; k++) {
-        const key = (lo + k).toString(16).padStart(x[1].length, "0");
-        if (arr) {
-          if (arr[k]) map.set(key, h2s(arr[k]));
-        } else if (x[3] && x[3].length >= 4) {
-          const b = Buffer.from(x[3], "hex");
-          b.writeUInt16BE((b.readUInt16BE(b.length - 2) + k) & 0xffff, b.length - 2);
-          map.set(key, utf16be(b));
-        }
-      }
-    }
-  return map;
-}
-/* 書体ごとの 表を 1つに まとめる。同じ 番号が 違う 字を 指したら ぶつかり（＝どの 字か 決められない） */
-export function mergeCmaps(datas) {
-  const map = new Map();
-  let conflict = false;
-  for (const d of datas) {
-    const lt = d.toString("latin1");
-    if (!lt.includes("begincmap")) continue;
-    for (const [k, v] of cmapOf(lt)) {
-      if (map.has(k) && map.get(k) !== v) conflict = true;
-      map.set(k, v);
-    }
-  }
-  return { map, conflict };
-}
-
-/* 文字を 書く 所（BT … ET）の 字の 塊を、表で 引いて つなぐ。
-   CID の 書体（Type0・Identity-H 等）で 表に 無い 番号は missing に 数える（黙って 緑に しない） */
-export function shownTexts(text, map, cid) {
-  const widths = [...new Set([...map.keys()].map((k) => k.length))].sort((a, b) => b - a);
-  const pieces = [];
-  let missing = 0;
-  for (const seg of text.match(/\bBT\b[\s\S]*?\bET\b/g) || []) {
-    for (const x of seg.matchAll(STR_TOKEN)) {
-      const hex = tokBytes(x).toString("hex");
-      let out = "";
-      let i = 0;
-      while (i < hex.length) {
-        const w = widths.find((wd) => map.has(hex.slice(i, i + wd)));
-        if (w) {
-          out += map.get(hex.slice(i, i + w));
-          i += w;
-        } else if (cid) {
-          missing++;
-          i += 4;
-        } else {
-          out += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16));
-          i += 2;
-        }
-      }
-      if (out) pieces.push(out);
-    }
-  }
-  return { texts: [pieces.join(""), pieces.join("\n")], missing };
-}
+/* ★PDF は「確かに 読める 形」だけ 読む★。字を 引けない 形が 1つでも あれば その PDF は 未測定。
+   （字形の 表を 読み解く 道は 穴が 尽きない＝7回 叩いて 毎回 新しい 抜けが 出た。読まずに 止める 方に 倒す） */
+const PDF_HARD = [
+  [
+    /\/Type0\b|\/CIDFont|Identity-[HV]|-UCS2-|-RKSJ-|\/Encoding\s*\/[\w-]+-[HV]\b/,
+    "日本語などの 書体（CID）",
+  ],
+  [/\/ToUnicode\b/, "字形の 表（ToUnicode）で 字を 引く 書体"],
+  [/\/Type3\b/, "Type3 の 書体"],
+  [/\/Differences\b/, "字の 割り当てを 変えた 書体（Differences）"],
+  [/\/[A-Za-z0-9.+-]*#[0-9A-Fa-f]{2}/, "名前の # 逃がし"],
+  [/(^|[\s>\]])BI[\s/][\s\S]*?[\s]ID[\s]/, "字の 流れの 中の 絵（BI）"],
+];
+const PDF_FONTFILE = /\/Length[123]\b|\/Subtype\s*\/(Type1C|CIDFontType0C|OpenType)\b/;
 
 /* xlsx の 印刷の 設定（DEVMODE）＝大きさが 合えば 形として 読めた（装置名は UTF-16LE で 当てる） */
 function isDevmode(label, buf) {
@@ -660,30 +604,31 @@ export function scan({ root, files, words }) {
       pdf.streams
         .filter(isEmb)
         .forEach((st, k) => scanBlob(label + "(添付 " + (k + 1) + ")", st.data, depth + 1));
-      const body = pdf.streams.filter((st) => !isEmb(st)).map((st) => st.data);
-      for (const b of [buf, ...body])
+      const body = pdf.streams.filter((st) => !isEmb(st));
+      /* 流れの 外（辞書・字の 欄）と、書体の 中身で ない 流れ を「字を 引けない 形が 無いか」の 判じに 使う */
+      const outside = buf
+        .toString("latin1")
+        .replace(/stream[ \t]*(?:\r\n|\r|\n)[\s\S]*?endstream/g, "stream endstream");
+      const judged = [
+        outside,
+        ...body.filter((st) => !PDF_FONTFILE.test(st.dict)).map((st) => st.data.toString("latin1")),
+      ];
+      for (const [re, why] of PDF_HARD)
+        if (judged.some((x) => re.test(x)))
+          notes.push(label + ": PDF の " + why + "＝字を 引けない（未測定）");
+      for (const b of [buf, ...body.map((st) => st.data)])
         for (const [kind, v] of pdfAuthors(b)) {
           c.pdfAuthors++;
           checkName(label, kind, v);
         }
-      const { map, conflict } = mergeCmaps(body);
-      if (conflict)
-        notes.push(label + ": PDF の 書体の 表が ぶつかる（どの 字か 決められない＝未測定）");
-      const lts = [buf.toString("latin1"), ...body.map((b) => b.toString("latin1"))];
-      const cid = lts.some((x) =>
-        /\/Type0\b|Identity-[HV]|\/CIDFontType|-UCS2-|-RKSJ-|\/Encoding\s*\/[\w-]+-[HV]\b/.test(x)
-      );
-      let missing = 0;
-      for (const lt of lts) {
-        const sh = shownTexts(lt, map, cid);
-        missing += sh.missing;
-        for (const t of sh.texts) scanText(label + "(PDF の 字)", t);
-        for (const t of pdfStrings(lt)) scanText(label + "(PDF の 字の 欄)", t);
-      }
-      if (missing) notes.push(label + ": PDF の 字形 " + missing + " 個を 表で 引けない（未測定）");
-      for (const b of body) {
+      /* 字の 塊は 全部の 流れを 順に つないで 読む（BT と ET が 別の 流れでも・塊が 分かれても 拾う） */
+      const lts = [outside, ...body.map((st) => st.data.toString("latin1"))];
+      const strs = lts.flatMap((lt) => pdfStrings(lt));
+      for (const t of strs) scanText(label + "(PDF の 字)", t);
+      scanText(label + "(PDF の 字を つないだ 物)", strs.join(""));
+      for (const st of body) {
         c.pdfStreams++;
-        for (const t of readTexts(b).texts) scanText(label + "(PDF の 流れ)", t);
+        for (const t of readTexts(st.data).texts) scanText(label + "(PDF の 流れ)", t);
       }
       for (const t of readTexts(buf).texts) scanText(label, t);
       return;
@@ -725,20 +670,43 @@ export function scan({ root, files, words }) {
     if (!ent) return;
     ent.used = true;
     const lab = named(rel, "(追跡物の " + (idx + 1) + " 本目)");
-    if (ent.kind === "未測定") {
-      const n = notes.length - before[1];
-      if (!n) return reds.push("白名簿: " + lab + " に 未測定が 無い＝要らなくなった");
-      notes.splice(before[1]);
-      passed.push({ label: lab, kind: ent.kind, n });
-    } else {
-      const n = hits.length - before[0];
-      if (n !== ent.count)
-        return reds.push(
-          "白名簿: " + lab + " の 当たりの 数が 違う（名指し " + ent.count + "・今 " + n + "）"
-        );
-      hits.splice(before[0]);
-      passed.push({ label: lab, kind: ent.kind, n });
+    let sha = "";
+    try {
+      sha = crypto
+        .createHash("sha256")
+        .update(fs.readFileSync(path.join(root, rel)))
+        .digest("hex")
+        .slice(0, 16);
+    } catch {
+      sha = "";
     }
+    if (sha !== ent.sha)
+      return reds.push(
+        "白名簿: " +
+          lab +
+          " の 中身が 変わった（名指し " +
+          ent.sha +
+          "・今 " +
+          (sha || "読めない") +
+          "＝目で 見直して 名指しし直す）"
+      );
+    const isNote = ent.kind === "未測定";
+    const n = isNote ? notes.length - before[1] : hits.length - before[0];
+    if (n !== ent.count)
+      return reds.push(
+        "白名簿: " +
+          lab +
+          " の " +
+          ent.kind +
+          "の 数が 違う（名指し " +
+          ent.count +
+          "・今 " +
+          n +
+          "）"
+      );
+    if (isNote) notes.splice(before[1]);
+    else hits.splice(before[0]);
+    passed.push({ label: lab, kind: ent.kind, n });
   });
   for (const e of shiro.errors) reds.push("白名簿: " + e);
   for (const [rel, ent] of shiro.map)
@@ -771,9 +739,10 @@ export function scan({ root, files, words }) {
   }
 }
 
-/* ---------- 白名簿（tests/kinshi-ji-shiro.txt）＝「道<TAB>種類<TAB>訳」 ----------
-   種類＝「未測定」（その 道の 未測定だけ 通す）か「当たりN」（その 道の 当たりを ちょうど N 件 だけ 通す・増えたら 赤）。
-   ★白名簿 自身の 道・訳に 一覧の 字・同じ 道の 2行・知らない 種類 は 赤★。訳は 出しに 書かない。 */
+/* ---------- 白名簿（tests/kinshi-ji-shiro.txt）＝「道<TAB>種類<TAB>中身の sha256 頭16字<TAB>訳」 ----------
+   種類＝「未測定N」（その 道の 未測定が ちょうど N 件 なら 通す）か「当たりN」（当たりが ちょうど N 件 なら 通す）。
+   ★中身（sha256）が 変われば 赤＝目で 見直して 名指しし直す★。件数が 違っても 赤（0件は 書けない＝要らない 名指し）。
+   白名簿 自身の 道・行に 一覧の 字・同じ 道の 2行・知らない 種類・形違い は 赤。訳は 出しに 書かない。 */
 export const SHIRO_PATH = "tests/kinshi-ji-shiro.txt";
 export function loadShiro(root, words = []) {
   const map = new Map();
@@ -787,14 +756,15 @@ export function loadShiro(root, words = []) {
       const at = i + 1 + " 行目";
       if (matchIdx(line, words).length)
         return errors.push(at + " に 一覧の 字が ある（字は 出さない）");
-      const [rel, kind, why] = line.split("\t").map((x) => (x || "").trim());
-      if (!rel || !kind || !why) return errors.push(at + " の 形が 違う（道<TAB>種類<TAB>訳）");
+      const [rel, kind, sha, why] = line.split("\t").map((x) => (x || "").trim());
+      if (!rel || !kind || !sha || !why)
+        return errors.push(at + " の 形が 違う（道<TAB>種類<TAB>sha256 頭16字<TAB>訳）");
       if (rel === SHIRO_PATH) return errors.push(at + " で 白名簿 自身を 名指ししている");
       if (map.has(rel)) return errors.push(at + " で 同じ 道を 2回 名指ししている");
-      const hm = kind.match(/^当たり(\d+)$/);
-      if (kind !== "未測定" && !hm)
-        return errors.push(at + " の 種類が 知らない 形（未測定 か 当たりN）");
-      map.set(rel, { kind, count: hm ? Number(hm[1]) : 0, used: false });
+      const km = kind.match(/^(未測定|当たり)([1-9]\d*)$/);
+      if (!km) return errors.push(at + " の 種類が 知らない 形（未測定N か 当たりN・N は 1 以上）");
+      if (!/^[0-9a-f]{16}$/.test(sha)) return errors.push(at + " の sha256 が 16字の 形で ない");
+      map.set(rel, { kind: km[1], count: Number(km[2]), sha, used: false });
     });
   return { map, errors };
 }
@@ -1364,89 +1334,89 @@ function selfTest() {
     const j = go([put("q.jpg", Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), junk]))]);
     must(j.code === 1 && j.r.notes.some((n) => n.includes("JPEG")), "JPEG の 未測定が 緑");
   });
-  T("白名簿：未測定／当たりN だけ 通す・自分の 名指し・訳の 字・2行・数違い・無い 道は 赤", () => {
-    const sf = path.join(tmp, SHIRO_PATH);
-    fs.mkdirSync(path.dirname(sf), { recursive: true });
-    const jpg = put("w.jpg", Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x80, 0x81, 0x00]));
-    const txt = put("w.txt", "見本台ためし語\n");
-    const clean = put("w2.txt", "ふつう\n");
-    const w = (body) => fs.writeFileSync(sf, body);
-    const reds = (x) => x.r.reds.join("\n");
-    try {
-      w(jpg + "\t未測定\t絵だけ\n" + txt + "\t当たり1\t法律で 載せる 表示\n");
-      const ok = go([jpg, txt, clean]);
-      must(
-        ok.code === 0 && ok.lines.filter((l) => l.includes("白名簿で 通した")).length === 2,
-        "名指しで 通らない"
-      );
-      must(
-        !ok.lines.join("\n").includes("法律") && !ok.lines.join("\n").includes("ためし"),
-        "訳か 字が 出た"
-      );
-      w(jpg + "\t当たり0\t絵\n");
-      must(go([jpg]).code === 1, "未測定を 当たりの 名指しで 通した");
-      w(txt + "\t未測定\t字\n");
-      must(go([txt]).code === 1, "当たりを 未測定の 名指しで 通した");
-      fs.appendFileSync(path.join(tmp, txt), "見本台ためし語 もう1つ\n");
-      w(txt + "\t当たり1\t字\n");
-      must(reds(go([txt])).includes("当たりの 数が 違う"), "当たりが 増えても 緑");
-      w(jpg + "\t未測定\n");
-      must(reds(go([jpg])).includes("形が 違う"), "訳の 無い 行が 赤に ならない");
-      w(clean + "\t未測定\t要らない\n");
-      must(reds(go([clean])).includes("要らなくなった"), "通す 物が 無い 白名簿で 緑");
-      w("nai/nai.jpg\t未測定\t無い\n");
-      must(reds(go([clean])).includes("追跡物に 無い"), "無い 道の 白名簿で 緑");
-      w(SHIRO_PATH + "\t当たり1\t自分\n");
-      must(reds(go([clean])).includes("自身を 名指し"), "自分の 名指しで 緑");
-      w(jpg + "\t未測定\t見本台ためし語 の 訳\n");
-      const lk = go([jpg]);
-      must(
-        reds(lk).includes("一覧の 字が ある") && !lk.lines.join("\n").includes("ためし"),
-        "訳の 字で 緑 か 出た"
-      );
-      w(jpg + "\t未測定\tA\n" + jpg + "\t未測定\tB\n");
-      must(reds(go([jpg])).includes("2回"), "同じ 道の 2行で 緑");
-      w(jpg + "\t何か\tA\n");
-      must(reds(go([jpg])).includes("知らない 形"), "知らない 種類で 緑");
-    } finally {
-      fs.rmSync(sf, { force: true });
-    }
-  });
   T(
-    "PDF：縮めた 流れ・表で 引いた 字（bfrange・bfchar）・8進・流れの 中の /Title・/Author・添付・ASCIIHex",
+    "白名簿：中身の sha と 件数で 通す・差し替え・件数違い・自分の 名指し・行の 字・2行・無い 道は 赤",
+    () => {
+      const sf = path.join(tmp, SHIRO_PATH);
+      fs.mkdirSync(path.dirname(sf), { recursive: true });
+      const jpg = put("w.jpg", Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x80, 0x81, 0x00]));
+      const txt = put("w.txt", "見本台ためし語\n");
+      const clean = put("w2.txt", "ふつう\n");
+      const sh = (rel) =>
+        crypto
+          .createHash("sha256")
+          .update(fs.readFileSync(path.join(tmp, rel)))
+          .digest("hex")
+          .slice(0, 16);
+      const w = (body) => fs.writeFileSync(sf, body);
+      const reds = (x) => x.r.reds.join("\n");
+      const L = (rel, kind, why = "訳") => rel + "\t" + kind + "\t" + sh(rel) + "\t" + why + "\n";
+      try {
+        w(L(jpg, "未測定1", "絵だけ") + L(txt, "当たり1", "法律で 載せる 表示"));
+        const ok = go([jpg, txt, clean]);
+        must(
+          ok.code === 0 && ok.lines.filter((l) => l.includes("白名簿で 通した")).length === 2,
+          "名指しで 通らない: " + ok.lines.join(" / ")
+        );
+        must(
+          !ok.lines.join("\n").includes("法律") && !ok.lines.join("\n").includes("ためし"),
+          "訳か 字が 出た"
+        );
+        w(L(jpg, "当たり1"));
+        must(go([jpg]).code === 1, "未測定を 当たりの 名指しで 通した");
+        w(L(txt, "未測定1"));
+        must(go([txt]).code === 1, "当たりを 未測定の 名指しで 通した");
+        w(L(jpg, "未測定2"));
+        must(reds(go([jpg])).includes("数が 違う"), "件数違いで 緑");
+        w(L(jpg, "未測定1"));
+        fs.writeFileSync(
+          path.join(tmp, jpg),
+          Buffer.from([0xff, 0xd8, 0xff, 0xe1, 0x80, 0x81, 0x00])
+        );
+        must(reds(go([jpg])).includes("中身が 変わった"), "差し替えた 絵が 緑");
+        w(L(clean, "未測定0"));
+        must(reds(go([clean])).includes("知らない 形"), "0件の 名指しが 通った");
+        w(jpg + "\t未測定1\t" + sh(jpg) + "\n");
+        must(reds(go([jpg])).includes("形が 違う"), "訳の 無い 行が 赤に ならない");
+        w("nai/nai.jpg\t未測定1\t0123456789abcdef\t無い\n");
+        must(reds(go([clean])).includes("追跡物に 無い"), "無い 道の 白名簿で 緑");
+        w(SHIRO_PATH + "\t当たり1\t0123456789abcdef\t自分\n");
+        must(reds(go([clean])).includes("自身を 名指し"), "自分の 名指しで 緑");
+        w(L(jpg, "未測定1", "見本台ためし語 の 訳"));
+        const lk = go([jpg]);
+        must(
+          reds(lk).includes("一覧の 字が ある") && !lk.lines.join("\n").includes("ためし"),
+          "行の 字で 緑 か 出た"
+        );
+        w(L(jpg, "未測定1", "A") + L(jpg, "未測定1", "B"));
+        must(reds(go([jpg])).includes("2回"), "同じ 道の 2行で 緑");
+        w(jpg + "\t未測定1\txyz\t訳\n");
+        must(reds(go([jpg])).includes("16字"), "sha の 形違いで 緑");
+      } finally {
+        fs.rmSync(sf, { force: true });
+      }
+    }
+  );
+  T(
+    "PDF：縮めた 流れ・8進・流れの 中の /Title・/Author・添付・ASCIIHex・流れを またいだ 字",
     () => {
       const fl = (s2) => zlib.deflateSync(Buffer.from(s2, "latin1"));
       const hit = (nm, objs) => go([put(nm, makePdf(objs))]).r.hits.length >= 1;
       must(hit("s1.pdf", [["/Filter /FlateDecode", fl("BT (Zorgox) Tj ET")]]), "縮めた 流れ");
-      /* 作り物の 語の UTF-16BE を 字形 1〜7 番に 割り当てた 表 */
-      const rng = "<0001> <0007> [<898B> <672C> <53F0> <305F> <3081> <3057> <8A9E>]";
-      const content = "BT /F1 12 Tf [<00010002> 5 <0003000400050006>] TJ <0007> Tj ET";
-      must(
-        hit("s2.pdf", [
-          [
-            "/Filter /FlateDecode",
-            fl("begincmap\n1 beginbfrange\n" + rng + "\nendbfrange\nendcmap"),
-          ],
-          ["/Filter /FlateDecode", fl("/Type0 /Encoding /Identity-H\n" + content)],
-        ]),
-        "bfrange で 引いた 字"
-      );
-      const chars = ["898B", "672C", "53F0", "305F", "3081", "3057", "8A9E"]
-        .map((h, i) => "<000" + (i + 1) + "> <" + h + ">")
-        .join("\n");
-      must(
-        hit("s2b.pdf", [
-          [
-            "/Filter /FlateDecode",
-            fl("begincmap\n7 beginbfchar\n" + chars + "\nendbfchar\nendcmap"),
-          ],
-          ["/Filter /FlateDecode", fl("/Type0 /Encoding /Identity-H\n" + content)],
-        ]),
-        "bfchar で 引いた 字"
-      );
       must(
         hit("s6.pdf", [["/Filter /FlateDecode", fl("BT (\\132\\157rgox) Tj ET")]]),
         "8進の 逃がし"
+      );
+      must(
+        hit("s11.pdf", [
+          ["/Filter /FlateDecode", fl("BT (Zor) Tj")],
+          ["/Filter /FlateDecode", fl("(gox) Tj ET")],
+        ]),
+        "流れを またいだ 字"
+      );
+      must(
+        hit("s12.pdf", [["/Filter /FlateDecode", fl("BT (\\001ET\\001) Tj (Zorgox) Tj ET")]]),
+        "塊の 中の ET の 後ろ"
       );
       const t16 = "FEFF" + Buffer.from("見本台ためし語", "utf16le").swap16().toString("hex");
       must(
@@ -1472,37 +1442,37 @@ function selfTest() {
         "ASCIIHex"
       );
       must(
-        go([put("s5.pdf", makePdf([["/Filter /FlateDecode", fl("BT (ok) Tj ET")]]))]).code === 0,
+        go([put("s5.pdf", makePdf([["/Filter /FlateDecode", fl("BT /F1 12 Tf (ok) Tj ET")]]))])
+          .code === 0,
         "きれいな PDF が 赤"
       );
     }
   );
   T(
-    "PDF：読めない 所は 未測定（表に 無い 字形・表の ぶつかり・絵・数違い・間接の 縮め方・鍵）・壊れは 赤",
+    "PDF：字を 引けない 形は 未測定（CID・ToUnicode・Type3・Differences・# 逃がし・BI の 絵・絵・数違い・間接・鍵）・壊れは 赤",
     () => {
       const fl = (s2) => zlib.deflateSync(Buffer.from(s2, "latin1"));
       const note = (nm, objs, why) => {
         const x = go([put(nm, Buffer.isBuffer(objs) ? objs : makePdf(objs))]);
         must(x.code === 1 && x.r.notes.length >= 1, why + " を 黙っている");
       };
+      note("u1.pdf", [["/Type /Font /Subtype /Type0 /Encoding /Identity-H", ""]], "CID の 書体");
       note(
-        "u1.pdf",
-        [["/Filter /FlateDecode", fl("/Type0 /Encoding /Identity-H\nBT <00010002> Tj ET")]],
-        "表の 無い CID"
+        "u1b.pdf",
+        [["/Filter /FlateDecode", fl("<< /Subtype /Type#30 /Encoding /Identity#2DH >>")]],
+        "# 逃がしの 名前"
+      );
+      note("u2.pdf", [["/Type /Font /ToUnicode 5 0 R", ""]], "ToUnicode の 書体");
+      note("u2b.pdf", [["/Type /Font /Subtype /Type3", ""]], "Type3 の 書体");
+      note(
+        "u2c.pdf",
+        [["/Type /Font /Encoding << /Differences [1 /uni898B] >>", ""]],
+        "Differences の 書体"
       );
       note(
-        "u2.pdf",
-        [
-          [
-            "/Filter /FlateDecode",
-            fl("begincmap\n1 beginbfchar\n<0001> <0041>\nendbfchar\nendcmap"),
-          ],
-          [
-            "/Filter /FlateDecode",
-            fl("begincmap\n1 beginbfchar\n<0001> <0042>\nendbfchar\nendcmap"),
-          ],
-        ],
-        "表の ぶつかり"
+        "u2d.pdf",
+        [["/Filter /FlateDecode", fl("q BI /W 1 /H 1 ID xxx EI Q")]],
+        "字の 流れの 中の 絵"
       );
       note("u3.pdf", [["/Filter /DCTDecode", Buffer.from([0xff, 0xd8, 0xff])]], "中の 絵（DCT）");
       note("u4.pdf", [["/Subtype /Image /Filter /FlateDecode", fl("xx")]], "中の 絵（Flate）");
@@ -1524,6 +1494,19 @@ function selfTest() {
         go([put("u8.pdf", makePdf([["/Filter /FlateDecode", Buffer.from("not deflate")]]))]).r.reds
           .length >= 1,
         "壊れた 流れが 緑"
+      );
+      /* 書体の 中身（FontFile）の バイトに たまたま BI…ID が あっても 未測定に しない */
+      must(
+        go([
+          put(
+            "u9.pdf",
+            makePdf([
+              ["/Length1 9", "x BI y ID z"],
+              ["/Filter /FlateDecode", fl("BT (ok) Tj ET")],
+            ])
+          ),
+        ]).code === 0,
+        "書体の 中身で 未測定に した"
       );
     }
   );
