@@ -372,15 +372,15 @@ export function pdfTokens(lt) {
   return out;
 }
 /* ( で 始まる 字の 塊が 閉じるか（入れ子と 逃がしを 数える） */
-function literalCloses(rest) {
+function literalEnd(rest) {
   let depth = 0;
   for (let j = 0; j < rest.length; j++) {
     const c2 = rest[j];
     if (c2 === "\\") j++;
     else if (c2 === "(") depth++;
-    else if (c2 === ")" && --depth === 0) return true;
+    else if (c2 === ")" && --depth === 0) return j;
   }
-  return false;
+  return -1;
 }
 function bytesText(b) {
   if (b[0] === 0xfe && b[1] === 0xff) return utf16be(b.slice(2));
@@ -409,13 +409,15 @@ export function pdfAuthors(buf) {
   const t = buf.toString("latin1");
   const out = [];
   for (const m of t.matchAll(/\/Author\b/g)) {
-    const rest = t.slice(m.index + 7, m.index + 7 + 65536).replace(/^\s+/, "");
+    /* 値の 前の 空白と 覚書（%…行末）を 飛ばす */
+    const rest = t.slice(m.index + 7).replace(/^(?:\s|%[^\r\n]*(?:\r\n|\r|\n|$))+/, "");
     if (rest[0] !== "(" && rest[0] !== "<") continue;
-    if (rest[0] === "(" && !literalCloses(rest)) {
-      out.push(["PDF /Author（閉じない 括弧）", "\u0000"]);
+    const end = rest[0] === "(" ? literalEnd(rest) : rest.indexOf(">");
+    if (end < 0) {
+      out.push(["PDF /Author（閉じない 塊）", "\u0000"]);
       continue;
     }
-    const b = pdfTokens(rest)[0];
+    const b = pdfTokens(rest.slice(0, end + 1))[0];
     if (b) out.push(["PDF /Author", bytesText(b)]);
   }
   const u = new TextDecoder("utf-8").decode(buf);
@@ -719,7 +721,7 @@ export function scan({ root, files, words }) {
       const lts = [outside, ...body.map((st) => st.data.toString("latin1"))];
       const sets = lts.map((lt) => pdfStringSets(lt));
       const need = Math.max(...words.map((w) => w.key.length)) + 1;
-      const size = (x) => normJa(x).replace(/[._+/-]/g, "").length;
+      const size = (x) => normJa(x).replace(/[._+/\u30fb-]/g, "").length;
       for (const way of [0, 1]) {
         /* 読み方ごとに、全部の 流れを 順に つなぐ（BT と ET が 別の 流れでも 拾う） */
         const strs = sets.flatMap((st) => st[way]);
@@ -733,10 +735,17 @@ export function scan({ root, files, words }) {
         }
         /* 前の 塊が 英数字で 終わると、つないだ 字では 英字の 語の 境目が 外れる＝塊の 頭から
            揃えた 字の 数が 一番 長い 語＋1 字に 届くまで つないだ 窓でも 当てる */
-        for (let i = 0; i < strs.length; i++) {
-          let acc = strs[i];
-          for (let k = i + 1; k < strs.length && size(acc) < need; k++) {
-            acc += strs[k];
+        /* 区切りだけの 塊（空白・点 等）が 続いたら 1つに まとめる＝数が 増えない 塊で 窓が 伸び続けない */
+        const merged = [];
+        for (const t of strs) {
+          if (merged.length && size(t) === 0 && size(merged[merged.length - 1]) === 0)
+            merged[merged.length - 1] += t;
+          else merged.push(t);
+        }
+        for (let i = 0; i < merged.length; i++) {
+          let acc = merged[i];
+          for (let k = i + 1; k < merged.length && k <= i + 64 && size(acc) < need; k++) {
+            acc += merged[k];
             for (const w of matchIdx(acc, words))
               hit(label + "(PDF の 字を つないだ 物): 一覧の " + (w + 1) + " 番目");
           }
@@ -1641,6 +1650,44 @@ function selfTest() {
       must(
         many.r.notes.some((n2) => n2.includes("多すぎて")),
         "塊が 多すぎる PDF を 黙っている"
+      );
+      /* 区切りだけの 塊が 長く 続いても 固まらず、前後の 語を つなぐ */
+      for (const [nm, piece] of [
+        ["k1", "( ) Tj "],
+        ["k2", "(.) Tj "],
+      ]) {
+        const t0 = Date.now();
+        const x = go([
+          put(
+            nm + ".pdf",
+            makePdf([
+              [
+                "/Filter /FlateDecode",
+                fl("BT (No1) Tj (Fakeco) Tj " + piece.repeat(2000) + "(Lounge) Tj ET"),
+              ],
+            ])
+          ),
+        ]);
+        must(x.r.hits.length >= 1, "区切りの 塊 2000 個を 挟んだ 語（" + nm + "）");
+        must(Date.now() - t0 < 5000, "区切りの 塊 2000 個で 重すぎる（" + nm + "）");
+      }
+      /* ・ は 標準 14 書体では 書けない＝UTF-16 の 16進の 塊で 置く */
+      const dots = "<FEFF" + "30FB".repeat(12) + "> Tj ";
+      must(
+        hit("k3.pdf", [
+          ["/Filter /FlateDecode", fl("BT (No1) Tj (Fakeco) Tj " + dots + "(Lounge) Tj ET")],
+        ]),
+        "・ の 区切り"
+      );
+      /* 閉じない 16進の /Author（64K を 越える）・値の 前の 覚書 */
+      must(
+        go([put("k4.pdf", "%PDF-1.4\n1 0 obj\n<< /Author <" + "41".repeat(33000) + "\nendobj\n")])
+          .code === 1,
+        "閉じない 長い 16進の /Author が 緑"
+      );
+      must(
+        go([put("k5.pdf", "%PDF-1.4\n1 0 obj\n<< /Author % note\n(他人) >>\nendobj\n")]).code === 1,
+        "覚書の 後の /Author を 見ていない"
       );
       must(
         go([put("s5.pdf", makePdf([["/Filter /FlateDecode", fl("BT /F1 12 Tf (ok) Tj ET")]]))])
