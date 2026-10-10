@@ -573,6 +573,7 @@ export const BIFF12_PERSON = new Map([
   [0x278, "xlsb の コメントの 作者"],
   [0x224, "xlsb の ファイル共有の 名前"],
   [0x817, "xlsb の 保存した 場所の 道（absPath）"],
+  [0x18d, "xlsb の 個人用ビューの 名前"],
 ]);
 /* BIFF12 で 読めた 扱いに する 部品（人の 欄を 持たない か、人の 記録を 上で 見る 物）。他の .bin は 未測定 */
 const BIFF12_READ =
@@ -581,7 +582,7 @@ export function wideStrings(data) {
   const out = [];
   for (let o = 0; o + 4 <= data.length; o++) {
     const n = data.readUInt32LE(o);
-    if (n > 0 && n <= 255 && o + 4 + 2 * n <= data.length)
+    if (n > 0 && n <= 32767 && o + 4 + 2 * n <= data.length)
       out.push(data.slice(o + 4, o + 4 + 2 * n).toString("utf16le"));
   }
   return out;
@@ -606,15 +607,19 @@ function xmlText(b) {
 /* Excel の 表の 部品の displayName は 表の 名前（人で ない）＝この 1つだけ 作者の 欄から 外す */
 const TABLE_PART = /(^|\/)xl\/tables\/[^/]+\.xml$/i;
 const NAME_TAGS =
-  /<(?:[\w-]+:)?(creator|lastModifiedBy|Company|Manager|initial-creator|author)\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:[\w-]+:)?\1>)/gi;
+  /<(?:[\w.-]+:)?(creator|lastModifiedBy|Company|Manager|initial-creator|author)\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?\1>)/gi;
 const NAME_ATTRS =
   /\s(?:[\w-]+:)?(author|displayName|initials|userName|userId|refreshedBy)\s*=\s*(["'])([\s\S]*?)\2/gi;
 const NAME_ELEM_ATTR =
-  /<(?:[\w-]+:)?(cmAuthor|userInfo|fileSharing|absPath)\b[^>]*?\s(name|url)\s*=\s*(["'])([\s\S]*?)\3/gi;
+  /<(?:[\w.-]+:)?(cmAuthor|userInfo|fileSharing|absPath|customWorkbookView)\b[^>]*?\s(name|url)\s*=\s*(["'])([\s\S]*?)\3/gi;
 const CUSTOM_VAL = /<vt:(?:lpwstr|lpstr|bstr)>([\s\S]*?)<\/vt:(?:lpwstr|lpstr|bstr)>/g;
 export function nameFields(partName, xml) {
   const out = [];
-  for (const m of xml.matchAll(NAME_TAGS)) out.push([m[1], (m[2] || "").replace(/<[^>]*>/g, "")]);
+  for (const m of xml.matchAll(NAME_TAGS))
+    out.push([
+      m[1],
+      (m[2] || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/<[^>]*>/g, ""),
+    ]);
   for (const m of xml.matchAll(NAME_ATTRS)) out.push([m[1], m[3]]);
   for (const m of xml.matchAll(NAME_ELEM_ATTR)) out.push([m[1] + "@" + m[2], m[4]]);
   if (/(^|\/)docProps\/custom\.xml$/i.test(partName))
@@ -704,6 +709,18 @@ export function scan({ root, files, words }) {
         const text = xmlText(part.data);
         if (/(^|\/)docProps\/core\.xml$/i.test(part.name) && !/coreProperties/.test(text))
           notes.push(pl + ": 作者の 欄の 部品を 読めない（未測定）");
+        if (/(^|\/)docProps\/(core|app)\.xml$/i.test(part.name)) {
+          const said = (
+            text.match(/<(?!\/)[^>!?]*?(creator|lastModifiedBy|Company|Manager)\b/gi) || []
+          ).length;
+          const got = nameFields(part.name, text).filter(([k]) =>
+            /^(creator|lastModifiedBy|Company|Manager)$/i.test(k)
+          ).length;
+          if (said > got)
+            notes.push(
+              pl + ": 作者の 欄を 読み損ねた（" + said + " 個 中 " + got + " 個＝未測定）"
+            );
+        }
         /* 表・集計表・つなぎの 部品の displayName は Excel の 表の 名前（人で ない）＝作者の 欄として 見ない。
            core.xml に 作者の 欄が 無いのは「空」と 同じ（空か 見本 だけ 通す 決まりの 中） */
         for (const [kind, v] of nameFields(part.name, text))
@@ -836,8 +853,13 @@ export function scan({ root, files, words }) {
       if (isBiff12(buf, recs) && BIFF12_READ.test(partName)) {
         for (const rc of recs)
           if (BIFF12_PERSON.has(rc.type)) {
-            const ws = wideStrings(rc.data).filter((x) => /[^\u0000-\u001f]/.test(x));
-            for (const v of ws.length ? ws : [""]) checkName(label, BIFF12_PERSON.get(rc.type), v);
+            /* 記録の 名前の 欄は その 記録で 一番 長い 字の 塊（固い 欄の 中の 字の 切れ端で 偽の 赤に しない） */
+            const ws = wideStrings(rc.data)
+              .filter((x) => /[^\u0000-\u001f]/.test(x))
+              .sort((a, b) => b.length - a.length);
+            if (ws.length) checkName(label, BIFF12_PERSON.get(rc.type), ws[0]);
+            else if (rc.data.length > 16)
+              notes.push(label + ": " + BIFF12_PERSON.get(rc.type) + " の 字を 読めない（未測定）");
           }
       } else if (!isDevmode(label, buf)) {
         c.unreadable++;
@@ -2227,6 +2249,67 @@ function selfTest() {
       must(
         go([put("up.xlsx", makeZip([["docProps/core.xml", upper]]))]).code === 1,
         "大文字の Creator が 緑"
+      );
+    }
+  );
+  T(
+    "作者の 欄の 読み損ね（接頭辞の 点・CDATA）・個人用ビュー（xlsx・xlsb）・255字を 越える 道",
+    () => {
+      const one = (nm, xml) => go([put(nm, makeZip([["docProps/core.xml", xml]]))]);
+      must(
+        one("dot.xlsx", "<cp:coreProperties><d.c:creator>他人</d.c:creator></cp:coreProperties>")
+          .code === 1,
+        "接頭辞に 点の 作者が 緑"
+      );
+      must(
+        one(
+          "cd.xlsx",
+          "<cp:coreProperties><dc:creator><![CDATA[他人]]></dc:creator></cp:coreProperties>"
+        ).code === 1,
+        "CDATA の 作者が 緑"
+      );
+      must(
+        one("odd.xlsx", "<cp:coreProperties><dc:creator>見本</dc:creatorX></cp:coreProperties>")
+          .code === 1,
+        "読み損ねた 作者の 欄が 緑"
+      );
+      must(
+        go([
+          put(
+            "cv.xlsx",
+            makeZip([
+              ["docProps/core.xml", core("見本")],
+              [
+                "xl/workbook.xml",
+                '<workbook><customWorkbookViews><customWorkbookView name="他人 - 個人用ビュー"/></customWorkbookViews></workbook>',
+              ],
+            ])
+          ),
+        ]).code === 1,
+        "xlsx の 個人用ビューが 緑"
+      );
+      const wrec = (t1, t2, head, txt) => {
+        const u = Buffer.from(txt, "utf16le");
+        const body = Buffer.concat([Buffer.alloc(head), Buffer.alloc(4), u]);
+        body.writeUInt32LE(txt.length, head);
+        const len = body.length;
+        const vl = len < 128 ? Buffer.from([len]) : Buffer.from([(len & 0x7f) | 0x80, len >> 7]);
+        return Buffer.concat([Buffer.from([t1, t2]), vl, body]);
+      };
+      const xb = (bin) =>
+        makeZip([
+          ["docProps/core.xml", core("見本")],
+          ["xl/workbook.bin", bin],
+        ]);
+      must(
+        go([put("uv.xlsb", xb(wrec(0x8d, 0x03, 30, "他人 - 個人用ビュー")))]).code === 1,
+        "xlsb の 個人用ビューが 緑"
+      );
+      const longPath =
+        "C:" + String.fromCharCode(92) + "x".repeat(300) + String.fromCharCode(92) + "tanin";
+      must(
+        go([put("lp.xlsb", xb(wrec(0x97, 0x10, 0, longPath)))]).code === 1,
+        "255字を 越える 保存場所の 道が 緑"
       );
     }
   );
