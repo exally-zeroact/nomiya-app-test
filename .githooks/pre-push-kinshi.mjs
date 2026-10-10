@@ -53,12 +53,16 @@ const gitBuf = (cwd, ...a) => execFileSync("git", ["-C", cwd, ...a], { maxBuffer
 /* ★押す 先の 遠く（hook の $1）に 今 在る 頭（ls-remote）の うち、手元に 在る 物★＝新しい 枝の 範囲の 下限。
    前の 形（--not --remotes）は 他の remote の 追跡枝・消された 枝の 古い 控えも「遠くに 在る」と 見て、
    新しい 枝の 字が 素通りした（10-11 アマかせ taiketsu 実測・remote 2 つの clone で「0 本」）。
-   遠くの 名が 無い・読めない は throw（止める 側）。 */
+   遠くの 名が 無い・読めない は throw（止める 側）。
+   ★読む 先は hook の $2（実際に 押す 道）★：$1 の 名で 読むと fetch 側の 道を 読む＝pushurl・道 2 本の remote で
+     押す 先と 取り違えて 偽の 緑（10-11 taiketsu 実測）。
+   ★枝と タグだけ 読み、手元に 取っていない 頭が 在れば「fetch してから」で 止める★（全履歴を 赤に して
+     作り直しへ 誘わない・10-11 taiketsu 実測＝古い 控えの clone で 128 件の 偽の 赤）。 */
 export function remoteKnown(cwd, remote) {
   if (!remote) throw new Error("押す 先の 遠くの 名が 無い（hook の $1）");
   let out;
   try {
-    out = gitText(cwd, "ls-remote", remote);
+    out = gitText(cwd, "ls-remote", "--heads", "--tags", remote);
   } catch {
     throw new Error("押す 先の 遠くの 頭を 読めない（ls-remote）");
   }
@@ -76,10 +80,37 @@ export function remoteKnown(cwd, remote) {
     encoding: "utf8",
     maxBuffer: 1 << 28,
   });
+  const missing = have.split("\n").filter((l) => / missing$/.test(l)).length;
+  if (missing)
+    throw new Error(
+      "押す 先の 遠くに、手元に 取っていない 頭が " +
+        missing +
+        " 本 在る＝git fetch してから 押す（commit は 作り直さない）"
+    );
   return have
     .split("\n")
     .filter((l) => / (commit|tag) /.test(l))
     .map((l) => l.split(" ")[0]);
+}
+/* 自己確認用：別の repo で 作った commit を 遠くの 枝に 置く（手元に 無い 頭） */
+function foreignHead(tmp, bare, ref) {
+  const x = fs.mkdtempSync(path.join(tmp, "x-"));
+  const gx = (...a) => execFileSync("git", ["-C", x, ...a], { stdio: "pipe" });
+  gx("init", "-q");
+  fs.writeFileSync(path.join(x, "f.txt"), "よそ\n");
+  gx("add", "-A");
+  gx(
+    "-c",
+    "user.name=x",
+    "-c",
+    "user.email=1+x@users.noreply.github.com",
+    "commit",
+    "-q",
+    "-m",
+    "f"
+  );
+  gx("push", "-q", bare, "HEAD:" + ref);
+  return () => gx("push", "-q", bare, ":" + ref);
 }
 
 /* 押す 行ごとに、まだ 遠くに 無い commit（古い 順） */
@@ -162,7 +193,7 @@ export const FINGER = ".githooks/kinshi-finger";
 /* hook の 中の 自己確認の 床＝★ci.yml の 床と 揃える★（自己確認を 0/0 に した 本体が 枝へ 緑で 出た＝10-11 taiketsu 実測） */
 export const FLOOR = {
   [BODY]: { groups: 29, checks: 239 },
-  [GATE]: { groups: 12, checks: 32 },
+  [GATE]: { groups: 13, checks: 34 },
 };
 export function selfOk(stdout, floor) {
   const m = /^自己確認: (\d+)\/(\d+)$/m.exec(stdout || "");
@@ -411,6 +442,16 @@ function selfTest() {
     g("fetch", "-q", "O");
     g("push", "-q", "O", ":refs/heads/old");
     must(nb(c4, "O").code === 1, "消された 枝の 古い 控えで 緑");
+    /* 遠くに 手元に 無い 頭が 在る＝全履歴を 見ず「fetch してから」で 止める */
+    const undo = foreignHead(tmp, O, "refs/heads/yoso");
+    const rf = nb(c1, "O");
+    undo();
+    must(
+      rf.code === 1 &&
+        rf.out.join(" ").includes("fetch してから") &&
+        !rf.out.some((l) => l.includes(c2.slice(0, 7))),
+      "取っていない 頭で fetch の 止めに ならない: " + rf.out.join(" / ")
+    );
   });
   T("白名簿は その commit の 物と blob の id で 通す", () => {
     const pic = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x80, 0x81, 0x00]);
@@ -598,6 +639,25 @@ function selfTest() {
     must(after <= before, "一時 dir が 残った（" + before + "→" + after + "）");
     g2("reset", "-q", "--hard", w1);
   });
+  T("本物の 門：新しい 枝は hook の $2（実際に 押す 道）を 読む（pushurl で 取り違えない）", () => {
+    const A = path.join(tmp, "A.git");
+    const B = path.join(tmp, "B.git");
+    execFileSync("git", ["init", "-q", "--bare", A], { stdio: "pipe" });
+    execFileSync("git", ["init", "-q", "--bare", B], { stdio: "pipe" });
+    g2("push", "-q", A, w1 + ":refs/heads/main");
+    g2("remote", "add", "r", A);
+    g2("remote", "set-url", "--push", "r", B);
+    const s = spawnSync(process.execPath, [path.join(r2, GATE), "r", B], {
+      cwd: r2,
+      env: env2,
+      encoding: "utf8",
+      input: "refs/heads/x " + w1 + " refs/heads/x " + "0".repeat(40) + "\n",
+    });
+    must(
+      s.status === 1 && said(s).includes(w1.slice(0, 7)),
+      "押す 先（B）で なく fetch 側（A）を 読んで 緑: " + said(s)
+    );
+  });
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log("自己確認: " + pass + "/" + (pass + fail));
   console.log("確かめた 回数: " + checks);
@@ -625,7 +685,7 @@ if (isMain) {
         lines,
         fingerFile: b.fingerFile,
         K: KB,
-        remote: process.argv[2],
+        remote: process.argv[3] || process.argv[2],
       });
       for (const l of r.out) (r.code ? console.error : console.log)(l);
       code = r.code;

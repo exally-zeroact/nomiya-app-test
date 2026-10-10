@@ -97,7 +97,7 @@ jobs:
         shell: bash
         run: |
           node .githooks/pre-push-kinshi.mjs --self-test | tee push-self.out
-          sh scripts/ci-yuka.sh push-self.out 12 32
+          sh scripts/ci-yuka.sh push-self.out 13 34
 
       # ★床の 物差し（scripts/ci-yuka.sh）の 自己確認＝ubuntu の awk で 233・234x 等が 赤に なるか★（2026-10-11）
       - name: 床の物差しの自己確認
@@ -179,4 +179,4 @@ jobs:
         shell: bash
         run: |
           node .githooks/pre-push-kinshi.mjs --self-test | tee push24-self.out
-          sh scripts/ci-yuka.sh push24-self.out 12 32
+          sh scripts/ci-yuka.sh push24-self.out 13 34

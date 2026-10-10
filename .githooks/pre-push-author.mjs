@@ -33,12 +33,16 @@ const git = (cwd, ...a) => execFileSync("git", ["-C", cwd, ...a], { encoding: "u
 /* ★押す 先の 遠く（hook の $1）に 今 在る 頭（ls-remote）の うち、手元に 在る 物★＝新しい 枝の 範囲の 下限。
    前の 形（--not --remotes）は 他の remote の 追跡枝・消された 枝の 古い 控えも「遠くに 在る」と 見て、
    新しい 枝の 字が 素通りした（10-11 アマかせ taiketsu 実測・remote 2 つの clone で「0 本」）。
-   遠くの 名が 無い・読めない は throw（止める 側）。 */
+   遠くの 名が 無い・読めない は throw（止める 側）。
+   ★読む 先は hook の $2（実際に 押す 道）★：$1 の 名で 読むと fetch 側の 道を 読む＝pushurl・道 2 本の remote で
+     押す 先と 取り違えて 偽の 緑（10-11 taiketsu 実測）。
+   ★枝と タグだけ 読み、手元に 取っていない 頭が 在れば「fetch してから」で 止める★（全履歴を 赤に して
+     作り直しへ 誘わない・10-11 taiketsu 実測＝古い 控えの clone で 128 件の 偽の 赤）。 */
 export function remoteKnown(cwd, remote) {
   if (!remote) throw new Error("押す 先の 遠くの 名が 無い（hook の $1）");
   let out;
   try {
-    out = execFileSync("git", ["-C", cwd, "ls-remote", remote], {
+    out = execFileSync("git", ["-C", cwd, "ls-remote", "--heads", "--tags", remote], {
       encoding: "utf8",
       maxBuffer: 1 << 28,
       stdio: ["ignore", "pipe", "pipe"],
@@ -60,10 +64,37 @@ export function remoteKnown(cwd, remote) {
     encoding: "utf8",
     maxBuffer: 1 << 28,
   });
+  const missing = have.split("\n").filter((l) => / missing$/.test(l)).length;
+  if (missing)
+    throw new Error(
+      "押す 先の 遠くに、手元に 取っていない 頭が " +
+        missing +
+        " 本 在る＝git fetch してから 押す（commit は 作り直さない）"
+    );
   return have
     .split("\n")
     .filter((l) => / (commit|tag) /.test(l))
     .map((l) => l.split(" ")[0]);
+}
+/* 自己確認用：別の repo で 作った commit を 遠くの 枝に 置く（手元に 無い 頭） */
+function foreignHead(tmp, bare, ref) {
+  const x = fs.mkdtempSync(path.join(tmp, "x-"));
+  const gx = (...a) => execFileSync("git", ["-C", x, ...a], { stdio: "pipe" });
+  gx("init", "-q");
+  fs.writeFileSync(path.join(x, "f.txt"), "よそ\n");
+  gx("add", "-A");
+  gx(
+    "-c",
+    "user.name=x",
+    "-c",
+    "user.email=1+x@users.noreply.github.com",
+    "commit",
+    "-q",
+    "-m",
+    "f"
+  );
+  gx("push", "-q", bare, "HEAD:" + ref);
+  return () => gx("push", "-q", bare, ":" + ref);
 }
 
 /* 押す 行ごとに、まだ 遠くに 無い commit を 並べ、欄が noreply で ない 物を 返す */
@@ -176,6 +207,34 @@ function selfTest() {
           threw++;
         }
       must(threw === 2, "押す 先の 名が 無い・読めない 遠くで 止まらない");
+      /* 遠くに 手元に 無い 頭＝「fetch してから」で 止める */
+      const undo = foreignHead(tmp, O, "refs/heads/yoso");
+      let msg = "";
+      try {
+        badCommits(tmp, line, "O");
+      } catch (e) {
+        msg = e.message;
+      }
+      undo();
+      must(msg.includes("fetch してから"), "取っていない 頭で fetch の 止めに ならない: " + msg);
+      /* 本物の 門：pushurl の remote は hook の $2（押す 道）を 読む */
+      const A = path.join(tmp, "A.git");
+      const B = path.join(tmp, "B.git");
+      execFileSync("git", ["init", "-q", "--bare", A], { stdio: "pipe" });
+      execFileSync("git", ["init", "-q", "--bare", B], { stdio: "pipe" });
+      g("push", "-q", A, c + ":refs/heads/main");
+      g("remote", "add", "r", A);
+      g("remote", "set-url", "--push", "r", B);
+      const s = spawnSync(process.execPath, [fileURLToPath(import.meta.url), "r", B], {
+        cwd: tmp,
+        env: { ...process.env, MAIL_SELFTEST_NESTED: "1" },
+        encoding: "utf8",
+        input: line[0] + "\n",
+      });
+      must(
+        s.status === 1,
+        "押す 先（B）で なく fetch 側（A）を 読んで 緑: " + (s.stdout || "") + (s.stderr || "")
+      );
     }
   );
   T("GIT_INDEX_FILE・GIT_DIR を 付けて 走らせても 親の index・config を 1バイトも 変えない", () => {
@@ -248,7 +307,7 @@ const input = fs.readFileSync(0, "utf8").split(/\r?\n/).filter(Boolean);
 let bad;
 let seen;
 try {
-  ({ bad, seen } = badCommits(process.cwd(), input, process.argv[2]));
+  ({ bad, seen } = badCommits(process.cwd(), input, process.argv[3] || process.argv[2]));
 } catch (e) {
   console.error("✗ 押すのを 止めた：" + e.message);
   process.exit(1);
