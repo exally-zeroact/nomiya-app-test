@@ -27,7 +27,7 @@
  *   ・作者・会社・利用者の 欄（creator・lastModifiedBy・author・Company・Manager・userName・userId・
  *     displayName・initials・cmAuthor/userInfo/fileSharing の name・absPath の url・custom.xml の 値）は「空か 見本」だけ
  *   ・ほどけない／鍵の かかった zip・読めない 追跡物・submodule・LFS の 指し札・作者の 欄が 読めない core.xml は 赤
- *   ・★見られない 物（絵・EXIF 等）は「未測定」＝赤★。通すのは tests/kinshi-ji-shiro.txt に「道<TAB>種類（未測定N か 当たりN）<TAB>中身の sha256 頭16字<TAB>訳」で 名指しした 道だけ（中身・件数が 変われば 赤）
+ *   ・★見られない 物（絵・EXIF 等）は「未測定」＝赤★。通すのは tests/kinshi-ji-shiro.txt に「道<TAB>種類（未測定N・当たりM か その 片方）<TAB>中身の sha256 頭16字<TAB>訳」で 名指しした 道だけ（中身・件数が 変われば 赤）
  * 見ない所（★未測定★）:
  *   ・絵（PNG・JPEG 等）の 画素の 中の 字・PDF の 中の 絵（＝未測定＝赤。目で 見て 白名簿に 名指しする）
  *   ・base64・\uXXXX・%XX（%20 以外）・字の つなぎ（'名'+'前'）・絵の 中の 字
@@ -544,7 +544,7 @@ const PDF_FONTFILE = /\/Length[123]\b|\/Subtype\s*\/(Type1C|CIDFontType0C|OpenTy
 
 /* xlsb の 部品（BIFF12）＝「種類（1〜2 バイトの 可変長）・大きさ（1〜4 バイトの 可変長）・中身」の 記録が
    ちょうど 最後まで 並ぶか。字（XLWideString）は UTF-16LE なので、読めた 扱いでも UTF-16LE の 両ずれで 当てる */
-export function isBiff12(buf) {
+export function isBiff12(buf, recs) {
   let p = 0;
   let n = 0;
   const varint = (max) => {
@@ -558,13 +558,29 @@ export function isBiff12(buf) {
     return -1;
   };
   while (p < buf.length) {
-    if (varint(2) < 0) return false;
+    const type = varint(2);
+    if (type < 0) return false;
     const size = varint(4);
     if (size < 0 || p + size > buf.length) return false;
+    if (recs) recs.push({ type, data: buf.slice(p, p + size) });
     p += size;
     n++;
   }
   return n > 0;
+}
+/* 人の 名前を 持つ BIFF12 の 記録（コメントの 作者・ファイル共有）の 中の 字（XLWideString＝字数 4 バイト＋UTF-16LE）を 拾う */
+export const BIFF12_PERSON = new Map([
+  [0x278, "xlsb の コメントの 作者"],
+  [0x224, "xlsb の ファイル共有の 名前"],
+]);
+export function wideStrings(data) {
+  const out = [];
+  for (let o = 0; o + 4 <= data.length; o++) {
+    const n = data.readUInt32LE(o);
+    if (n > 0 && n <= 255 && o + 4 + 2 * n <= data.length)
+      out.push(data.slice(o + 4, o + 4 + 2 * n).toString("utf16le"));
+  }
+  return out;
 }
 
 /* xlsx の 印刷の 設定（DEVMODE）＝大きさが 合えば 形として 読めた（装置名は UTF-16LE で 当てる） */
@@ -573,6 +589,13 @@ function isDevmode(label, buf) {
   const size = buf.readUInt16LE(68);
   const extra = buf.readUInt16LE(70);
   return size >= 68 && size + extra === buf.length;
+}
+
+/* XML の 部品を 字に（BOM で UTF-16 LE/BE も） */
+function xmlText(b) {
+  if (b[0] === 0xff && b[1] === 0xfe) return b.slice(2).toString("utf16le");
+  if (b[0] === 0xfe && b[1] === 0xff) return utf16be(b.slice(2));
+  return new TextDecoder("utf-8").decode(b);
 }
 
 /* ---------- 作者・会社・利用者の 欄 ---------- */
@@ -674,7 +697,9 @@ export function scan({ root, files, words }) {
         const pl = label + "!" + named(part.name, "(" + (k + 1) + " 番目の 部品)");
         scanBlob(pl, part.data, depth + 1);
         if (!/\.(xml|rels|vml)$/i.test(part.name)) return;
-        const text = new TextDecoder("utf-8").decode(part.data);
+        const text = xmlText(part.data);
+        if (/(^|\/)docProps\/core\.xml$/i.test(part.name) && !/coreProperties/.test(text))
+          notes.push(pl + ": 作者の 欄の 部品を 読めない（未測定）");
         /* 表・集計表・つなぎの 部品の displayName は Excel の 表の 名前（人で ない）＝作者の 欄として 見ない。
            core.xml に 作者の 欄が 無いのは「空」と 同じ（空か 見本 だけ 通す 決まりの 中） */
         if (!NOT_PERSON_PART.test(part.name))
@@ -768,15 +793,20 @@ export function scan({ root, files, words }) {
         /* 区切りだけの 塊（空白・点 等）が 続いたら 1つに まとめる＝数が 増えない 塊で 窓が 伸び続けない */
         const merged = [];
         for (const t of strs) {
+          const sep = (x) => normBase(x).replace(/\s+/g, " ").slice(0, 16);
           if (size(t) !== 0) merged.push(t);
           else if (merged.length && size(merged[merged.length - 1]) === 0)
-            merged[merged.length - 1] = (merged[merged.length - 1] + t).slice(0, 16);
-          else merged.push(t.slice(0, 16));
+            merged[merged.length - 1] = sep(merged[merged.length - 1] + t);
+          else merged.push(sep(t));
         }
+        const sizes = merged.map(size);
         for (let i = 0; i < merged.length; i++) {
           let acc = merged[i];
-          for (let k = i + 1; k < merged.length && k <= i + 64 && size(acc) < need; k++) {
+          let sz = sizes[i];
+          for (let k = i + 1; k < merged.length && k <= i + 64 && sz < need; k++) {
             acc += merged[k];
+            sz += sizes[k];
+            if (!sizes[k]) continue;
             for (const w of matchIdx(acc, words))
               hit(label + "(PDF の 字を つないだ 物): 一覧の " + (w + 1) + " 番目");
           }
@@ -797,14 +827,21 @@ export function scan({ root, files, words }) {
        BIFF12 の 記録の 並び か DEVMODE なら 読めた 扱い、それ 以外は 知らない 形＝赤（字は 当てる） */
     if (label.includes("!") && /\.bin$/i.test(label)) {
       for (const t of texts) scanText(label, t);
-      if (!isBiff12(buf) && !isDevmode(label, buf)) {
+      const recs = [];
+      if (isBiff12(buf, recs)) {
+        for (const rc of recs)
+          if (BIFF12_PERSON.has(rc.type)) {
+            const ws = wideStrings(rc.data).filter((x) => /[^\u0000-\u001f]/.test(x));
+            for (const v of ws.length ? ws : [""]) checkName(label, BIFF12_PERSON.get(rc.type), v);
+          }
+      } else if (!isDevmode(label, buf)) {
         c.unreadable++;
         const ole = buf.length >= 8 && buf.readUInt32BE(0) === 0xd0cf11e0;
-        reds.push(
+        notes.push(
           label +
             (ole
-              ? ": OLE の 部品（VBA 等）＝中の 字は 見ていない（未測定＝赤）"
-              : ": 形の 分からない バイナリの 部品（BIFF12 でも 印刷の 設定でも ない＝未測定＝赤）")
+              ? ": OLE の 部品（VBA 等）＝中の 字は 見ていない（未測定）"
+              : ": 形の 分からない バイナリの 部品（BIFF12 でも 印刷の 設定でも ない＝未測定）")
         );
       }
       return;
@@ -825,9 +862,11 @@ export function scan({ root, files, words }) {
       if (kind)
         notes.push(label + ": 字として 読めない " + kind + "（未測定・読める 部分だけ 当てた）");
       else
-        reds.push(
+        /* zip の 中の 部品なら 未測定（親の 行を 白名簿の「未測定N」で 名指しできる・中身は 親の sha で 固まる）。
+           追跡物 そのものなら 赤 */
+        (label.includes("!") ? notes : reds).push(
           label +
-            ": 字として 読めない 知らない 形（UTF-8・Shift_JIS・EUC-JP・UTF-16 の どれでも ない＝未測定＝赤）"
+            ": 字として 読めない 知らない 形（UTF-8・Shift_JIS・EUC-JP・UTF-16 の どれでも ない＝未測定）"
         );
     }
     for (const t of texts) scanText(label, t);
@@ -862,23 +901,18 @@ export function scan({ root, files, words }) {
           (sha || "読めない") +
           "＝目で 見直して 名指しし直す）"
       );
-    const isNote = ent.kind === "未測定";
-    const n = isNote ? notes.length - before[1] : hits.length - before[0];
-    if (n !== ent.count)
-      return reds.push(
-        "白名簿: " +
-          lab +
-          " の " +
-          ent.kind +
-          "の 数が 違う（名指し " +
-          ent.count +
-          "・今 " +
-          n +
-          "）"
-      );
-    if (isNote) notes.splice(before[1]);
-    else hits.splice(before[0]);
-    passed.push({ label: lab, kind: ent.kind, n });
+    /* 名指しした 種類ごとに 数を 照らす（未測定N・当たりM の 両方も 書ける。どちらかが 違えば 赤） */
+    const nNote = notes.length - before[1];
+    const nHit = hits.length - before[0];
+    const wrong = [];
+    if (ent.notes && nNote !== ent.notes)
+      wrong.push("未測定（名指し " + ent.notes + "・今 " + nNote + "）");
+    if (ent.hits && nHit !== ent.hits)
+      wrong.push("当たり（名指し " + ent.hits + "・今 " + nHit + "）");
+    if (wrong.length) return reds.push("白名簿: " + lab + " の 数が 違う：" + wrong.join("・"));
+    if (ent.notes) notes.splice(before[1]);
+    if (ent.hits) hits.splice(before[0]);
+    passed.push({ label: lab, kind: ent.kind, n: (ent.notes ? nNote : 0) + (ent.hits ? nHit : 0) });
   });
   for (const e of shiro.errors) reds.push("白名簿: " + e);
   for (const [rel, ent] of shiro.map)
@@ -933,10 +967,20 @@ export function loadShiro(root, words = []) {
         return errors.push(at + " の 形が 違う（道<TAB>種類<TAB>sha256 頭16字<TAB>訳）");
       if (rel === SHIRO_PATH) return errors.push(at + " で 白名簿 自身を 名指ししている");
       if (map.has(rel)) return errors.push(at + " で 同じ 道を 2回 名指ししている");
-      const km = kind.match(/^(未測定|当たり)([1-9]\d*)$/);
-      if (!km) return errors.push(at + " の 種類が 知らない 形（未測定N か 当たりN・N は 1 以上）");
+      /* 種類＝「未測定N」「当たりM」か その 両方（・ か , で つなぐ）。N・M は 1 以上・同じ 種類の 2度書きは 赤 */
+      const ent = { kind, notes: 0, hits: 0, sha, used: false };
+      const parts = kind.split(/[・,、]/);
+      for (const part of parts) {
+        const km = part.trim().match(/^(未測定|当たり)([1-9]\d*)$/);
+        const key = km && (km[1] === "未測定" ? "notes" : "hits");
+        if (!km || ent[key])
+          return errors.push(
+            at + " の 種類が 知らない 形（未測定N・当たりM か その 片方・数は 1 以上）"
+          );
+        ent[key] = Number(km[2]);
+      }
       if (!/^[0-9a-f]{16}$/.test(sha)) return errors.push(at + " の sha256 が 16字の 形で ない");
-      map.set(rel, { kind: km[1], count: Number(km[2]), sha, used: false });
+      map.set(rel, ent);
     });
   return { map, errors };
 }
@@ -1968,6 +2012,108 @@ function selfTest() {
     const bad = go([put("dm3.xlsx", z(dm("Some Printer", 100)))]);
     must(bad.code === 1, "大きさの 合わない 印刷の 設定が 緑");
   });
+  T(
+    "白名簿の 未測定N・当たりM の 両方・zip の 中の 知らない 形は 親の 未測定・UTF-16 の core・xlsb の 人の 欄・揃えてから 切る 区切り",
+    () => {
+      const sf = path.join(tmp, SHIRO_PATH);
+      fs.mkdirSync(path.dirname(sf), { recursive: true });
+      const sh = (rel) =>
+        crypto
+          .createHash("sha256")
+          .update(fs.readFileSync(path.join(tmp, rel)))
+          .digest("hex")
+          .slice(0, 16);
+      const NL = String.fromCharCode(10);
+      const TAB = String.fromCharCode(9);
+      const junk = Buffer.from([0x80, 0x81, 0xfe, 0x00, 0x9f, 0x00, 0xff, 0x80, 0xc0, 0x00]);
+      /* zip の 中の 知らない 形＋字の 当たり 1 */
+      const z = put(
+        "both.zip",
+        makeZip([
+          ["docProps/core.xml", core("見本")],
+          ["a.dat", junk],
+          ["b.txt", "見本台ためし語"],
+        ])
+      );
+      try {
+        const x0 = go([z]);
+        must(
+          x0.r.reds.length === 0 && x0.r.notes.length === 1 && x0.r.hits.length === 1,
+          "zip の 中の 知らない 形が 未測定で ない"
+        );
+        fs.writeFileSync(sf, z + TAB + "未測定1・当たり1" + TAB + sh(z) + TAB + "訳" + NL);
+        must(go([z]).code === 0, "両方の 名指しで 通らない");
+        fs.writeFileSync(sf, z + TAB + "未測定1" + TAB + sh(z) + TAB + "訳" + NL);
+        must(go([z]).code === 1, "片方の 名指しで 当たりが 通った");
+        fs.writeFileSync(sf, z + TAB + "未測定1・当たり2" + TAB + sh(z) + TAB + "訳" + NL);
+        must(go([z]).r.reds.join(NL).includes("当たり（名指し 2"), "当たりの 数違いで 緑");
+        fs.writeFileSync(sf, z + TAB + "未測定1・未測定1" + TAB + sh(z) + TAB + "訳" + NL);
+        must(go([z]).r.reds.join(NL).includes("知らない 形"), "同じ 種類の 2度書きで 緑");
+      } finally {
+        fs.rmSync(sf, { force: true });
+      }
+      /* UTF-16 の core.xml */
+      const u16 = (t) => Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(t, "utf16le")]);
+      must(
+        go([put("c16.xlsx", makeZip([["docProps/core.xml", u16(core("他人"))]]))]).code === 1,
+        "UTF-16 の core の 他人が 緑"
+      );
+      must(
+        go([put("c16ok.xlsx", makeZip([["docProps/core.xml", u16(core("見本"))]]))]).code === 0,
+        "UTF-16 の core の 見本が 赤"
+      );
+      must(
+        go([put("c8bad.xlsx", makeZip([["docProps/core.xml", Buffer.from([0x81, 0x82, 0x83])]]))])
+          .code === 1,
+        "読めない core が 緑"
+      );
+      /* xlsb の コメントの 作者（記録 0x278＝可変長で F8 04） */
+      const wrec = (t1, t2, txt) => {
+        const u = Buffer.from(txt, "utf16le");
+        const body = Buffer.concat([Buffer.alloc(4), u]);
+        body.writeUInt32LE(txt.length, 0);
+        return Buffer.concat([Buffer.from([t1, t2, body.length]), body]);
+      };
+      const xb = (bin) =>
+        makeZip([
+          ["docProps/core.xml", core("見本")],
+          ["xl/comments1.bin", bin],
+        ]);
+      must(
+        go([put("ca.xlsb", xb(wrec(0xf8, 0x04, "他人")))]).code === 1,
+        "xlsb の コメントの 作者が 緑"
+      );
+      must(
+        go([put("cb.xlsb", xb(wrec(0xf8, 0x04, "見本")))]).code === 0,
+        "xlsb の 見本の 作者が 赤"
+      );
+      must(
+        go([put("cc.xlsb", xb(wrec(0xa4, 0x04, "他人")))]).code === 1,
+        "xlsb の ファイル共有の 名前が 緑"
+      );
+      /* 区切りの 塊を 揃えてから 切る（&nbsp;×3・%20×6・&#32;×4 を 途中で 割らない） */
+      const fl = (s2) => zlib.deflateSync(Buffer.from(s2, "latin1"));
+      for (const [nm, mid] of [
+        ["e1", "&nbsp;".repeat(3)],
+        ["e2", "%20".repeat(6)],
+        ["e3", "&#32;".repeat(4)],
+      ])
+        must(
+          go([
+            put(
+              nm + ".pdf",
+              makePdf([
+                [
+                  "/Filter /FlateDecode",
+                  fl("BT (No1) Tj (Fakeco) Tj (" + mid + ") Tj (Lounge) Tj ET"),
+                ],
+              ])
+            ),
+          ]).r.hits.length >= 1,
+          "文字参照の 区切り（" + nm + "）"
+        );
+    }
+  );
   T("手元に 無い 追跡物・フォルダ（submodule の 形）・LFS の 指し札は 赤", () => {
     must(go(["nai/nai.txt"]).code === 1, "無いのに 緑");
     fs.mkdirSync(path.join(tmp, "sub"), { recursive: true });

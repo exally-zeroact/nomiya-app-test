@@ -77,11 +77,11 @@ jobs:
 
       - name: 実在の字の見張りの自己確認
         timeout-minutes: 10
-        # 全部 通って、しかも 23 本 以上 走った 時だけ 緑（0/0・本数が 減った を 止める）
+        # 全部 通って、しかも 24 本 以上 走った 時だけ 緑（0/0・本数が 減った を 止める）
         shell: bash
         run: |
           node tests/kinshi-ji.test.mjs --self-test | tee kinshi-self.out
-          awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 23) ok = 1 } END { exit !ok }' kinshi-self.out
+          awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 24) ok = 1 } END { exit !ok }' kinshi-self.out
 
       # ★commit の メールを 公開 repo に 出さない 門（.githooks/pre-push）の 自己確認★（2026-10-11）
       #   門は 手元の push で 走る（git config --local core.hooksPath .githooks）。ここでは 門 自身が 壊れていないかを 見る。
