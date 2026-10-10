@@ -569,8 +569,9 @@ export function isBiff12(buf, recs) {
   return n > 0;
 }
 /* 人の 名前を 持つ BIFF12 の 記録（コメントの 作者・ファイル共有）の 中の 字（XLWideString＝字数 4 バイト＋UTF-16LE）を 拾う */
-/* 実 Excel の 個人用ビューの 固い 欄（01 00 00 00 58 02）が 字数 1 の XLWideString に 見えて 作る 1 字（人の 名前では ない） */
-const EXCEL_FIXED_BIT = "\u0258";
+/* 実 Excel の 個人用ビュー（0x18d）の 固い 欄＝16 バイト目の 4 バイト（01 00 00 00）＋2 バイト が
+   字数 1 の XLWideString に 見える（値は シート見出しの 幅 等で 変わる）。★値で なく 置き場所で 外す★ */
+const isViewFixedField = (type, o, n) => type === 0x18d && o === 16 && n === 1;
 export const BIFF12_PERSON = new Map([
   [0x278, "xlsb の コメントの 作者"],
   [0x224, "xlsb の ファイル共有の 名前"],
@@ -580,14 +581,15 @@ export const BIFF12_PERSON = new Map([
 /* BIFF12 で 読めた 扱いに する 部品（人の 欄を 持たない か、人の 記録を 上で 見る 物）。他の .bin は 未測定 */
 const BIFF12_READ =
   /(^|\/)xl\/(sharedStrings|styles|calcChain|metadata|workbook|comments\d*|worksheets\/(sheet|binaryIndex)\d+|tables\/table\d+)\.bin$/i;
-export function wideStrings(data, atEnd = false) {
+export function wideStrings(data, atEnd = false, skip = () => false) {
   const out = [];
   for (let o = 0; o + 4 <= data.length; o++) {
     const n = data.readUInt32LE(o);
     if (
       n > 0 &&
       n <= 32767 &&
-      (atEnd ? o + 4 + 2 * n === data.length : o + 4 + 2 * n <= data.length)
+      (atEnd ? o + 4 + 2 * n === data.length : o + 4 + 2 * n <= data.length) &&
+      !skip(o, n)
     )
       out.push(data.slice(o + 4, o + 4 + 2 * n).toString("utf16le"));
   }
@@ -863,11 +865,14 @@ export function scan({ root, files, words }) {
         for (const rc of recs)
           if (BIFF12_PERSON.has(rc.type)) {
             /* 名前の 欄＝記録の 終わりで 終わる 字の 塊 ＋ 途中の 塊（全部 見る・1 字の 名前も）。
-               見ないのは 実 Excel の 固い 欄（01 00 00 00 58 02）が 作る 1 字 U+0258 だけ。
+               見ないのは 個人用ビューの 固い 欄（16 バイト目の 字数 1 の 塊）だけ。
                どれか 1つでも 空か 見本で なければ 赤 */
-            const printable = (x) => /[^\u0000-\u001f]/.test(x);
-            const tail = wideStrings(rc.data, true).filter(printable);
-            const mid = wideStrings(rc.data).filter((x) => printable(x) && x !== EXCEL_FIXED_BIT);
+            /* 揃えて 空に なる 塊（空白 だけ 等）と NUL を 含む 塊（固い 欄と 字数欄の 重なり）は 名前と して 数えない */
+            const printable = (x) =>
+              /[^\u0000-\u001f]/.test(x) && !x.includes("\u0000") && normJa(x) !== "";
+            const skip = (o, n) => isViewFixedField(rc.type, o, n);
+            const tail = wideStrings(rc.data, true, skip).filter(printable);
+            const mid = wideStrings(rc.data, false, skip).filter(printable);
             const ws = [...new Set([...tail, ...mid])].sort((a, b) => b.length - a.length);
             const odd = ws.find((x) => !OK_NAMES.has(normJa(x)));
             if (ws.length) checkName(label, BIFF12_PERSON.get(rc.type), odd ?? ws[0]);
@@ -1230,7 +1235,9 @@ function selfTest() {
       console.log("  ✗ " + n + " … " + e.message);
     }
   };
+  let checks = 0;
   const must = (v, m) => {
+    checks++;
     if (!v) throw new Error(m);
   };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "kinshi-"));
@@ -2446,6 +2453,32 @@ function selfTest() {
         go([put("v2.xlsb", view("他人 - 個人用ビュー"))]).code === 1,
         "他人の 個人用ビューが 緑"
       );
+      /* 固い 欄の 値が 違っても（シート見出しの 幅 等）置き場所で 外す＝見本なら 緑 */
+      for (const v of [
+        [0xf4, 0x01],
+        [0x20, 0x03],
+        [0xe8, 0x03],
+        [0x64, 0x00],
+      ]) {
+        const head = Buffer.alloc(30);
+        Buffer.from([1, 0, 0, 0, v[0], v[1]]).copy(head, 16);
+        const nb = Buffer.alloc(4 + 4);
+        nb.writeUInt32LE(2, 0);
+        nb.write("見本", 4, "utf16le");
+        const body = Buffer.concat([head, nb]);
+        const z = makeZip([
+          ["docProps/core.xml", core("見本")],
+          ["xl/workbook.bin", Buffer.concat([Buffer.from([0x8d, 0x03, body.length]), body])],
+        ]);
+        must(go([put("vf" + v[0] + ".xlsb", z)]).code === 0, "固い 欄の 値 " + v + " で 偽の 赤");
+      }
+      /* 読めない 名前の 記録に 偶然の 空白 1字（01 00 00 00 20 00）＝未測定を 消さない */
+      const odd18d = Buffer.from("0100000020000000000000000000000004000000ffffff", "hex");
+      const z2 = makeZip([
+        ["docProps/core.xml", core("見本")],
+        ["xl/workbook.bin", Buffer.concat([Buffer.from([0x8d, 0x03, odd18d.length]), odd18d])],
+      ]);
+      must(go([put("blank.xlsb", z2)]).code === 1, "偶然の 空白で 読めない 名前が 緑");
       /* 途中に 本物の 名前・終わりに 見本（今の 本番で 赤＝後戻りを 止める 歯） */
       const wsb = (txt) => {
         const b = Buffer.alloc(4 + 2 * txt.length);
@@ -2562,6 +2595,7 @@ function selfTest() {
 
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log("自己確認: " + pass + "/" + (pass + fail));
+  console.log("確かめた 回数: " + checks);
   return fail ? 1 : 0;
 }
 
