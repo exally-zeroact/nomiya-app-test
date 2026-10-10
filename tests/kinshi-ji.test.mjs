@@ -27,7 +27,7 @@
  *   ・作者・会社・利用者の 欄（creator・lastModifiedBy・author・Company・Manager・userName・userId・
  *     displayName・initials・cmAuthor/userInfo/fileSharing の name・absPath の url・custom.xml の 値）は「空か 見本」だけ
  *   ・ほどけない／鍵の かかった zip・読めない 追跡物・submodule・LFS の 指し札・作者の 欄が 読めない core.xml は 赤
- *   ・★見られない 物（絵・EXIF 等）は「未測定」＝赤★。通すのは tests/kinshi-ji-shiro.txt に「道<TAB>種類（未測定N・当たりM か その 片方）<TAB>中身の sha256 頭16字<TAB>訳」で 名指しした 道だけ（中身・件数が 変われば 赤）
+ *   ・★見られない 物（絵・EXIF 等）は「未測定」＝赤★。通すのは tests/kinshi-ji-shiro.txt に「道<TAB>種類（未測定N・当たりM か その 片方）<TAB>git の blob の id 頭16字（git hash-object --path）<TAB>訳」で 名指しした 道だけ（中身・件数が 変われば 赤）
  * 見ない所（★未測定★）:
  *   ・絵（PNG・JPEG 等）の 画素の 中の 字・PDF の 中の 絵（＝未測定＝赤。目で 見て 白名簿に 名指しする）
  *   ・base64・\uXXXX・%XX（%20 以外）・字の つなぎ（'名'+'前'）・絵の 中の 字
@@ -881,16 +881,7 @@ export function scan({ root, files, words }) {
     if (!ent) return;
     ent.used = true;
     const lab = named(rel, "(追跡物の " + (idx + 1) + " 本目)");
-    let sha = "";
-    try {
-      sha = crypto
-        .createHash("sha256")
-        .update(fs.readFileSync(path.join(root, rel)))
-        .digest("hex")
-        .slice(0, 16);
-    } catch {
-      sha = "";
-    }
+    const sha = blobId(root, rel);
     if (sha !== ent.sha)
       return reds.push(
         "白名簿: " +
@@ -945,7 +936,32 @@ export function scan({ root, files, words }) {
   }
 }
 
-/* ---------- 白名簿（tests/kinshi-ji-shiro.txt）＝「道<TAB>種類<TAB>中身の sha256 頭16字<TAB>訳」 ----------
+/* 白名簿の 中身の 印＝git の blob の id の 頭16字（git hash-object --path＝.gitattributes の 改行の 揃えを 通す）。
+   手元（Windows の CRLF の 取り出し）と CI で 同じ 値に なる。git が 無い 所では 生の バイトで blob の id を 計る */
+export function blobId(root, rel) {
+  const abs = path.join(root, rel);
+  try {
+    return execFileSync("git", ["-C", root, "hash-object", "--path", rel, "--", abs], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .trim()
+      .slice(0, 16);
+  } catch {
+    try {
+      const b = fs.readFileSync(abs);
+      return crypto
+        .createHash("sha1")
+        .update(Buffer.concat([Buffer.from("blob " + b.length + "\0"), b]))
+        .digest("hex")
+        .slice(0, 16);
+    } catch {
+      return "";
+    }
+  }
+}
+
+/* ---------- 白名簿（tests/kinshi-ji-shiro.txt）＝「道<TAB>種類<TAB>git の blob の id 頭16字<TAB>訳」 ----------
    種類＝「未測定N」（その 道の 未測定が ちょうど N 件 なら 通す）か「当たりN」（当たりが ちょうど N 件 なら 通す）。
    ★中身（sha256）が 変われば 赤＝目で 見直して 名指しし直す★。件数が 違っても 赤（0件は 書けない＝要らない 名指し）。
    白名簿 自身の 道・行に 一覧の 字・同じ 道の 2行・知らない 種類・形違い は 赤。訳は 出しに 書かない。 */
@@ -964,7 +980,7 @@ export function loadShiro(root, words = []) {
         return errors.push(at + " に 一覧の 字が ある（字は 出さない）");
       const [rel, kind, sha, why] = line.split("\t").map((x) => (x || "").trim());
       if (!rel || !kind || !sha || !why)
-        return errors.push(at + " の 形が 違う（道<TAB>種類<TAB>sha256 頭16字<TAB>訳）");
+        return errors.push(at + " の 形が 違う（道<TAB>種類<TAB>git の blob の id 頭16字<TAB>訳）");
       if (rel === SHIRO_PATH) return errors.push(at + " で 白名簿 自身を 名指ししている");
       if (map.has(rel)) return errors.push(at + " で 同じ 道を 2回 名指ししている");
       /* 種類＝「未測定N」「当たりM」か その 両方（・ か , で つなぐ）。N・M は 1 以上・同じ 種類の 2度書きは 赤 */
@@ -979,7 +995,8 @@ export function loadShiro(root, words = []) {
           );
         ent[key] = Number(km[2]);
       }
-      if (!/^[0-9a-f]{16}$/.test(sha)) return errors.push(at + " の sha256 が 16字の 形で ない");
+      if (!/^[0-9a-f]{16}$/.test(sha))
+        return errors.push(at + " の blob の id が 16字の 形で ない");
       map.set(rel, ent);
     });
   return { map, errors };
@@ -1605,12 +1622,7 @@ function selfTest() {
       const jpg = put("w.jpg", Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x80, 0x81, 0x00]));
       const txt = put("w.txt", "見本台ためし語\n");
       const clean = put("w2.txt", "ふつう\n");
-      const sh = (rel) =>
-        crypto
-          .createHash("sha256")
-          .update(fs.readFileSync(path.join(tmp, rel)))
-          .digest("hex")
-          .slice(0, 16);
+      const sh = (rel) => blobId(tmp, rel);
       const w = (body) => fs.writeFileSync(sf, body);
       const reds = (x) => x.r.reds.join("\n");
       const L = (rel, kind, why = "訳") => rel + "\t" + kind + "\t" + sh(rel) + "\t" + why + "\n";
@@ -2017,12 +2029,7 @@ function selfTest() {
     () => {
       const sf = path.join(tmp, SHIRO_PATH);
       fs.mkdirSync(path.dirname(sf), { recursive: true });
-      const sh = (rel) =>
-        crypto
-          .createHash("sha256")
-          .update(fs.readFileSync(path.join(tmp, rel)))
-          .digest("hex")
-          .slice(0, 16);
+      const sh = (rel) => blobId(tmp, rel);
       const NL = String.fromCharCode(10);
       const TAB = String.fromCharCode(9);
       const junk = Buffer.from([0x80, 0x81, 0xfe, 0x00, 0x9f, 0x00, 0xff, 0x80, 0xc0, 0x00]);
@@ -2112,6 +2119,24 @@ function selfTest() {
           ]).r.hits.length >= 1,
           "文字参照の 区切り（" + nm + "）"
         );
+    }
+  );
+  T(
+    "白名簿の 印は git の blob の id＝手元が CRLF でも LF の 中身と 同じ 値・中身が 変われば 変わる",
+    () => {
+      const repo = path.join(tmp, "crlf");
+      fs.mkdirSync(repo, { recursive: true });
+      const g = (...a) => execFileSync("git", ["-C", repo, ...a], { stdio: "ignore" });
+      g("init", "-q");
+      const NL = String.fromCharCode(10);
+      const CR = String.fromCharCode(13);
+      fs.writeFileSync(path.join(repo, ".gitattributes"), "* text=auto eol=lf" + NL);
+      fs.writeFileSync(path.join(repo, "a.txt"), "ふつう" + CR + NL + "二行目" + CR + NL);
+      fs.writeFileSync(path.join(repo, "b.txt"), "ふつう" + NL + "二行目" + NL);
+      must(blobId(repo, "a.txt") === blobId(repo, "b.txt"), "CRLF と LF で 印が 違う");
+      fs.writeFileSync(path.join(repo, "b.txt"), "ふつう" + NL + "三行目" + NL);
+      must(blobId(repo, "a.txt") !== blobId(repo, "b.txt"), "中身が 違うのに 印が 同じ");
+      must(/^[0-9a-f]{16}$/.test(blobId(repo, "a.txt")), "印の 形が 違う");
     }
   );
   T("手元に 無い 追跡物・フォルダ（submodule の 形）・LFS の 指し札は 赤", () => {

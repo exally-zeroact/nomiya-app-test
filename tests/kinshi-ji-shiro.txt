@@ -1,8 +1,8 @@
-# 実在の字の見張り（tests/kinshi-ji.test.mjs）の 白名簿＝道<TAB>種類（未測定N か 当たりN）<TAB>中身の sha256 頭16字<TAB>訳。
+# 実在の字の見張り（tests/kinshi-ji.test.mjs）の 白名簿＝道<TAB>種類（未測定N・当たりM か その 片方）<TAB>git の blob の id 頭16字（git hash-object --path）<TAB>訳。
 # 中身か 件数が 変われば 赤＝絵を 目で 見直して 名指しし直す（2026-10-10 6枚とも ロゴか「見本」の 判子だった）。
-icons/apple-touch-icon.png	未測定1	9855a996099bd876	アプリの ロゴの 絵（字は Castally だけ）
-icons/icon-192.png	未測定1	e04770740a9e9dd8	アプリの ロゴの 絵（字は Castally だけ）
-icons/icon-512.png	未測定1	f2796f62953463aa	アプリの ロゴの 絵（字は Castally だけ）
-icons/icon-maskable-512.png	未測定1	24352b7a27cb54bb	アプリの ロゴの 絵（字は Castally だけ）
-icons/logo-castally.png	未測定1	a0d327f9955e3314	アプリの ロゴの 絵（字は Castally だけ）
-tests/e2e/fixtures/tpl-real-like.xlsx	未測定1	90dd7c85495c2b4c	見本の 判子の 絵（字は 見本 だけ）
+icons/apple-touch-icon.png	未測定1	2a5c34c936276c96	アプリの ロゴの 絵（字は Castally だけ）
+icons/icon-192.png	未測定1	48f5673ca84e3b5a	アプリの ロゴの 絵（字は Castally だけ）
+icons/icon-512.png	未測定1	92494f2b04abcee5	アプリの ロゴの 絵（字は Castally だけ）
+icons/icon-maskable-512.png	未測定1	0ed38a9cc9ec6580	アプリの ロゴの 絵（字は Castally だけ）
+icons/logo-castally.png	未測定1	407627a6b260d05b	アプリの ロゴの 絵（字は Castally だけ）
+tests/e2e/fixtures/tpl-real-like.xlsx	未測定1	e6851f6b27d30355	見本の 判子の 絵（字は 見本 だけ）
