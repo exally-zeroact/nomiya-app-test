@@ -2499,6 +2499,30 @@ function selfTest() {
         ]);
         must(go([put(nm + ".xlsb", z)]).code === 1, "NUL 入りの 名前が 緑（" + nm + "）");
       }
+      /* 外す 範囲の 境目（0x18d の 16〜21 バイト目 だけ）・型（0x18d だけ）を 押さえる 歯 */
+      const at = (t1, t2, off, name) => {
+        const w = (t) => {
+          const b = Buffer.alloc(4 + 2 * t.length);
+          b.writeUInt32LE(t.length, 0);
+          b.write(t, 4, "utf16le");
+          return b;
+        };
+        const body = Buffer.concat([Buffer.alloc(off), w(name), w("見本")]);
+        return makeZip([
+          ["docProps/core.xml", core("見本")],
+          ["xl/workbook.bin", Buffer.concat([Buffer.from([t1, t2, body.length]), body])],
+        ]);
+      };
+      for (const [nm, t1, t2, off, name] of [
+        ["b22", 0x8d, 0x03, 22, "他人"],
+        ["b15", 0x8d, 0x03, 15, "他人"],
+        ["b224", 0xa4, 0x04, 16, "他人"],
+        ["b18dnul", 0x8d, 0x03, 22, "田" + String.fromCharCode(0) + "中"],
+      ])
+        must(
+          go([put(nm + ".xlsb", at(t1, t2, off, name))]).code === 1,
+          "外す 範囲の 外の 名前が 緑（" + nm + "）"
+        );
       /* 途中に 本物の 名前・終わりに 見本（今の 本番で 赤＝後戻りを 止める 歯） */
       const wsb = (txt) => {
         const b = Buffer.alloc(4 + 2 * txt.length);

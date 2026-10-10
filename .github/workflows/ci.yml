@@ -77,12 +77,12 @@ jobs:
 
       - name: 実在の字の見張りの自己確認
         timeout-minutes: 10
-        # 全部 通って、しかも 29 組 以上・確かめた 回数 230 以上の 時だけ 緑（組の 中の 歯を 消しても 割れる）
+        # 全部 通って、しかも 29 組 以上・確かめた 回数 234 以上の 時だけ 緑（組の 中の 歯を 消しても 割れる）
         shell: bash
         run: |
           node tests/kinshi-ji.test.mjs --self-test | tee kinshi-self.out
           awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 29) ok = 1 } END { exit !ok }' kinshi-self.out
-          awk '/^確かめた 回数: /{ if ($3 + 0 >= 230) ok = 1 } END { exit !ok }' kinshi-self.out
+          awk '/^確かめた 回数: /{ if ($3 + 0 >= 234) ok = 1 } END { exit !ok }' kinshi-self.out
 
       # ★commit の メールを 公開 repo に 出さない 門（.githooks/pre-push）の 自己確認★（2026-10-11）
       #   門は 手元の push で 走る（git config --local core.hooksPath .githooks）。ここでは 門 自身が 壊れていないかを 見る。
@@ -153,4 +153,4 @@ jobs:
         run: |
           node tests/kinshi-ji.test.mjs --self-test | tee kinshi24-self.out
           awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 29) ok = 1 } END { exit !ok }' kinshi24-self.out
-          awk '/^確かめた 回数: /{ if ($3 + 0 >= 230) ok = 1 } END { exit !ok }' kinshi24-self.out
+          awk '/^確かめた 回数: /{ if ($3 + 0 >= 234) ok = 1 } END { exit !ok }' kinshi24-self.out
