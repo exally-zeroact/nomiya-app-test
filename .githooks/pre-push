@@ -1,0 +1,4 @@
+#!/bin/sh
+# commit の メールを 公開 repo に 出さない 門（中身は pre-push-author.mjs）。
+# 置き方: git config --local core.hooksPath .githooks
+exec node "$(dirname "$0")/pre-push-author.mjs"
