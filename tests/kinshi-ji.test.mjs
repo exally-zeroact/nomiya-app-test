@@ -860,12 +860,13 @@ export function scan({ root, files, words }) {
       if (isBiff12(buf, recs) && BIFF12_READ.test(partName)) {
         for (const rc of recs)
           if (BIFF12_PERSON.has(rc.type)) {
-            /* 名前の 欄は 記録の 終わりで 終わる 字の 塊（固い 欄の 中の 切れ端で 偽の 赤に しない）。
-               終わりで 終わる 塊が 無ければ 全部の 塊を 見る（どれか 1つでも 空か 見本で なければ 赤） */
-            const tail = wideStrings(rc.data, true).filter((x) => /[^\u0000-\u001f]/.test(x));
-            const ws = (tail.length ? tail : wideStrings(rc.data))
-              .filter((x) => /[^\u0000-\u001f]/.test(x))
-              .sort((a, b) => b.length - a.length);
+            /* 名前の 欄＝記録の 終わりで 終わる 字の 塊 ＋ 途中の 2 字 以上の 塊（全部 見る）。
+               見ないのは 途中の 1 字の 切れ端 だけ（実 Excel の 固い 欄 01 00 00 00 58 02 が 1 字に 見える）。
+               どれか 1つでも 空か 見本で なければ 赤 */
+            const printable = (x) => /[^\u0000-\u001f]/.test(x);
+            const tail = wideStrings(rc.data, true).filter(printable);
+            const mid = wideStrings(rc.data).filter((x) => printable(x) && x.length >= 2);
+            const ws = [...new Set([...tail, ...mid])].sort((a, b) => b.length - a.length);
             const odd = ws.find((x) => !OK_NAMES.has(normJa(x)));
             if (ws.length) checkName(label, BIFF12_PERSON.get(rc.type), odd ?? ws[0]);
             else if (rc.data.length > 4)
@@ -2443,6 +2444,39 @@ function selfTest() {
         go([put("v2.xlsb", view("他人 - 個人用ビュー"))]).code === 1,
         "他人の 個人用ビューが 緑"
       );
+      /* 途中に 本物の 名前・終わりに 見本（今の 本番で 赤＝後戻りを 止める 歯） */
+      const wsb = (txt) => {
+        const b = Buffer.alloc(4 + 2 * txt.length);
+        b.writeUInt32LE(txt.length, 0);
+        b.write(txt, 4, "utf16le");
+        return b;
+      };
+      const recb = (t1, t2, body) => Buffer.concat([Buffer.from([t1, t2, body.length]), body]);
+      const wbz = (bin) =>
+        makeZip([
+          ["docProps/core.xml", core("見本")],
+          ["xl/workbook.bin", bin],
+        ]);
+      for (const [nm, t1, t2] of [
+        ["m18d", 0x8d, 0x03],
+        ["m224", 0xa4, 0x04],
+        ["m817", 0x97, 0x10],
+      ])
+        must(
+          go([
+            put(
+              nm + ".xlsb",
+              wbz(
+                recb(
+                  t1,
+                  t2,
+                  Buffer.concat([Buffer.alloc(8), wsb("他人"), Buffer.alloc(6), wsb("見本")])
+                )
+              )
+            ),
+          ]).code === 1,
+          "途中の 本物の 名前を 見落とした（" + nm + "）"
+        );
       const rec = (t1, t2, parts) => {
         const body = Buffer.concat(
           parts.map((txt) => {
