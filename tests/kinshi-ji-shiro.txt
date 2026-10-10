@@ -1,0 +1,8 @@
+# 実在の字の見張り（tests/kinshi-ji.test.mjs）の 白名簿＝道<TAB>種類<TAB>訳。種類は 未測定 か 当たりN。
+# 足す前に 絵を 目で 見て、中に 実在の 字が 無い 事を 確かめる（2026-10-10 6枚とも ロゴか「見本」の 判子だった）。
+icons/apple-touch-icon.png	未測定	アプリの ロゴの 絵（字は Castally だけ）
+icons/icon-192.png	未測定	アプリの ロゴの 絵（字は Castally だけ）
+icons/icon-512.png	未測定	アプリの ロゴの 絵（字は Castally だけ）
+icons/icon-maskable-512.png	未測定	アプリの ロゴの 絵（字は Castally だけ）
+icons/logo-castally.png	未測定	アプリの ロゴの 絵（字は Castally だけ）
+tests/e2e/fixtures/tpl-real-like.xlsx	未測定	見本の 判子の 絵（字は 見本 だけ）
