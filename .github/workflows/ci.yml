@@ -59,6 +59,17 @@ jobs:
       - name: 向き先の見張りの自己確認
         run: node tests/supa-config-env-matches-repo.test.mjs --self-test
 
+      # ★公開 repo に 実在の 字（司さん・会社・お客さんの 本物）を 戻さない★（2026-10-10）
+      #   一覧は repo に 置かない＝secret KINSHI_JI（1行に 1語）。無ければ「未測定」で 赤。
+      #   当たっても 字は 出さない（公開の CI ログは 誰でも 読める）。zip（xlsx 等）は ほどいて 中まで 見る。
+      - name: 実在の字が戻っていないか（一覧は secret）
+        run: npm run kinshi
+        env:
+          KINSHI_JI: ${{ secrets.KINSHI_JI }}
+
+      - name: 実在の字の見張りの自己確認
+        run: node tests/kinshi-ji.test.mjs --self-test
+
       - name: Lint (eslint)
         run: npm run lint
 
