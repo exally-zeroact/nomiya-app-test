@@ -640,6 +640,7 @@ export function scan({ root, files, words }) {
     pdfAuthors: 0,
     pdfStreams: 0,
     unreadable: 0,
+    shiroNotes: 0,
     nameChecks: 0,
   };
   const hits = [];
@@ -930,7 +931,10 @@ export function scan({ root, files, words }) {
     if (ent.hits && nHit !== ent.hits)
       wrong.push("当たり（名指し " + ent.hits + "・今 " + nHit + "）");
     if (wrong.length) return reds.push("白名簿: " + lab + " の 数が 違う：" + wrong.join("・"));
-    if (ent.notes) notes.splice(before[1]);
+    if (ent.notes) {
+      c.shiroNotes += nNote;
+      notes.splice(before[1]);
+    }
     if (ent.hits) hits.splice(before[0]);
     passed.push({ label: lab, kind: ent.kind, n: (ent.notes ? nNote : 0) + (ent.hits ? nHit : 0) });
   });
@@ -992,7 +996,7 @@ export function blobId(root, rel) {
 
 /* ---------- 白名簿（tests/kinshi-ji-shiro.txt）＝「道<TAB>種類<TAB>git の blob の id 頭16字<TAB>訳」 ----------
    種類＝「未測定N」（その 道の 未測定が ちょうど N 件 なら 通す）か「当たりN」（当たりが ちょうど N 件 なら 通す）。
-   ★中身（sha256）が 変われば 赤＝目で 見直して 名指しし直す★。件数が 違っても 赤（0件は 書けない＝要らない 名指し）。
+   ★中身（git の blob の id）が 変われば 赤＝目で 見直して 名指しし直す★。件数が 違っても 赤（0件は 書けない＝要らない 名指し）。
    白名簿 自身の 道・行に 一覧の 字・同じ 道の 2行・知らない 種類・形違い は 赤。訳は 出しに 書かない。 */
 export const SHIRO_PATH = "tests/kinshi-ji-shiro.txt";
 export function loadShiro(root, words = []) {
@@ -1090,7 +1094,11 @@ export function run({
       r.c.pdfStreams +
       " 個・字として 読めない " +
       r.c.unreadable +
-      " 本"
+      " 本・未測定 " +
+      (r.notes.length + r.c.shiroNotes) +
+      " 件（うち 白名簿に 名指しして 通した " +
+      r.c.shiroNotes +
+      " 件）"
   );
   for (const pz of r.passed)
     lines.push("  白名簿で 通した: " + pz.label + "（" + pz.kind + "）" + pz.n + " 件");
