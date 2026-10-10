@@ -9,10 +9,16 @@
  *     白名簿は その commit の tests/kinshi-ji-shiro.txt・印は その commit の blob の id。
  *   一覧：KINSHI_JI か ~/.tsukurimono/kinshi-ji.txt。★指紋を .githooks/kinshi-finger と 照らす★（縮んだ・差し替えた 一覧で 緑に しない）。
  *     一覧が 無い・指紋が 違う・指紋の 紙が 無い は 赤。
- *   見張りの 本体が 押す 範囲で 変わった 時は、自己確認も 回す（手元の 版で）。
+ *   ★見張りの 本体は 押す 頭の 木の 物を 一時の 所へ 取り出して 走らせる★（手元の 字の 本体は 読まない）。
+ *     手元で 本体を 弱めた・add し忘れた push が 緑で 通った（10-11 taiketsu T11・5a45b10 の 入れ忘れ）。
+ *     門（この 紙）も 押す 頭の 物と 手元が 違えば 赤（走っている 門＝押す 門 に する）。押す 頭に 本体・門が 無ければ 赤。
+ *   見張りの 本体が 押す 範囲で 変わった 時は、自己確認も 回す（取り出した 押す 版で）。
  *   ★字は 出さない★（commit の SHA・道・行・一覧の 何番目か だけ）。
  *
- *   門の 外：--no-verify・core.hooksPath を 置いていない clone・GitHub の 画面での 編集。最後の 門は CI（main と PR）。
+ *   門の 外：--no-verify・core.hooksPath を 置いていない clone・GitHub の 画面での 編集・
+ *     commit 文／作者名／注釈タグの 文・門の 古い 版を 取り出した 作業木からの push（門 自体が 走らない）・
+ *     遠くで 消された 枝の 古い 控え（--not --remotes が 遠く扱い）・.githooks/pre-push と メールの 門の 手元の 書き換え。
+ *     最後の 門は CI（main と PR）。
  *
  *   使い方（git が 呼ぶ）: 標準入力に「<手元の ref> <手元の sha> <遠くの ref> <遠くの sha>」
  *   自分で 確かめる:       node .githooks/pre-push-kinshi.mjs --self-test
@@ -25,9 +31,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SELF = fileURLToPath(import.meta.url);
 const ZERO = /^0+$/;
-const K = await import(
-  pathToFileURL(path.join(path.dirname(SELF), "..", "tests", "kinshi-ji.test.mjs")).href
-);
+/* 手元の 本体は 自己確認と 既定の 読み口 だけ（押す 時は 押す 頭の 本体で 走る）＝手元に 無くても 門は 走る */
+let K = null;
+try {
+  K = await import(
+    pathToFileURL(path.join(path.dirname(SELF), "..", "tests", "kinshi-ji.test.mjs")).href
+  );
+} catch {
+  K = null;
+}
 
 const gitText = (cwd, ...a) =>
   execFileSync("git", ["-C", cwd, ...a], {
@@ -54,7 +66,7 @@ export function pushedCommits(cwd, lines) {
 }
 
 /* 1本の commit の「親から 変わった・増えた 物」を、見張りの 読み口に して 返す */
-export function commitSource(cwd, commit) {
+export function commitSource(cwd, commit, KB = K) {
   const parents = gitText(cwd, "rev-list", "--parents", "-n", "1", commit)
     .trim()
     .split(" ")
@@ -86,7 +98,7 @@ export function commitSource(cwd, commit) {
   }
   let shiro;
   try {
-    shiro = gitText(cwd, "show", commit + ":" + K.SHIRO_PATH);
+    shiro = gitText(cwd, "show", commit + ":" + KB.SHIRO_PATH);
   } catch {
     shiro = null;
   }
@@ -105,10 +117,55 @@ export function commitSource(cwd, commit) {
   };
 }
 
+/* ★押す 頭の 木の 見張りの 本体を 一時の 所へ 取り出す★（手元の 字の 本体・門で 走らせない）
+   返す：{ heads, bodyFile, dir } か { err } */
+export const BODY = "tests/kinshi-ji.test.mjs";
+export const GATE = ".githooks/pre-push-kinshi.mjs";
+export function bodyForPush(cwd, lines, gateFile = SELF) {
+  const heads = [];
+  for (const line of lines) {
+    const [, localSha] = line.trim().split(/\s+/);
+    if (localSha && !ZERO.test(localSha) && !heads.includes(localSha)) heads.push(localSha);
+  }
+  if (!heads.length) return { heads };
+  const blob = (h, rel) => {
+    try {
+      return gitText(cwd, "rev-parse", "--verify", "-q", h + ":" + rel).trim();
+    } catch {
+      return "";
+    }
+  };
+  const bodies = new Set();
+  const gates = new Set();
+  for (const h of heads) {
+    const b = blob(h, BODY);
+    const g = blob(h, GATE);
+    if (!b) return { err: "押す 頭 " + h.slice(0, 7) + " に 見張りの 本体（" + BODY + "）が 無い" };
+    if (!g) return { err: "押す 頭 " + h.slice(0, 7) + " に 門（" + GATE + "）が 無い" };
+    bodies.add(b);
+    gates.add(g);
+  }
+  if (bodies.size > 1 || gates.size > 1)
+    return { err: "押す 頭ごとに 見張りの 本体・門の 版が 違う（1 回の push は 1 つの 版で）" };
+  const here = gitText(cwd, "hash-object", "--path=" + GATE, gateFile).trim();
+  if (here !== [...gates][0])
+    return {
+      err:
+        "手元の 門（" +
+        GATE +
+        "）が 押す 頭の 物と 違う＝走る 門が 押す 門で ない。commit してから 押す",
+    };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ppk-body-"));
+  const bodyFile = path.join(dir, BODY);
+  fs.mkdirSync(path.dirname(bodyFile), { recursive: true });
+  fs.writeFileSync(bodyFile, gitBuf(cwd, "cat-file", "blob", [...bodies][0]));
+  return { heads, bodyFile, dir };
+}
+
 /* 門の 本体：赤なら 1 */
-export function check({ cwd, lines, env = process.env, file, fingerFile }) {
+export function check({ cwd, lines, env = process.env, file, fingerFile, K: KB = K }) {
   const out = [];
-  const { words, finger } = K.loadWords({
+  const { words, finger } = KB.loadWords({
     env,
     file: file ?? env.KINSHI_JI_FILE ?? path.join(os.homedir(), ".tsukurimono", "kinshi-ji.txt"),
   });
@@ -130,11 +187,11 @@ export function check({ cwd, lines, env = process.env, file, fingerFile }) {
   let red = 0;
   let selfNeeded = false;
   for (const c of commits) {
-    const { files: fl, src } = commitSource(cwd, c);
+    const { files: fl, src } = commitSource(cwd, c, KB);
     if (fl.includes("tests/kinshi-ji.test.mjs")) selfNeeded = true;
     files += fl.length;
     if (!fl.length) continue;
-    const r = K.scan({ root: cwd, files: fl, words, src });
+    const r = KB.scan({ root: cwd, files: fl, words, src });
     const all = [...r.hits, ...r.reds, ...r.notes.map((n) => n + "（未測定＝赤）")];
     for (const x of all) out.push("  " + c.slice(0, 7) + ": " + x);
     red += all.length;
@@ -305,6 +362,80 @@ function selfTest() {
       "消す push で 赤"
     );
   });
+  /* ★本物の 門を 作り物 repo の hook と 同じ 形で 走らせる★（押す 頭の 本体で 走るか） */
+  const r2 = path.join(tmp, "r2");
+  fs.mkdirSync(r2);
+  const g2 = (...a) => execFileSync("git", ["-C", r2, ...a], { stdio: "pipe" });
+  g2("init", "-q");
+  const realBody = fs.readFileSync(path.join(path.dirname(SELF), "..", BODY));
+  const put = (rel, body) => {
+    fs.mkdirSync(path.dirname(path.join(r2, rel)), { recursive: true });
+    fs.writeFileSync(path.join(r2, rel), body);
+  };
+  const commit2 = (msg) => {
+    g2("add", "-A");
+    g2(
+      "-c",
+      "user.name=x",
+      "-c",
+      "user.email=1+x@users.noreply.github.com",
+      "commit",
+      "-q",
+      "-m",
+      msg
+    );
+    return gitText(r2, "rev-parse", "HEAD").trim();
+  };
+  put(GATE, fs.readFileSync(SELF));
+  put(BODY, realBody);
+  put(".githooks/kinshi-finger", finger + "\n");
+  put("a.txt", "ふつう\n");
+  const b0 = commit2("b0");
+  put("w.txt", "x\n" + WORD + "\n");
+  const w1 = commit2("w1");
+  const env2 = { ...process.env, KINSHI_JI_FILE: list };
+  delete env2.KINSHI_JI;
+  const gate = (from, to) =>
+    spawnSync(process.execPath, [path.join(r2, GATE)], {
+      cwd: r2,
+      env: env2,
+      encoding: "utf8",
+      input: "refs/heads/main " + to + " refs/heads/main " + from + "\n",
+    });
+  const said = (s) => (s.stdout || "") + (s.stderr || "");
+  T("本物の 門：押す 中身の 字で 止まる（作り物 repo・hook と 同じ 呼び方）", () => {
+    const s = gate(b0, w1);
+    must(
+      s.status === 1 && said(s).includes(w1.slice(0, 7)),
+      "字の 入った push が 通った: " + said(s)
+    );
+  });
+  T("手元で 本体を 弱めても（commit せず）押す 頭の 本体で 止まる", () => {
+    const weak =
+      realBody.toString("utf8").replace("export function scan(", "function scanReal(") +
+      "\nexport function scan() { return { hits: [], notes: [], reds: [], c: 0, passed: 0 }; }\n";
+    must(weak.includes("function scanReal("), "弱める 置き換えが 当たらない（試しが 壊れている）");
+    put(BODY, weak);
+    const s = gate(b0, w1);
+    put(BODY, realBody);
+    must(s.status === 1 && said(s).includes(w1.slice(0, 7)), "手元の 弱い 本体で 緑: " + said(s));
+  });
+  T("手元の 門が 押す 頭の 物と 違えば 止まる・押す 頭に 本体が 無ければ 止まる", () => {
+    const orig = fs.readFileSync(path.join(r2, GATE));
+    put(GATE, Buffer.concat([orig, Buffer.from("// 手元だけ\n")]));
+    const s = gate(b0, w1);
+    put(GATE, orig);
+    must(
+      s.status === 1 && said(s).includes("手元の 門"),
+      "手元の 門が 違うのに 通った: " + said(s)
+    );
+    g2("rm", "-q", BODY);
+    const w2 = commit2("w2");
+    const s2 = gate(w1, w2);
+    must(s2.status === 1 && said(s2).includes("本体"), "本体の 無い 頭が 通った: " + said(s2));
+    g2("reset", "-q", "--hard", w1);
+    must(gate(b0, b0).status === 0, "何も 押さない（同じ sha）で 赤");
+  });
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log("自己確認: " + pass + "/" + (pass + fail));
   console.log("確かめた 回数: " + checks);
@@ -316,15 +447,27 @@ if (isMain) {
   if (process.argv.includes("--self-test")) process.exit(selfTest());
   const root = gitText(process.cwd(), "rev-parse", "--show-toplevel").trim();
   const lines = fs.readFileSync(0, "utf8").split(/\r?\n/).filter(Boolean);
-  const r = check({ cwd: root, lines, fingerFile: path.join(root, ".githooks", "kinshi-finger") });
+  const b = bodyForPush(root, lines);
+  if (b.err) {
+    console.error("✗ 押すのを 止めた：" + b.err);
+    process.exit(1);
+  }
+  const done = () => b.dir && fs.rmSync(b.dir, { recursive: true, force: true });
+  const KB = b.bodyFile ? await import(pathToFileURL(b.bodyFile).href) : K;
+  const r = check({
+    cwd: root,
+    lines,
+    fingerFile: path.join(root, ".githooks", "kinshi-finger"),
+    K: KB,
+  });
   for (const l of r.out) (r.code ? console.error : console.log)(l);
-  if (r.code) process.exit(1);
+  if (r.code) {
+    done();
+    process.exit(1);
+  }
   if (r.selfNeeded) {
-    const s = spawnSync(
-      process.execPath,
-      [path.join(root, "tests", "kinshi-ji.test.mjs"), "--self-test"],
-      { encoding: "utf8" }
-    );
+    const s = spawnSync(process.execPath, [b.bodyFile, "--self-test"], { encoding: "utf8" });
+    done();
     const ok = s.status === 0 && /^自己確認: (\d+)\/\1$/m.test(s.stdout || "");
     console.log(
       ok
@@ -333,4 +476,5 @@ if (isMain) {
     );
     if (!ok) process.exit(1);
   }
+  done();
 }
