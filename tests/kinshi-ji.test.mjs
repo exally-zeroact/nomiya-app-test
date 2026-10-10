@@ -570,8 +570,9 @@ export function isBiff12(buf, recs) {
 }
 /* 人の 名前を 持つ BIFF12 の 記録（コメントの 作者・ファイル共有）の 中の 字（XLWideString＝字数 4 バイト＋UTF-16LE）を 拾う */
 /* 実 Excel の 個人用ビュー（0x18d）の 固い 欄＝16 バイト目の 4 バイト（01 00 00 00）＋2 バイト が
-   字数 1 の XLWideString に 見える（値は シート見出しの 幅 等で 変わる）。★値で なく 置き場所で 外す★ */
-const isViewFixedField = (type, o, n) => type === 0x18d && o === 16 && n === 1;
+   XLWideString に 見える（値は シート見出しの 幅 等で 変わる）。★値で なく 置き場所で 外す★ */
+/* 外すのは 16〜21 バイト目から 始まる 塊（固い 欄・固い 欄と 字数欄の 重なり）。名前は その 後ろ */
+const isViewFixedField = (type, o) => type === 0x18d && o >= 16 && o <= 21;
 export const BIFF12_PERSON = new Map([
   [0x278, "xlsb の コメントの 作者"],
   [0x224, "xlsb の ファイル共有の 名前"],
@@ -867,10 +868,9 @@ export function scan({ root, files, words }) {
             /* 名前の 欄＝記録の 終わりで 終わる 字の 塊 ＋ 途中の 塊（全部 見る・1 字の 名前も）。
                見ないのは 個人用ビューの 固い 欄（16 バイト目の 字数 1 の 塊）だけ。
                どれか 1つでも 空か 見本で なければ 赤 */
-            /* 揃えて 空に なる 塊（空白 だけ 等）と NUL を 含む 塊（固い 欄と 字数欄の 重なり）は 名前と して 数えない */
-            const printable = (x) =>
-              /[^\u0000-\u001f]/.test(x) && !x.includes("\u0000") && normJa(x) !== "";
-            const skip = (o, n) => isViewFixedField(rc.type, o, n);
+            /* 揃えて 空に なる 塊（空白 だけ 等）は 名前と して 数えない。NUL 入りの 塊は 数える（本物の 名前を 隠せる） */
+            const printable = (x) => /[^\u0000-\u001f]/.test(x) && normJa(x) !== "";
+            const skip = (o) => isViewFixedField(rc.type, o);
             const tail = wideStrings(rc.data, true, skip).filter(printable);
             const mid = wideStrings(rc.data, false, skip).filter(printable);
             const ws = [...new Set([...tail, ...mid])].sort((a, b) => b.length - a.length);
@@ -2479,6 +2479,26 @@ function selfTest() {
         ["xl/workbook.bin", Buffer.concat([Buffer.from([0x8d, 0x03, odd18d.length]), odd18d])],
       ]);
       must(go([put("blank.xlsb", z2)]).code === 1, "偶然の 空白で 読めない 名前が 緑");
+      /* NUL 入りの 本物の 名前＋見本 の 塊（同じ 記録）は 赤 */
+      for (const [nm, t1, t2, parts] of [
+        ["n278", 0xf8, 0x04, ["見本", "Bob" + String.fromCharCode(0)]],
+        ["n224", 0xa4, 0x04, [String.fromCharCode(0) + "田中", "見本"]],
+        ["n817", 0x97, 0x10, ["田" + String.fromCharCode(0) + "中", "見本"]],
+      ]) {
+        const body = Buffer.concat(
+          parts.map((t) => {
+            const b = Buffer.alloc(4 + 2 * t.length);
+            b.writeUInt32LE(t.length, 0);
+            b.write(t, 4, "utf16le");
+            return b;
+          })
+        );
+        const z = makeZip([
+          ["docProps/core.xml", core("見本")],
+          ["xl/workbook.bin", Buffer.concat([Buffer.from([t1, t2, body.length]), body])],
+        ]);
+        must(go([put(nm + ".xlsb", z)]).code === 1, "NUL 入りの 名前が 緑（" + nm + "）");
+      }
       /* 途中に 本物の 名前・終わりに 見本（今の 本番で 赤＝後戻りを 止める 歯） */
       const wsb = (txt) => {
         const b = Buffer.alloc(4 + 2 * txt.length);
