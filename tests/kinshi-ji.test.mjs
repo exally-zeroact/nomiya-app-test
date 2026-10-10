@@ -20,7 +20,8 @@
  *   ・字の 読み分け：BOM → UTF-8 → NUL を 含む 物は UTF-16（LE・BE）でも → 読めない 物は 壊れた 字を 飛ばして 読む
  *   ・揃え方：&#..; → NFKC → 幅の 無い 字・異体字の 印・向きの 印を 消す → ハイフンの 仲間と「ー」を - に
  *       日本語の 語 … 空白を 全部 消し、カタカナを ひらがなに 揃えて 含むか
- *       英字だけの 語 … 空白・_・%20・&nbsp; を 1つの 空白に。大文字小文字は 区別し、語の 境目で
+ *       英字だけの 語 … 空白・_・%20・&nbsp; を 1つの 空白に。語の 境目で。1語の ふつうの 語だけ 大文字小文字を 区別
+ *         （2語 以上・@ . - を 含む 語は 問わず、2語の 間は 空白・. _ + - ・ / でも 無しでも 当てる）
  *   ・作者・会社・利用者の 欄（creator・lastModifiedBy・author・Company・Manager・userName・userId・
  *     displayName・initials・cmAuthor/userInfo/fileSharing の name・absPath の url・custom.xml の 値）は「空か 見本」だけ
  *   ・ほどけない／鍵の かかった zip・読めない 追跡物・submodule・LFS の 指し札・作者の 欄が 読めない core.xml は 赤
@@ -438,7 +439,8 @@ export function scan({ root, files, words }) {
         scanText(label + "(PNG の 字の 塊)", t);
       }
       scanText(label + "(PNG の 生の 字)", buf.toString("latin1"));
-      scanText(label + "(PNG の 生の 字)", new TextDecoder("utf-8").decode(buf));
+      for (const enc of ["utf-8", "shift_jis", "euc-jp"])
+        scanText(label + "(PNG の 生の 字)", new TextDecoder(enc).decode(buf));
       return;
     }
     if (buf[0] === 0x1f && buf[1] === 0x8b) {
@@ -472,7 +474,7 @@ export function scan({ root, files, words }) {
       else
         reds.push(
           label +
-            ": 字として 読めない 知らない 形（UTF-8・Shift_JIS・EUC-JP・ISO-2022-JP の どれでも ない＝未測定＝赤）"
+            ": 字として 読めない 知らない 形（UTF-8・Shift_JIS・EUC-JP・UTF-16 の どれでも ない＝未測定＝赤）"
         );
     }
     for (const t of texts) scanText(label, t);
@@ -663,7 +665,14 @@ function selfTest() {
     if (!v) throw new Error(m);
   };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "kinshi-"));
-  const W_RAW = ["見本台ためし語", "９９－８－７７", "カレホン ためし", "Fakeco Lounge", "Zorgox"];
+  const W_RAW = [
+    "見本台ためし語",
+    "９９－８－７７",
+    "カレホン ためし",
+    "Fakeco Lounge",
+    "Zorgox",
+    "Qx@Wobble.jp",
+  ];
   const listFile = path.join(tmp, "list.txt");
   fs.writeFileSync(listFile, W_RAW.join("\n") + "\n");
   const FINGER = loadWords({ env: {}, file: listFile }).finger;
@@ -795,7 +804,11 @@ function selfTest() {
       "info@fakeco-lounge.jp",
       "FakecoLounge",
       "fakeco.lounge",
+      "Fakeco・Lounge",
+      "Fakeco/Lounge",
       "Zorgox",
+      "qx@wobble.jp",
+      "QX@WOBBLE.JP",
     ])
       must(go([put("d.txt", s + "\n")]).code === 1, JSON.stringify(s) + " で 当たらない");
     must(
@@ -990,6 +1003,12 @@ function selfTest() {
       ]).code === 1,
       "PNG の 中の UTF-8 の 日本語"
     );
+    /* 作り物の 語を Shift_JIS で 書いた バイトを PNG の tEXt に */
+    const sj = Buffer.concat([
+      Buffer.from("Author\0", "latin1"),
+      Buffer.from("8ca9967b91e482bd82df82b58cea", "hex"),
+    ]);
+    must(go([put("sj.png", makePng([["tEXt", sj]]))]).r.hits.length >= 1, "PNG の Shift_JIS");
   });
   T("日本の 古い 字コード・BOM 無しの UTF-16（日本語だけ）・gzip でも 当たる", () => {
     /* 作り物の 語を 各 字コードで 書いた バイト（字の 並びとしては ソースに 載らない） */
