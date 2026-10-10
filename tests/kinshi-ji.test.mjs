@@ -322,9 +322,43 @@ function pdfLiteral(body) {
   }
   return Buffer.from(out);
 }
-const STR_TOKEN = /<([0-9A-Fa-f\s]*)>(?!>)|\(((?:\\[\s\S]|[^\\)])*)\)/g;
-const tokBytes = (x) =>
-  x[1] !== undefined ? Buffer.from(x[1].replace(/\s+/g, ""), "hex") : pdfLiteral(x[2]);
+/* 字の 塊を 拾う＝(..) は 括弧の 入れ子と 逃がしを 数えて 読む・<..> は 16進（<< は 辞書なので 飛ばす） */
+export function pdfTokens(lt) {
+  const out = [];
+  for (let i = 0; i < lt.length; i++) {
+    const ch = lt[i];
+    if (ch === "(") {
+      let depth = 1;
+      let j = i + 1;
+      let body = "";
+      while (j < lt.length) {
+        const c2 = lt[j];
+        if (c2 === "\\") {
+          body += c2 + (lt[j + 1] ?? "");
+          j += 2;
+          continue;
+        }
+        if (c2 === "(") depth++;
+        else if (c2 === ")" && --depth === 0) break;
+        body += c2;
+        j++;
+      }
+      out.push(pdfLiteral(body));
+      i = j;
+    } else if (ch === "<") {
+      if (lt[i + 1] === "<") {
+        i++;
+        continue;
+      }
+      const j = lt.indexOf(">", i + 1);
+      if (j < 0) break;
+      const hex = lt.slice(i + 1, j);
+      if (/^[0-9A-Fa-f\s]*$/.test(hex)) out.push(Buffer.from(hex.replace(/\s+/g, ""), "hex"));
+      i = j;
+    }
+  }
+  return out;
+}
 function bytesText(b) {
   if (b[0] === 0xfe && b[1] === 0xff) return utf16be(b.slice(2));
   try {
@@ -335,19 +369,18 @@ function bytesText(b) {
 }
 /* 字の 欄（/Title・/Author 等）として 全部の 字の 塊を 読む */
 export function pdfStrings(lt) {
-  const out = [];
-  for (const x of lt.matchAll(STR_TOKEN)) {
-    const b = tokBytes(x);
-    if (b.length) out.push(bytesText(b));
-  }
-  return out;
+  return pdfTokens(lt)
+    .filter((b) => b.length)
+    .map(bytesText);
 }
 export function pdfAuthors(buf) {
   const t = buf.toString("latin1");
   const out = [];
-  for (const m of t.matchAll(/\/Author\s*(<[0-9A-Fa-f\s]*>|\((?:\\[\s\S]|[^\\)])*\))/g)) {
-    const x = [...m[1].matchAll(STR_TOKEN)][0];
-    if (x) out.push(["PDF /Author", bytesText(tokBytes(x))]);
+  for (const m of t.matchAll(/\/Author\b/g)) {
+    const rest = t.slice(m.index + 7, m.index + 7 + 65536).replace(/^\s+/, "");
+    if (rest[0] !== "(" && rest[0] !== "<") continue;
+    const b = pdfTokens(rest)[0];
+    if (b) out.push(["PDF /Author", bytesText(b)]);
   }
   const u = new TextDecoder("utf-8").decode(buf);
   for (const m of u.matchAll(/<dc:creator>([\s\S]*?)<\/dc:creator>/g))
@@ -412,6 +445,10 @@ export function pdfStreams(buf) {
       images++;
       continue;
     }
+    if (/\/DecodeParms\b/.test(dict)) {
+      problems.push("予測付きの 縮め方（DecodeParms）の 流れ");
+      continue;
+    }
     try {
       for (const f of filters) {
         if (f === "FlateDecode" || f === "Fl") data = zlib.inflateSync(data);
@@ -444,7 +481,20 @@ const PDF_HARD = [
   [/\/Differences\b/, "字の 割り当てを 変えた 書体（Differences）"],
   [/\/[A-Za-z0-9.+-]*#[0-9A-Fa-f]{2}/, "名前の # 逃がし"],
   [/(^|[\s>\]])BI[\s/][\s\S]*?[\s]ID[\s]/, "字の 流れの 中の 絵（BI）"],
+  [/\/Subtype\s*\/(TrueType|MMType1|CIDFontType[02])\b/, "標準で ない 書体（TrueType 等）"],
+  [/\/FontFile[23]?\b/, "中身を 持つ 書体（FontFile）"],
+  [/\/Encoding\s*(\d+\s+\d+\s+R|<<)/, "間接 か 辞書の 字の 割り当て"],
+  [
+    /\/Encoding\s*\/(?!(WinAnsiEncoding|StandardEncoding|MacRomanEncoding|PDFDocEncoding)\b)/,
+    "知らない 字の 割り当て",
+  ],
 ];
+/* 標準 14 書体（中身を 持たず、決まった 字の 割り当てで 読める） */
+const PDF_STD14 = new Set(
+  "Times-Roman Times-Bold Times-Italic Times-BoldItalic Helvetica Helvetica-Bold Helvetica-Oblique Helvetica-BoldOblique Courier Courier-Bold Courier-Oblique Courier-BoldOblique Symbol ZapfDingbats".split(
+    " "
+  )
+);
 const PDF_FONTFILE = /\/Length[123]\b|\/Subtype\s*\/(Type1C|CIDFontType0C|OpenType)\b/;
 
 /* xlsx の 印刷の 設定（DEVMODE）＝大きさが 合えば 形として 読めた（装置名は UTF-16LE で 当てる） */
@@ -613,6 +663,10 @@ export function scan({ root, files, words }) {
         outside,
         ...body.filter((st) => !PDF_FONTFILE.test(st.dict)).map((st) => st.data.toString("latin1")),
       ];
+      const odd = judged.some((x) =>
+        [...x.matchAll(/\/BaseFont\s*\/([^\s/<>[\]()]+)/g)].some((m) => !PDF_STD14.has(m[1]))
+      );
+      if (odd) notes.push(label + ": PDF の 標準 14 書体で ない 書体＝字を 引けない（未測定）");
       for (const [re, why] of PDF_HARD)
         if (judged.some((x) => re.test(x)))
           notes.push(label + ": PDF の " + why + "＝字を 引けない（未測定）");
@@ -626,6 +680,10 @@ export function scan({ root, files, words }) {
       const strs = lts.flatMap((lt) => pdfStrings(lt));
       for (const t of strs) scanText(label + "(PDF の 字)", t);
       scanText(label + "(PDF の 字を つないだ 物)", strs.join(""));
+      /* 前の 塊が 英数字で 終わると、つないだ 字では 英字の 語の 境目が 外れる＝2〜8 個の 窓でも 当てる */
+      for (let i = 0; i < strs.length; i++)
+        for (let k = 2; k <= 8 && i + k <= strs.length; k++)
+          scanText(label + "(PDF の 字を つないだ 物)", strs.slice(i, i + k).join(""));
       for (const st of body) {
         c.pdfStreams++;
         for (const t of readTexts(st.data).texts) scanText(label + "(PDF の 流れ)", t);
@@ -1442,6 +1500,27 @@ function selfTest() {
         "ASCIIHex"
       );
       must(
+        hit("s13.pdf", [["/Filter /FlateDecode", fl("BT (Total) Tj (Zor) Tj (gox) Tj ET")]]),
+        "英数字の 後に 分かれた 英字の 語"
+      );
+      must(
+        hit("s14.pdf", [["/Filter /FlateDecode", fl("BT [(No1) 5 (Zor) 10 (gox)] TJ ET")]]),
+        "TJ の 中で 分かれた 英字の 語"
+      );
+      must(
+        hit("s15.pdf", [["/Filter /FlateDecode", fl("BT (a(b)\\132orgox) Tj ET")]]),
+        "括弧の 入れ子の 後ろの 逃がし"
+      );
+      /* 流れの 外（注釈の /Contents）の 16進 UTF-16 */
+      const c16 = "FEFF" + Buffer.from("見本台ためし語", "utf16le").swap16().toString("hex");
+      const annot = Buffer.concat([
+        Buffer.from(
+          "%PDF-1.4\n1 0 obj\n<< /Type /Annot /Contents <" + c16 + "> >>\nendobj\n",
+          "latin1"
+        ),
+      ]);
+      must(go([put("s16.pdf", annot)]).r.hits.length >= 1, "流れの 外の 16進 UTF-16");
+      must(
         go([put("s5.pdf", makePdf([["/Filter /FlateDecode", fl("BT /F1 12 Tf (ok) Tj ET")]]))])
           .code === 0,
         "きれいな PDF が 赤"
@@ -1494,6 +1573,74 @@ function selfTest() {
         go([put("u8.pdf", makePdf([["/Filter /FlateDecode", Buffer.from("not deflate")]]))]).r.reds
           .length >= 1,
         "壊れた 流れが 緑"
+      );
+      note(
+        "u10.pdf",
+        [
+          [
+            "/Type /Font /Subtype /TrueType /BaseFont /Abc /FontDescriptor << /FontFile2 9 0 R >>",
+            "",
+          ],
+        ],
+        "TrueType の 書体"
+      );
+      note(
+        "u11.pdf",
+        [["/Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding 7 0 R", ""]],
+        "間接の 字の 割り当て"
+      );
+      note(
+        "u12.pdf",
+        [
+          [
+            "/Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding << /BaseEncoding /WinAnsiEncoding >>",
+            "",
+          ],
+        ],
+        "辞書の 字の 割り当て"
+      );
+      note(
+        "u13.pdf",
+        [["/Type /Font /Subtype /Type1 /BaseFont /MyFont", ""]],
+        "標準で ない 書体名"
+      );
+      note(
+        "u14.pdf",
+        [["/Filter /FlateDecode /DecodeParms << /Predictor 12 /Columns 4 >>", fl("BT (ok) Tj ET")]],
+        "予測付きの 縮め方"
+      );
+      note(
+        "u15.pdf",
+        [["/Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /MyEncoding", ""]],
+        "知らない 字の 割り当て"
+      );
+      /* 名前は 標準 14 書体でも、TrueType・中身付きは それだけで 未測定 */
+      note(
+        "u17.pdf",
+        [["/Type /Font /Subtype /TrueType /BaseFont /Helvetica", ""]],
+        "TrueType だけ"
+      );
+      note(
+        "u18.pdf",
+        [
+          [
+            "/Type /Font /Subtype /Type1 /BaseFont /Helvetica /FontDescriptor << /FontFile 9 0 R >>",
+            "",
+          ],
+        ],
+        "中身付きの 書体だけ"
+      );
+      must(
+        go([
+          put(
+            "u16.pdf",
+            makePdf([
+              ["/Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding", ""],
+              ["/Filter /FlateDecode", fl("BT /F1 9 Tf (ok) Tj ET")],
+            ])
+          ),
+        ]).code === 0,
+        "標準 14 書体と WinAnsi で 未測定に した"
       );
       /* 書体の 中身（FontFile）の バイトに たまたま BI…ID が あっても 未測定に しない */
       must(
