@@ -371,6 +371,17 @@ export function pdfTokens(lt) {
   }
   return out;
 }
+/* ( で 始まる 字の 塊が 閉じるか（入れ子と 逃がしを 数える） */
+function literalCloses(rest) {
+  let depth = 0;
+  for (let j = 0; j < rest.length; j++) {
+    const c2 = rest[j];
+    if (c2 === "\\") j++;
+    else if (c2 === "(") depth++;
+    else if (c2 === ")" && --depth === 0) return true;
+  }
+  return false;
+}
 function bytesText(b) {
   if (b[0] === 0xfe && b[1] === 0xff) return utf16be(b.slice(2));
   try {
@@ -381,18 +392,29 @@ function bytesText(b) {
 }
 /* 字の 欄（/Title・/Author 等）として 全部の 字の 塊を 読む */
 const OLD_TOKEN = /<([0-9A-Fa-f\s]*)>(?!>)|\(((?:\\[\s\S]|[^\\)])*)\)/g;
-export function pdfStrings(lt) {
+/* 字の 塊を 2通りの 読み方で（新しい 読み・前の 正規表現）。★混ぜて つながない★（語の 境目が 崩れる） */
+export function pdfStringSets(lt) {
   const olds = [...lt.matchAll(OLD_TOKEN)].map((x) =>
     x[1] !== undefined ? Buffer.from(x[1].replace(/\s+/g, ""), "hex") : pdfLiteral(x[2])
   );
-  return [...pdfTokens(lt), ...olds].filter((b) => b.length).map(bytesText);
+  const fin = (bs) =>
+    bs
+      .filter((b) => b.length)
+      .map(bytesText)
+      .filter((t) => t.length);
+  return [fin(pdfTokens(lt)), fin(olds)];
 }
+export const pdfStrings = (lt) => pdfStringSets(lt).flat();
 export function pdfAuthors(buf) {
   const t = buf.toString("latin1");
   const out = [];
   for (const m of t.matchAll(/\/Author\b/g)) {
     const rest = t.slice(m.index + 7, m.index + 7 + 65536).replace(/^\s+/, "");
     if (rest[0] !== "(" && rest[0] !== "<") continue;
+    if (rest[0] === "(" && !literalCloses(rest)) {
+      out.push(["PDF /Author（閉じない 括弧）", "\u0000"]);
+      continue;
+    }
     const b = pdfTokens(rest)[0];
     if (b) out.push(["PDF /Author", bytesText(b)]);
   }
@@ -509,6 +531,8 @@ const PDF_STD14 = new Set(
     " "
   )
 );
+/* 窓で つなぐ 字の 塊の 上限（越えたら 未測定）＝1字ずつ 置く 大きな PDF で 重く なりすぎない */
+const PDF_WINDOW_MAX = 20000;
 const PDF_FONTFILE = /\/Length[123]\b|\/Subtype\s*\/(Type1C|CIDFontType0C|OpenType)\b/;
 
 /* xlsx の 印刷の 設定（DEVMODE）＝大きさが 合えば 形として 読めた（装置名は UTF-16LE で 当てる） */
@@ -693,18 +717,29 @@ export function scan({ root, files, words }) {
         }
       /* 字の 塊は 全部の 流れを 順に つないで 読む（BT と ET が 別の 流れでも・塊が 分かれても 拾う） */
       const lts = [outside, ...body.map((st) => st.data.toString("latin1"))];
-      const strs = lts.flatMap((lt) => pdfStrings(lt));
-      for (const t of strs) scanText(label + "(PDF の 字)", t);
-      scanText(label + "(PDF の 字を つないだ 物)", strs.join(""));
-      /* 前の 塊が 英数字で 終わると、つないだ 字では 英字の 語の 境目が 外れる＝塊の 頭から
-         一番 長い 語＋1 字に 届くまで（塊 64 個 まで）つないだ 窓でも 当てる */
+      const sets = lts.map((lt) => pdfStringSets(lt));
       const need = Math.max(...words.map((w) => w.key.length)) + 1;
-      for (let i = 0; i < strs.length; i++) {
-        let acc = "";
-        for (let k = i; k < strs.length && k < i + 64; k++) {
-          acc += strs[k];
-          if (k > i) scanText(label + "(PDF の 字を つないだ 物)", acc);
-          if (acc.length >= need) break;
+      const size = (x) => normJa(x).replace(/[._+/-]/g, "").length;
+      for (const way of [0, 1]) {
+        /* 読み方ごとに、全部の 流れを 順に つなぐ（BT と ET が 別の 流れでも 拾う） */
+        const strs = sets.flatMap((st) => st[way]);
+        for (const t of strs) scanText(label + "(PDF の 字)", t);
+        scanText(label + "(PDF の 字を つないだ 物)", strs.join(""));
+        if (strs.length > PDF_WINDOW_MAX) {
+          notes.push(
+            label + ": PDF の 字の 塊が 多すぎて（" + strs.length + " 個）窓を 見ていない（未測定）"
+          );
+          continue;
+        }
+        /* 前の 塊が 英数字で 終わると、つないだ 字では 英字の 語の 境目が 外れる＝塊の 頭から
+           揃えた 字の 数が 一番 長い 語＋1 字に 届くまで つないだ 窓でも 当てる */
+        for (let i = 0; i < strs.length; i++) {
+          let acc = strs[i];
+          for (let k = i + 1; k < strs.length && size(acc) < need; k++) {
+            acc += strs[k];
+            for (const w of matchIdx(acc, words))
+              hit(label + "(PDF の 字を つないだ 物): 一覧の " + (w + 1) + " 番目");
+          }
         }
       }
       for (const st of body) {
@@ -1569,6 +1604,43 @@ function selfTest() {
       must(
         hit("s21.pdf", [["/Filter /FlateDecode", fl("BT [" + one + "] TJ ET")]]),
         "1字ずつの 長い 英字の 語"
+      );
+      /* 塊の 間が 長い 英字 2語（本番 ed40afe で 赤・4644a29 で 緑 に なっていた 形） */
+      const sp = (n) => "(" + " ".repeat(n) + ")";
+      for (const [nm, body] of [
+        ["g1", "BT (Fakeco) Tj " + sp(10) + " Tj (Lounge) Tj ET"],
+        ["g2", "BT (Fakeco) Tj " + sp(12) + " Tj (Lounge) Tj ET"],
+        ["g3", "BT (Fakeco) Tj (" + ".".repeat(40) + ") Tj (Lounge) Tj ET"],
+        ["g4", "BT [(Fakeco) " + sp(20) + " " + sp(20) + " (Lounge)] TJ ET"],
+        ["g5", "BT [(&#70;akeco) " + sp(10) + " (Lounge)] TJ ET"],
+      ])
+        must(
+          hit(nm + ".pdf", [["/Filter /FlateDecode", fl(body)]]),
+          "間の 長い 英字 2語（" + nm + "）"
+        );
+      must(
+        hit("g6.pdf", [
+          ["/Filter /FlateDecode", fl("BT (Fakeco) Tj " + sp(40) + " Tj")],
+          ["/Filter /FlateDecode", fl("(Lounge) Tj ET")],
+        ]),
+        "流れを またいだ 間の 長い 英字 2語"
+      );
+      /* 閉じない 括弧の /Author は 空と 読まず 赤 */
+      for (const au of ["<< /Author (Taro() >>", "<< /Author (Taro() /Title () >>"])
+        must(
+          go([put("au.pdf", "%PDF-1.4\n1 0 obj\n" + au + "\nendobj\n")]).code === 1,
+          "閉じない /Author が 緑"
+        );
+      /* 字の 塊が 上限を 越えたら 窓を 見ずに 未測定（黙って 緑に しない） */
+      const many = go([
+        put(
+          "many.pdf",
+          makePdf([["/Filter /FlateDecode", fl("BT " + "(a) Tj ".repeat(20001) + "ET")]])
+        ),
+      ]);
+      must(
+        many.r.notes.some((n2) => n2.includes("多すぎて")),
+        "塊が 多すぎる PDF を 黙っている"
       );
       must(
         go([put("s5.pdf", makePdf([["/Filter /FlateDecode", fl("BT /F1 12 Tf (ok) Tj ET")]]))])
