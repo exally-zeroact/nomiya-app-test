@@ -90,4 +90,5 @@ $xl.Quit()
 [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($wb)
 [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($xl)
 [GC]::Collect()
+& (Join-Path $PSScriptRoot "set-sample-author.ps1") -Path $full
 Write-Output ("作った: {0} ({1} バイト)" -f $full, (Get-Item $full).Length)

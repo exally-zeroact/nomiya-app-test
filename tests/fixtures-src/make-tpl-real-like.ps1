@@ -136,4 +136,5 @@ $wb.SaveAs($full, 51)
 $wb.Close($false)
 $xl.Quit()
 [GC]::Collect()
+& (Join-Path $PSScriptRoot "set-sample-author.ps1") -Path $full
 Write-Output ("作った: {0} ({1} バイト)" -f $full, (Get-Item $full).Length)
