@@ -68,14 +68,8 @@ npm run live        # 本物のDBに往復（テストrepoだけ・本番倉庫�
 npm run live:ui     # 本物のURLで実UI往復（同上）
 ```
 
-`live` を走らせるには、テスト用アカウントの合言葉が
-`%TEMP%\nomiya-test-cred.json` に要る。
-
-```json
-{ "email": "exally.supoort+nomiya@gmail.com", "password": "…" }
-```
-
-決めたこのメール以外では走らない（お店のデータに触らないため）。
+`live` は匿名で入る（合言葉のファイルは要らない）。
+匿名でないアカウントで入ったら止まる（お店のデータに触らないため・`tests/live-nomiya.mjs` の `ALLOW_EMAIL`）。
 
 ## 棚を変えるとき
 
