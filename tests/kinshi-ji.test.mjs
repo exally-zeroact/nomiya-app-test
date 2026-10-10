@@ -417,8 +417,13 @@ export function pdfAuthors(buf) {
       out.push(["PDF /Author（閉じない 塊）", "\u0000"]);
       continue;
     }
-    const b = pdfTokens(rest.slice(0, end + 1))[0];
-    if (b) out.push(["PDF /Author", bytesText(b)]);
+    const tok = rest.slice(0, end + 1);
+    const b = pdfTokens(tok)[0];
+    if (!b || (tok[0] === "<" && !/^<[0-9A-Fa-f\s]*>$/.test(tok))) {
+      out.push(["PDF /Author（読めない 塊）", "\u0000"]);
+      continue;
+    }
+    out.push(["PDF /Author", bytesText(b)]);
   }
   const u = new TextDecoder("utf-8").decode(buf);
   for (const m of u.matchAll(/<dc:creator>([\s\S]*?)<\/dc:creator>/g))
@@ -537,6 +542,31 @@ const PDF_STD14 = new Set(
 const PDF_WINDOW_MAX = 20000;
 const PDF_FONTFILE = /\/Length[123]\b|\/Subtype\s*\/(Type1C|CIDFontType0C|OpenType)\b/;
 
+/* xlsb の 部品（BIFF12）＝「種類（1〜2 バイトの 可変長）・大きさ（1〜4 バイトの 可変長）・中身」の 記録が
+   ちょうど 最後まで 並ぶか。字（XLWideString）は UTF-16LE なので、読めた 扱いでも UTF-16LE の 両ずれで 当てる */
+export function isBiff12(buf) {
+  let p = 0;
+  let n = 0;
+  const varint = (max) => {
+    let v = 0;
+    for (let k = 0; k < max; k++) {
+      if (p >= buf.length) return -1;
+      const b = buf[p++];
+      v |= (b & 0x7f) << (7 * k);
+      if (!(b & 0x80)) return v;
+    }
+    return -1;
+  };
+  while (p < buf.length) {
+    if (varint(2) < 0) return false;
+    const size = varint(4);
+    if (size < 0 || p + size > buf.length) return false;
+    p += size;
+    n++;
+  }
+  return n > 0;
+}
+
 /* xlsx の 印刷の 設定（DEVMODE）＝大きさが 合えば 形として 読めた（装置名は UTF-16LE で 当てる） */
 function isDevmode(label, buf) {
   if (!/printerSettings\d*\.bin$/i.test(label) || buf.length < 72) return false;
@@ -546,6 +576,8 @@ function isDevmode(label, buf) {
 }
 
 /* ---------- 作者・会社・利用者の 欄 ---------- */
+const NOT_PERSON_PART =
+  /(^|\/)xl\/(tables|pivotTables|pivotCache|queryTables|externalLinks|connections)(\/|\.xml)/i;
 const NAME_TAGS =
   /<(?:[\w-]+:)?(creator|lastModifiedBy|Company|Manager|initial-creator|author)\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:[\w-]+:)?\1>)/g;
 const NAME_ATTRS =
@@ -643,12 +675,10 @@ export function scan({ root, files, words }) {
         scanBlob(pl, part.data, depth + 1);
         if (!/\.(xml|rels|vml)$/i.test(part.name)) return;
         const text = new TextDecoder("utf-8").decode(part.data);
-        for (const [kind, v] of nameFields(part.name, text)) checkName(pl, kind, v);
-        if (/(^|\/)docProps\/core\.xml$/i.test(part.name)) {
-          const has = (t) => new RegExp("<(?:[\\w-]+:)?" + t + "\\b").test(text);
-          if (!has("creator") || !has("lastModifiedBy"))
-            reds.push(pl + ": 作者の 欄が 読めない（未測定＝赤）");
-        }
+        /* 表・集計表・つなぎの 部品の displayName は Excel の 表の 名前（人で ない）＝作者の 欄として 見ない。
+           core.xml に 作者の 欄が 無いのは「空」と 同じ（空か 見本 だけ 通す 決まりの 中） */
+        if (!NOT_PERSON_PART.test(part.name))
+          for (const [kind, v] of nameFields(part.name, text)) checkName(pl, kind, v);
       });
       return;
     }
@@ -738,9 +768,10 @@ export function scan({ root, files, words }) {
         /* 区切りだけの 塊（空白・点 等）が 続いたら 1つに まとめる＝数が 増えない 塊で 窓が 伸び続けない */
         const merged = [];
         for (const t of strs) {
-          if (merged.length && size(t) === 0 && size(merged[merged.length - 1]) === 0)
-            merged[merged.length - 1] += t;
-          else merged.push(t);
+          if (size(t) !== 0) merged.push(t);
+          else if (merged.length && size(merged[merged.length - 1]) === 0)
+            merged[merged.length - 1] = (merged[merged.length - 1] + t).slice(0, 16);
+          else merged.push(t.slice(0, 16));
         }
         for (let i = 0; i < merged.length; i++) {
           let acc = merged[i];
@@ -762,6 +793,22 @@ export function scan({ root, files, words }) {
     if (head.startsWith("version https://git-lfs"))
       return reds.push(label + ": LFS の 指し札＝中身を 見ていない（未測定＝赤）");
     const { ok, texts } = readTexts(buf);
+    /* zip の 中の .bin（xlsb の 部品・印刷の 設定 等）は 字コードで たまたま 読めても 形で 決める：
+       BIFF12 の 記録の 並び か DEVMODE なら 読めた 扱い、それ 以外は 知らない 形＝赤（字は 当てる） */
+    if (label.includes("!") && /\.bin$/i.test(label)) {
+      for (const t of texts) scanText(label, t);
+      if (!isBiff12(buf) && !isDevmode(label, buf)) {
+        c.unreadable++;
+        const ole = buf.length >= 8 && buf.readUInt32BE(0) === 0xd0cf11e0;
+        reds.push(
+          label +
+            (ole
+              ? ": OLE の 部品（VBA 等）＝中の 字は 見ていない（未測定＝赤）"
+              : ": 形の 分からない バイナリの 部品（BIFF12 でも 印刷の 設定でも ない＝未測定＝赤）")
+        );
+      }
+      return;
+    }
     if (!ok && isDevmode(label, buf)) {
       for (const t of texts) scanText(label, t);
       return;
@@ -1351,11 +1398,58 @@ function selfTest() {
       }
     }
   );
-  T("作者の 欄が 無い core.xml は 赤", () => {
+  T("作者の 欄が 無い core.xml は 空と 同じ（緑）・表の 名前は 人で ない・xlsb の 部品", () => {
     must(
-      go([put("l.xlsx", makeZip([["docProps/core.xml", "<cp:coreProperties/>"]]))]).code === 1,
-      "読めないのに 緑"
+      go([put("l.xlsx", makeZip([["docProps/core.xml", "<cp:coreProperties/>"]]))]).code === 0,
+      "欄なしで 赤"
     );
+    const tbl = '<table xmlns="x" id="1" name="T1" displayName="売上の表" ref="A1:B2"/>';
+    must(
+      go([
+        put(
+          "t.xlsx",
+          makeZip([
+            ["docProps/core.xml", core("見本")],
+            ["xl/tables/table1.xml", tbl],
+          ])
+        ),
+      ]).code === 0,
+      "表の 名前を 作者に 取り違えた"
+    );
+    must(
+      go([
+        put(
+          "p.xlsx",
+          makeZip([
+            ["docProps/core.xml", core("見本")],
+            ["xl/persons/person.xml", '<person displayName="他人"/>'],
+          ])
+        ),
+      ]).code === 1,
+      "人の displayName を 見ていない"
+    );
+    /* BIFF12 の 記録：種類 0x13・中身＝1 バイト＋字数（4 バイト）＋UTF-16LE の 字 */
+    const rec = (txt) => {
+      const u = Buffer.from(txt, "utf16le");
+      const body = Buffer.concat([Buffer.from([0]), Buffer.alloc(4), u]);
+      body.writeUInt32LE(txt.length, 1);
+      return Buffer.concat([Buffer.from([0x13, body.length]), body]);
+    };
+    const xb = (bin) =>
+      makeZip([
+        ["docProps/core.xml", core("見本")],
+        ["xl/sharedStrings.bin", bin],
+      ]);
+    must(
+      go([put("ok.xlsb", xb(Buffer.concat([rec("ふつう"), rec("abc")])))]).code === 0,
+      "ふつうの xlsb が 赤"
+    );
+    must(
+      go([put("hit.xlsb", xb(Buffer.concat([rec("見本台ためし語")])))]).r.hits.length >= 1,
+      "xlsb の 字に 当たらない"
+    );
+    const bad = Buffer.concat([rec("ふつう"), Buffer.from([0x13, 0x7f, 0x81])]);
+    must(go([put("bad.xlsb", xb(bad))]).code === 1, "形の 合わない xlsb の 部品が 緑");
   });
   T("UTF-16（BOM あり LE・BE・BOM なし LE）・UTF-8 の BOM でも 当たる", () => {
     const s = "見本台ためし語 Fakeco Lounge";
@@ -1688,6 +1782,24 @@ function selfTest() {
       must(
         go([put("k5.pdf", "%PDF-1.4\n1 0 obj\n<< /Author % note\n(他人) >>\nendobj\n")]).code === 1,
         "覚書の 後の /Author を 見ていない"
+      );
+      for (const au of [
+        "<< /Author <54Z61Z72> >>",
+        "<< /Author <5461%x" + String.fromCharCode(10) + "726F> >>",
+      ])
+        must(
+          go([put("au2.pdf", "%PDF-1.4" + String.fromCharCode(10) + au)]).code === 1,
+          "読めない 16進の /Author が 緑"
+        );
+      /* 長い 区切りの 塊（空白 2000 字）を 挟んだ 語も 当たる（16 字に 切っても 当て方は 同じ） */
+      must(
+        hit("k6.pdf", [
+          [
+            "/Filter /FlateDecode",
+            fl("BT (Fakeco) Tj (" + " ".repeat(2000) + ") Tj (Lounge) Tj ET"),
+          ],
+        ]),
+        "長い 区切りの 塊"
       );
       must(
         go([put("s5.pdf", makePdf([["/Filter /FlateDecode", fl("BT /F1 12 Tf (ok) Tj ET")]]))])
