@@ -18,7 +18,8 @@
  *   使い方（git が 呼ぶ）: 標準入力に「<手元の ref> <手元の sha> <遠くの ref> <遠くの sha>」の 行
  *   自分で 確かめる:       node .githooks/pre-push-author.mjs --self-test
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -51,6 +52,8 @@ export function badCommits(cwd, lines) {
 }
 
 function selfTest() {
+  /* ★呼ぶ側（hook・worktree）が 渡す GIT_*（GIT_INDEX_FILE・GIT_DIR 等）を 外す★＝一時 repo の git が 親の index・config を 書き換えない */
+  for (const k of Object.keys(process.env)) if (k.startsWith("GIT_")) delete process.env[k];
   let pass = 0;
   let fail = 0;
   const T = (n, fn) => {
@@ -105,6 +108,54 @@ function selfTest() {
       badCommits(tmp, ["(delete) " + "0".repeat(40) + " refs/heads/x " + c]).seen === 0,
       "消す push を 見た"
     );
+  });
+  T("GIT_INDEX_FILE・GIT_DIR を 付けて 走らせても 親の index・config を 1バイトも 変えない", () => {
+    if (process.env.MAIL_SELFTEST_NESTED) return; // 入れ子の 中では 回さない
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "kinshi-parent-"));
+    const pg = (...a) => execFileSync("git", ["-C", parent, ...a], { stdio: "ignore" });
+    pg("init", "-q");
+    fs.writeFileSync(path.join(parent, "p.txt"), "parent");
+    pg("add", "-A");
+    pg(
+      "-c",
+      "user.name=x",
+      "-c",
+      "user.email=1+x@users.noreply.github.com",
+      "commit",
+      "-q",
+      "-m",
+      "p"
+    );
+    const gd = path.join(parent, ".git");
+    const before = [
+      fs.readFileSync(path.join(gd, "index")),
+      fs.readFileSync(path.join(gd, "config")),
+    ];
+    const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), "--self-test"], {
+      env: {
+        ...process.env,
+        GIT_INDEX_FILE: path.join(gd, "index"),
+        GIT_DIR: gd,
+        GIT_WORK_TREE: parent,
+        MAIL_SELFTEST_NESTED: "1",
+      },
+      encoding: "utf8",
+    });
+    const after = [
+      fs.readFileSync(path.join(gd, "index")),
+      fs.readFileSync(path.join(gd, "config")),
+    ];
+    fs.rmSync(parent, { recursive: true, force: true });
+    must(
+      r.status === 0,
+      "GIT_* を 付けると 自己確認が 赤: " +
+        String(r.stdout)
+          .split(String.fromCharCode(10))
+          .filter((l) => l.includes("✗"))
+          .join(" / ")
+    );
+    must(before[0].equals(after[0]), "親の index を 書き換えた");
+    must(before[1].equals(after[1]), "親の config を 書き換えた");
   });
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log("自己確認: " + pass + "/" + (pass + fail));
