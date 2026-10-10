@@ -5927,7 +5927,7 @@ test.describe("㉒ 判子と印刷の窓", () => {
       const N = window.__NOMIYA;
       N.settings.hanko = trimmed;
       N.settings.store = "合同会社ZEROact";
-      N.settings.addr = "東京都架空区見本町1-2-3";
+      N.settings.addr = "東京都架空区見本台1-2-3";
       N.settings.tel = "090-0000-0000";
       N.renderAll();
       return { before, after };

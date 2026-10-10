@@ -45,7 +45,7 @@ $ws.Range("I2").NumberFormat = 'yyyy/m/d'
 $ws.Range("I3").Value2 = "合同会社サンプル"
 $ws.Range("I3").SetPhonetic()
 $ws.Range("I4").Value2 = "〒000-0000"
-$ws.Range("I5").Value2 = "東京都架空区見本町1-2-3　00コーポ1号"
+$ws.Range("I5").Value2 = "東京都架空区見本台1-2-3　00コーポ1号"
 $ws.Range("I6").Value2 = "TEL000-0000-0000"
 $ws.Range("I7").Value2 = "登録番号：T0000000000000"
 $ws.Range("I3:I7").HorizontalAlignment = -4152   # 右寄せ
