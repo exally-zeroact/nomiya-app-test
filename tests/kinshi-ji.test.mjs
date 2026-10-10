@@ -569,6 +569,8 @@ export function isBiff12(buf, recs) {
   return n > 0;
 }
 /* 人の 名前を 持つ BIFF12 の 記録（コメントの 作者・ファイル共有）の 中の 字（XLWideString＝字数 4 バイト＋UTF-16LE）を 拾う */
+/* 実 Excel の 個人用ビューの 固い 欄（01 00 00 00 58 02）が 字数 1 の XLWideString に 見えて 作る 1 字（人の 名前では ない） */
+const EXCEL_FIXED_BIT = "\u0258";
 export const BIFF12_PERSON = new Map([
   [0x278, "xlsb の コメントの 作者"],
   [0x224, "xlsb の ファイル共有の 名前"],
@@ -860,12 +862,12 @@ export function scan({ root, files, words }) {
       if (isBiff12(buf, recs) && BIFF12_READ.test(partName)) {
         for (const rc of recs)
           if (BIFF12_PERSON.has(rc.type)) {
-            /* 名前の 欄＝記録の 終わりで 終わる 字の 塊 ＋ 途中の 2 字 以上の 塊（全部 見る）。
-               見ないのは 途中の 1 字の 切れ端 だけ（実 Excel の 固い 欄 01 00 00 00 58 02 が 1 字に 見える）。
+            /* 名前の 欄＝記録の 終わりで 終わる 字の 塊 ＋ 途中の 塊（全部 見る・1 字の 名前も）。
+               見ないのは 実 Excel の 固い 欄（01 00 00 00 58 02）が 作る 1 字 U+0258 だけ。
                どれか 1つでも 空か 見本で なければ 赤 */
             const printable = (x) => /[^\u0000-\u001f]/.test(x);
             const tail = wideStrings(rc.data, true).filter(printable);
-            const mid = wideStrings(rc.data).filter((x) => printable(x) && x.length >= 2);
+            const mid = wideStrings(rc.data).filter((x) => printable(x) && x !== EXCEL_FIXED_BIT);
             const ws = [...new Set([...tail, ...mid])].sort((a, b) => b.length - a.length);
             const odd = ws.find((x) => !OK_NAMES.has(normJa(x)));
             if (ws.length) checkName(label, BIFF12_PERSON.get(rc.type), odd ?? ws[0]);
@@ -2476,6 +2478,24 @@ function selfTest() {
             ),
           ]).code === 1,
           "途中の 本物の 名前を 見落とした（" + nm + "）"
+        );
+      /* 途中に 1 字の 本物の 名前・終わりに 空白（姓だけ・頭文字）＝見落とさない */
+      for (const [nm, t1, t2] of [
+        ["s18d", 0x8d, 0x03],
+        ["s224", 0xa4, 0x04],
+        ["s817", 0x97, 0x10],
+        ["s278", 0xf8, 0x04],
+      ])
+        must(
+          go([
+            put(
+              nm + ".xlsb",
+              wbz(
+                recb(t1, t2, Buffer.concat([Buffer.alloc(8), wsb("他"), Buffer.alloc(6), wsb(" ")]))
+              )
+            ),
+          ]).code === 1,
+          "途中の 1 字の 名前を 見落とした（" + nm + "）"
         );
       const rec = (t1, t2, parts) => {
         const body = Buffer.concat(
