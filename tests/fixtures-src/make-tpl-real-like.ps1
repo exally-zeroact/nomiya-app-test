@@ -34,7 +34,7 @@ $ws.Range("A1").Font.Size = 18
 $ws.Range("A1").SetPhonetic()          # ★ふりがなを付ける（これが本文に混ざる罠）★
 
 $ws.Range("A3:D4").Merge()
-$ws.Range("A3").Value2 = "エスプリ　アマン　御中"
+$ws.Range("A3").Value2 = "カレホン　カレホ　御中"
 $ws.Range("A3").SetPhonetic()
 $ws.Range("A3").Font.Size = 14
 

@@ -5898,7 +5898,7 @@ test.describe("㉒ 判子と印刷の窓", () => {
   async function withHanko(page) {
     await addSale(page, {
       date: "2026-08-03",
-      name: "飛勝工業株式会社",
+      name: "験模工業株式会社",
       people: 3,
       amount: 15000,
       pay: "invoice",
