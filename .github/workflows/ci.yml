@@ -98,8 +98,8 @@ jobs:
         shell: bash
         run: |
           node .githooks/pre-push-kinshi.mjs --self-test | tee push-self.out
-          awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 9) ok = 1 } END { exit !ok }' push-self.out
-          awk '/^確かめた 回数: /{ if ($3 + 0 >= 17) ok = 1 } END { exit !ok }' push-self.out
+          awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 12) ok = 1 } END { exit !ok }' push-self.out
+          awk '/^確かめた 回数: /{ if ($3 + 0 >= 26) ok = 1 } END { exit !ok }' push-self.out
 
       - name: Lint (eslint)
         run: npm run lint
@@ -163,3 +163,10 @@ jobs:
           node tests/kinshi-ji.test.mjs --self-test | tee kinshi24-self.out
           awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 29) ok = 1 } END { exit !ok }' kinshi24-self.out
           awk '/^確かめた 回数: /{ if ($3 + 0 >= 234) ok = 1 } END { exit !ok }' kinshi24-self.out
+      # 押す commit の 中身の 門も node 24 で（手元の 機械の node は 24・2026-10-11）
+      - name: 押す commit の 中身の 門の自己確認（node 24）
+        shell: bash
+        run: |
+          node .githooks/pre-push-kinshi.mjs --self-test | tee push24-self.out
+          awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 12) ok = 1 } END { exit !ok }' push24-self.out
+          awk '/^確かめた 回数: /{ if ($3 + 0 >= 26) ok = 1 } END { exit !ok }' push24-self.out

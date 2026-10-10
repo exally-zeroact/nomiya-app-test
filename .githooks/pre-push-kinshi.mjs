@@ -121,6 +121,17 @@ export function commitSource(cwd, commit, KB = K) {
    返す：{ heads, bodyFile, dir } か { err } */
 export const BODY = "tests/kinshi-ji.test.mjs";
 export const GATE = ".githooks/pre-push-kinshi.mjs";
+export const FINGER = ".githooks/kinshi-finger";
+/* hook の 中の 自己確認の 床＝★ci.yml の 床と 揃える★（自己確認を 0/0 に した 本体が 枝へ 緑で 出た＝10-11 taiketsu 実測） */
+export const FLOOR = {
+  [BODY]: { groups: 29, checks: 234 },
+  [GATE]: { groups: 12, checks: 26 },
+};
+export function selfOk(stdout, floor) {
+  const m = /^自己確認: (\d+)\/(\d+)$/m.exec(stdout || "");
+  const c = /^確かめた 回数: (\d+)$/m.exec(stdout || "");
+  return !!m && m[1] === m[2] && +m[1] >= floor.groups && !!c && +c[1] >= floor.checks;
+}
 export function bodyForPush(cwd, lines, gateFile = SELF) {
   const heads = [];
   for (const line of lines) {
@@ -137,15 +148,19 @@ export function bodyForPush(cwd, lines, gateFile = SELF) {
   };
   const bodies = new Set();
   const gates = new Set();
+  const fingers = new Set();
   for (const h of heads) {
     const b = blob(h, BODY);
     const g = blob(h, GATE);
+    const f = blob(h, FINGER);
     if (!b) return { err: "押す 頭 " + h.slice(0, 7) + " に 見張りの 本体（" + BODY + "）が 無い" };
     if (!g) return { err: "押す 頭 " + h.slice(0, 7) + " に 門（" + GATE + "）が 無い" };
+    if (!f) return { err: "押す 頭 " + h.slice(0, 7) + " に 指紋の 紙（" + FINGER + "）が 無い" };
     bodies.add(b);
     gates.add(g);
+    fingers.add(f);
   }
-  if (bodies.size > 1 || gates.size > 1)
+  if (bodies.size > 1 || gates.size > 1 || fingers.size > 1)
     return { err: "押す 頭ごとに 見張りの 本体・門の 版が 違う（1 回の push は 1 つの 版で）" };
   const here = gitText(cwd, "hash-object", "--path=" + GATE, gateFile).trim();
   if (here !== [...gates][0])
@@ -159,7 +174,11 @@ export function bodyForPush(cwd, lines, gateFile = SELF) {
   const bodyFile = path.join(dir, BODY);
   fs.mkdirSync(path.dirname(bodyFile), { recursive: true });
   fs.writeFileSync(bodyFile, gitBuf(cwd, "cat-file", "blob", [...bodies][0]));
-  return { heads, bodyFile, dir };
+  /* 指紋の 紙も 押す 頭の 物（手元の 紙を 書き換えて 違う 一覧で 押した 字が 緑で 出た＝10-11 taiketsu 実測） */
+  const fingerFile = path.join(dir, FINGER);
+  fs.mkdirSync(path.dirname(fingerFile), { recursive: true });
+  fs.writeFileSync(fingerFile, gitBuf(cwd, "cat-file", "blob", [...fingers][0]));
+  return { heads, bodyFile, fingerFile, dir };
 }
 
 /* 門の 本体：赤なら 1 */
@@ -186,9 +205,11 @@ export function check({ cwd, lines, env = process.env, file, fingerFile, K: KB =
   let files = 0;
   let red = 0;
   let selfNeeded = false;
+  let gateNeeded = false;
   for (const c of commits) {
     const { files: fl, src } = commitSource(cwd, c, KB);
-    if (fl.includes("tests/kinshi-ji.test.mjs")) selfNeeded = true;
+    if (fl.includes(BODY)) selfNeeded = true;
+    if (fl.includes(GATE)) gateNeeded = true;
     files += fl.length;
     if (!fl.length) continue;
     const r = KB.scan({ root: cwd, files: fl, words, src });
@@ -206,7 +227,7 @@ export function check({ cwd, lines, env = process.env, file, fingerFile, K: KB =
         files +
         " 本・字は 出さない）"
     );
-    return { code: 1, out, selfNeeded };
+    return { code: 1, out, selfNeeded, gateNeeded };
   }
   out.push(
     "✓ 押す commit " +
@@ -219,7 +240,7 @@ export function check({ cwd, lines, env = process.env, file, fingerFile, K: KB =
       finger +
       "）"
   );
-  return { code: 0, out, selfNeeded };
+  return { code: 0, out, selfNeeded, gateNeeded };
 }
 
 function selfTest() {
@@ -436,6 +457,69 @@ function selfTest() {
     g2("reset", "-q", "--hard", w1);
     must(gate(b0, b0).status === 0, "何も 押さない（同じ sha）で 赤");
   });
+  T("手元の 指紋の 紙を 違う 一覧に 合わせても、押す 頭の 紙で 止まる", () => {
+    const list2 = path.join(tmp, "list2.txt");
+    fs.writeFileSync(list2, ["別の", "ことば"].join("") + "\n");
+    const f2 = K.loadWords({ env: {}, file: list2 }).finger;
+    put(FINGER, f2 + "\n");
+    const s = spawnSync(process.execPath, [path.join(r2, GATE)], {
+      cwd: r2,
+      env: { ...env2, KINSHI_JI_FILE: list2 },
+      encoding: "utf8",
+      input: "refs/heads/main " + w1 + " refs/heads/main " + b0 + "\n",
+    });
+    put(FINGER, finger + "\n");
+    must(
+      s.status === 1 && said(s).includes("指紋"),
+      "手元の 指紋の 紙で 違う 一覧が 通った: " + said(s)
+    );
+  });
+  T("自己確認を 床 未満に した 本体（字を 見ない）を 押すと 止まる", () => {
+    const weak =
+      "export * from " +
+      JSON.stringify(pathToFileURL(path.join(path.dirname(SELF), "..", BODY)).href) +
+      ";\n" +
+      "export function scan() { return { hits: [], notes: [], reds: [], c: 0, passed: 0 }; }\n" +
+      'if (process.argv.includes("--self-test")) { console.log("自己確認: 1/1"); console.log("確かめた 回数: 1"); }\n';
+    put(BODY, weak);
+    put("w9.txt", WORD + "\n");
+    const wv = commit2("wv");
+    const s = gate(w1, wv);
+    must(s.status === 1 && said(s).includes("床"), "床 未満の 自己確認で 通った: " + said(s));
+    must(selfOk("自己確認: 29/29\n確かめた 回数: 234\n", FLOOR[BODY]), "床 ちょうどが 赤");
+    must(!selfOk("自己確認: 29/29\n確かめた 回数: 233\n", FLOOR[BODY]), "回数 1 足りないのが 緑");
+    must(!selfOk("自己確認: 28/29\n確かめた 回数: 300\n", FLOOR[BODY]), "1 組 落ちたのが 緑");
+    g2("reset", "-q", "--hard", w1);
+  });
+  T("門が 変わった push は 門の 自己確認を 床で 見る・一時 dir を 残さない", () => {
+    const real = fs.readFileSync(path.join(r2, GATE), "utf8");
+    /* 字を 2 つに 割る＝この 行 自身に 当たらない */
+    const hook = 'if (process.argv.includes("--self-test")) process.exit(' + "selfTest());";
+    must(real.split(hook).length === 2, "門の 自己確認の 口が 当たらない（試しが 壊れている）");
+    /* 門の 自己確認を 床 未満（1/1）に 弱めた 門を commit して 押す＝自己確認を 回して 床で 赤（門の中で 門の 自己確認を 呼ぶと 入れ子が 終わらないので 弱めた 門で 見る） */
+    put(
+      GATE,
+      real.replace(
+        hook,
+        'if (process.argv.includes("--self-test")) { console.log("自己確認: 1/1"); console.log("確かめた 回数: 1"); process.exit(0); }'
+      )
+    );
+    const wg = commit2("wg");
+    const s = gate(w1, wg);
+    must(
+      s.status === 1 && said(s).includes("門の 自己確認") && said(s).includes("床"),
+      "弱めた 門の 自己確認で 通った: " + said(s)
+    );
+    g2("reset", "-q", "--hard", w1);
+    const before = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith("ppk-body-")).length;
+    put(BODY, "export const = ;\n");
+    const wb = commit2("wb");
+    const s2 = gate(w1, wb);
+    must(s2.status !== 0, "構文エラーの 本体で 緑");
+    const after = fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith("ppk-body-")).length;
+    must(after <= before, "一時 dir が 残った（" + before + "→" + after + "）");
+    g2("reset", "-q", "--hard", w1);
+  });
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log("自己確認: " + pass + "/" + (pass + fail));
   console.log("確かめた 回数: " + checks);
@@ -452,29 +536,46 @@ if (isMain) {
     console.error("✗ 押すのを 止めた：" + b.err);
     process.exit(1);
   }
-  const done = () => b.dir && fs.rmSync(b.dir, { recursive: true, force: true });
-  const KB = b.bodyFile ? await import(pathToFileURL(b.bodyFile).href) : K;
-  const r = check({
-    cwd: root,
-    lines,
-    fingerFile: path.join(root, ".githooks", "kinshi-finger"),
-    K: KB,
-  });
-  for (const l of r.out) (r.code ? console.error : console.log)(l);
-  if (r.code) {
-    done();
-    process.exit(1);
+  /* 一時 dir は 赤・throw（取り出した 本体の 構文エラー 等）でも 消す（残った＝10-11 taiketsu 実測） */
+  let code = 1;
+  try {
+    if (!b.bodyFile) code = 0; /* 消すだけの push＝見る commit が 無い */
+    else {
+      const KB = await import(pathToFileURL(b.bodyFile).href);
+      const r = check({ cwd: root, lines, fingerFile: b.fingerFile, K: KB });
+      for (const l of r.out) (r.code ? console.error : console.log)(l);
+      code = r.code;
+      const runs = [
+        [r.selfNeeded, b.bodyFile, BODY, "見張りの 本体"],
+        [r.gateNeeded, SELF, GATE, "門"],
+      ];
+      for (const [need, file, rel, name] of runs) {
+        if (code || !need) continue;
+        const s = spawnSync(process.execPath, [file, "--self-test"], { encoding: "utf8" });
+        const ok = s.status === 0 && selfOk(s.stdout, FLOOR[rel]);
+        const f = FLOOR[rel];
+        console.log(
+          ok
+            ? "✓ " +
+                name +
+                "が 変わったので 自己確認も 回した（通った・床 " +
+                f.groups +
+                " 組・" +
+                f.checks +
+                " 回）"
+            : "✗ " +
+                name +
+                "の 自己確認が 通らないか 床（" +
+                f.groups +
+                " 組・" +
+                f.checks +
+                " 回）未満"
+        );
+        if (!ok) code = 1;
+      }
+    }
+  } finally {
+    if (b.dir) fs.rmSync(b.dir, { recursive: true, force: true });
   }
-  if (r.selfNeeded) {
-    const s = spawnSync(process.execPath, [b.bodyFile, "--self-test"], { encoding: "utf8" });
-    done();
-    const ok = s.status === 0 && /^自己確認: (\d+)\/\1$/m.test(s.stdout || "");
-    console.log(
-      ok
-        ? "✓ 見張りの 本体が 変わったので 自己確認も 回した（通った）"
-        : "✗ 見張りの 自己確認が 通らない"
-    );
-    if (!ok) process.exit(1);
-  }
-  done();
+  process.exit(code);
 }
