@@ -93,18 +93,26 @@ export function loadWords({ env = process.env, file = LOCAL_LIST } = {}) {
   for (const line of raw.split(/\r?\n/)) {
     const a = normAscii(line);
     if (!a) continue;
-    /* 英字の 語：1語の 物は 大文字小文字を 区別（ふつうの 英単語に 当てない）。
-       2語 以上の 物は 大文字小文字を 問わず、間が 空白・. _ + - でも 無しでも 当てる（メール・ドメイン・続け書き） */
+    /* 英字の 語：1語の ふつうの 物は 大文字小文字を 区別（ふつうの 英単語に 当てない）。
+       2語 以上・メールや ドメインの 形（@ . - を 含む）は 大文字小文字を 問わない。
+       2語 以上は 間が 空白・. _ + - ・ / でも 無しでも 当てる（メール・ドメイン・続け書き） */
     const toks = a.split(" ");
     const w = !isAscii(a)
       ? { ascii: false, key: normJa(line) }
       : toks.length === 1
-        ? { ascii: true, key: a, re: new RegExp("(?<![A-Za-z0-9])" + esc(a) + "(?![A-Za-z0-9])") }
+        ? {
+            ascii: true,
+            key: a,
+            re: new RegExp(
+              "(?<![A-Za-z0-9])" + esc(a) + "(?![A-Za-z0-9])",
+              /[@.-]/.test(a) ? "i" : ""
+            ),
+          }
         : {
             ascii: true,
             key: a,
             re: new RegExp(
-              "(?<![A-Za-z0-9])" + toks.map(esc).join("[\\s._+-]*") + "(?![A-Za-z0-9])",
+              "(?<![A-Za-z0-9])" + toks.map(esc).join("[\\s._+/\\u30fb-]*") + "(?![A-Za-z0-9])",
               "i"
             ),
           };
@@ -210,11 +218,11 @@ export function readTexts(buf) {
       return null;
     }
   };
-  const jis = buf.includes(0x1b) ? strict("iso-2022-jp") : null;
+  /* ESC が あれば JIS（ISO-2022-JP）でも 読む。ほかの ESC 列（色の 印 等）が 混ざっても 飛ばして 読む */
+  const jis = buf.includes(0x1b) ? [new TextDecoder("iso-2022-jp").decode(buf)] : [];
   const u8 = strict("utf-8");
-  if (u8 !== null)
-    return { ok: true, texts: [u8, ...(buf.includes(0) ? utf16s : []), ...(jis ? [jis] : [])] };
-  /* UTF-8 で 読めない＝日本の 古い 字コード（Shift_JIS・EUC-JP・ISO-2022-JP）と BOM 無しの UTF-16 でも 読んで 当てる */
+  if (u8 !== null) return { ok: true, texts: [u8, ...(buf.includes(0) ? utf16s : []), ...jis] };
+  /* UTF-8 で 読めない＝日本の 古い 字コード（Shift_JIS・EUC-JP）と BOM 無しの UTF-16 でも 読んで 当てる */
   const sjis = strict("shift_jis");
   const euc = strict("euc-jp");
   const texts = [
@@ -223,9 +231,16 @@ export function readTexts(buf) {
     new TextDecoder("shift_jis").decode(buf),
     new TextDecoder("euc-jp").decode(buf),
     ...utf16s,
-    ...(jis ? [jis] : []),
+    ...jis,
   ];
-  return { ok: Boolean(sjis !== null || euc !== null || jis), texts };
+  return { ok: Boolean(sjis !== null || euc !== null || utf16s.some(looksLikeText)), texts };
+}
+
+/* BOM 無しの UTF-16 として 読んだ 字が「字らしい」か（日本語・英数・句読点が 9割 以上） */
+function looksLikeText(s) {
+  if (!s || s.includes("\uFFFD")) return false;
+  const good = s.match(/[\t\n\r\x20-\x7e\u3000-\u30ff\u4e00-\u9fff\uff00-\uffef]/g);
+  return Boolean(good) && good.length >= s.length * 0.9;
 }
 
 /* ---------- 字の 無い 形と 分かっている バイナリ（読めなくても 赤に しない） ---------- */
@@ -251,8 +266,10 @@ export function pngTexts(buf) {
     const len = buf.readUInt32BE(p);
     const type = buf.slice(p + 4, p + 8).toString("latin1");
     const d = buf.slice(p + 8, p + 8 + len);
-    if (type === "tEXt") texts.push(d.toString("latin1").replace("\0", " "));
-    else if (type === "zTXt") {
+    if (type === "tEXt") {
+      texts.push(d.toString("latin1").replace("\0", " "));
+      texts.push(d.toString("utf8").replace("\0", " "));
+    } else if (type === "zTXt") {
       const z = d.indexOf(0);
       texts.push(
         d.slice(0, z).toString("latin1") + " " + zlib.inflateSync(d.slice(z + 2)).toString("latin1")
@@ -421,6 +438,7 @@ export function scan({ root, files, words }) {
         scanText(label + "(PNG の 字の 塊)", t);
       }
       scanText(label + "(PNG の 生の 字)", buf.toString("latin1"));
+      scanText(label + "(PNG の 生の 字)", new TextDecoder("utf-8").decode(buf));
       return;
     }
     if (buf[0] === 0x1f && buf[1] === 0x8b) {
@@ -960,6 +978,18 @@ function selfTest() {
       go([put("raw.png", Buffer.concat([makePng([]), Buffer.from("Zorgox")]))]).code === 1,
       "IEND の 後ろ"
     );
+    must(
+      go([
+        put(
+          "rawj.png",
+          Buffer.concat([
+            makePng([["prVt", Buffer.from("見本台ためし語")]]),
+            Buffer.from("見本台ためし語"),
+          ])
+        ),
+      ]).code === 1,
+      "PNG の 中の UTF-8 の 日本語"
+    );
   });
   T("日本の 古い 字コード・BOM 無しの UTF-16（日本語だけ）・gzip でも 当たる", () => {
     /* 作り物の 語を 各 字コードで 書いた バイト（字の 並びとしては ソースに 載らない） */
@@ -970,7 +1000,26 @@ function selfTest() {
       ["u16le.txt", "8b892c67f0535f30813057309e8a"],
       ["u16be.txt", "898b672c53f0305f308130578a9e"],
     ])
-      must(go([put(nm, Buffer.from(hex, "hex"))]).code === 1, nm + " で 当たらない");
+      must(go([put(nm, Buffer.from(hex, "hex"))]).r.hits.length >= 1, nm + " で 語が 当たらない");
+    /* JIS の 語に 色の 印（ESC [0m）が 混ざっても 当たる */
+    must(
+      go([
+        put(
+          "jis2.log",
+          Buffer.concat([
+            Buffer.from("1b5b306d", "hex"),
+            Buffer.from("1b2442382b4b5c4266243f24612437386c1b2842", "hex"),
+          ])
+        ),
+      ]).r.hits.length >= 1,
+      "色の 印が 混ざった JIS で 当たらない"
+    );
+    /* 語の 無い BOM 無し UTF-16（日本語だけ）は 赤に しない */
+    for (const enc of ["utf16le", "be"]) {
+      const b = Buffer.from("ふつうの 日本語の 文です。", "utf16le");
+      if (enc === "be") b.swap16();
+      must(go([put("plain-" + enc + ".txt", b)]).code === 0, enc + " の ふつうの 文で 赤");
+    }
     must(go([put("z.gz", zlib.gzipSync(Buffer.from("見本台ためし語")))]).code === 1, "gzip の 中");
   });
   T("知らない 形の バイナリは 赤・分かっている 形（JPEG 等）は 未測定と 書く", () => {

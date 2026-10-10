@@ -65,6 +65,8 @@ jobs:
       #   当たっても 字は 出さない（公開の CI ログは 誰でも 読める）。zip（xlsx 等）は ほどいて 中まで 見る。
       - name: 実在の字が戻っていないか（一覧は secret）
         # 本体が 何も 言わずに 終わる（main が 走らない 等）のを 緑に しない＝終わりの 行が 出たかも 見る
+        # shell: bash＝-eo pipefail（書かないと -e だけで、tee の 前の 終わり値が 捨てられる）
+        shell: bash
         run: |
           npm run kinshi | tee kinshi.out
           grep -q "^✓ 実在の 字 0 件" kinshi.out
@@ -73,9 +75,11 @@ jobs:
           KINSHI_JI_FINGER: ${{ vars.KINSHI_JI_FINGER }}
 
       - name: 実在の字の見張りの自己確認
+        # 全部 通って、しかも 19 本 以上 走った 時だけ 緑（0/0・本数が 減った を 止める）
+        shell: bash
         run: |
           node tests/kinshi-ji.test.mjs --self-test | tee kinshi-self.out
-          grep -Eq "^自己確認: ([0-9]+)/\1$" kinshi-self.out
+          awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 19) ok = 1 } END { exit !ok }' kinshi-self.out
 
       - name: Lint (eslint)
         run: npm run lint
