@@ -637,7 +637,27 @@ export function nameFields(partName, xml) {
 }
 
 /* ---------- 本体 ---------- */
-export function scan({ root, files, words }) {
+/* 読み口（src）＝{ read(rel)→Buffer か throw, kind(rel)→"file"|"other"|"none", id(rel)→blob の id 頭16字, shiroText()→白名簿の 字 か null, partial }。
+   既定は 手元の 字（git ls-files の 道を fs で 読む）。push の 門は 押す commit の 中身を 渡す（tests/kinshi-ji の 外から） */
+export function localSource(root) {
+  return {
+    kind(rel) {
+      try {
+        return fs.lstatSync(path.join(root, rel)).isFile() ? "file" : "other";
+      } catch {
+        return "none";
+      }
+    },
+    read: (rel) => fs.readFileSync(path.join(root, rel)),
+    id: (rel) => blobId(root, rel),
+    shiroText() {
+      const f = path.join(root, SHIRO_PATH);
+      return fs.existsSync(f) ? fs.readFileSync(f, "utf8") : null;
+    },
+    partial: false,
+  };
+}
+export function scan({ root, files, words, src = localSource(root) }) {
   const hitSet = new Set();
   const notes = [];
   const reds = [];
@@ -919,7 +939,7 @@ export function scan({ root, files, words }) {
     for (const t of texts) scanText(label, t);
   }
 
-  const shiro = loadShiro(root, words);
+  const shiro = loadShiro(root, words, src.shiroText());
   const passed = [];
   files.forEach((rel, idx) => {
     const before = [hits.length, notes.length];
@@ -928,7 +948,7 @@ export function scan({ root, files, words }) {
     if (!ent) return;
     ent.used = true;
     const lab = named(rel, "(追跡物の " + (idx + 1) + " 本目)");
-    const sha = blobId(root, rel);
+    const sha = src.id(rel);
     if (sha !== ent.sha)
       return reds.push(
         "白名簿: " +
@@ -956,8 +976,10 @@ export function scan({ root, files, words }) {
     passed.push({ label: lab, kind: ent.kind, n: (ent.notes ? nNote : 0) + (ent.hits ? nHit : 0) });
   });
   for (const e of shiro.errors) reds.push("白名簿: " + e);
-  for (const [rel, ent] of shiro.map)
-    if (!ent.used) reds.push("白名簿の 道が 追跡物に 無い（" + named(rel, "名指しの 道") + "）");
+  /* 一部の 道だけを 見る 時（push の 門の 変わった 物）は、使われない 名指しを 赤に しない */
+  if (!src.partial)
+    for (const [rel, ent] of shiro.map)
+      if (!ent.used) reds.push("白名簿の 道が 追跡物に 無い（" + named(rel, "名指しの 道") + "）");
   return { hits, notes, reds, c, passed };
 
   function scanFile(rel, idx) {
@@ -967,18 +989,13 @@ export function scan({ root, files, words }) {
         "追跡物の " + (idx + 1) + " 本目の 道・名前: 一覧の " + (w + 1) + " 番目（名前は 出さない）"
       );
     const label = named(rel, "(追跡物の " + (idx + 1) + " 本目)");
-    const abs = path.join(root, rel);
-    let st;
-    try {
-      st = fs.lstatSync(abs);
-    } catch {
-      return reds.push(label + ": 追跡物が 手元に 無い（未測定＝赤）");
-    }
-    if (!st.isFile())
+    const kind = src.kind(rel);
+    if (kind === "none") return reds.push(label + ": 追跡物が 手元に 無い（未測定＝赤）");
+    if (kind !== "file")
       return reds.push(label + ": ふつうの ファイルでない（submodule・リンク 等＝未測定＝赤）");
     let buf;
     try {
-      buf = fs.readFileSync(abs);
+      buf = src.read(rel);
     } catch {
       return reds.push(label + ": 読めない（未測定＝赤）");
     }
@@ -1016,39 +1033,39 @@ export function blobId(root, rel) {
    ★中身（git の blob の id）が 変われば 赤＝目で 見直して 名指しし直す★。件数が 違っても 赤（0件は 書けない＝要らない 名指し）。
    白名簿 自身の 道・行に 一覧の 字・同じ 道の 2行・知らない 種類・形違い は 赤。訳は 出しに 書かない。 */
 export const SHIRO_PATH = "tests/kinshi-ji-shiro.txt";
-export function loadShiro(root, words = []) {
+export function loadShiro(root, words = [], text) {
   const map = new Map();
   const errors = [];
-  const f = path.join(root, SHIRO_PATH);
-  if (!fs.existsSync(f)) return { map, errors };
-  fs.readFileSync(f, "utf8")
-    .split(/\r?\n/)
-    .forEach((line, i) => {
-      if (!line.trim() || line.startsWith("#")) return;
-      const at = i + 1 + " 行目";
-      if (matchIdx(line, words).length)
-        return errors.push(at + " に 一覧の 字が ある（字は 出さない）");
-      const [rel, kind, sha, why] = line.split("\t").map((x) => (x || "").trim());
-      if (!rel || !kind || !sha || !why)
-        return errors.push(at + " の 形が 違う（道<TAB>種類<TAB>git の blob の id 頭16字<TAB>訳）");
-      if (rel === SHIRO_PATH) return errors.push(at + " で 白名簿 自身を 名指ししている");
-      if (map.has(rel)) return errors.push(at + " で 同じ 道を 2回 名指ししている");
-      /* 種類＝「未測定N」「当たりM」か その 両方（・ か , で つなぐ）。N・M は 1 以上・同じ 種類の 2度書きは 赤 */
-      const ent = { kind, notes: 0, hits: 0, sha, used: false };
-      const parts = kind.split(/[・,、]/);
-      for (const part of parts) {
-        const km = part.trim().match(/^(未測定|当たり)([1-9]\d*)$/);
-        const key = km && (km[1] === "未測定" ? "notes" : "hits");
-        if (!km || ent[key])
-          return errors.push(
-            at + " の 種類が 知らない 形（未測定N・当たりM か その 片方・数は 1 以上）"
-          );
-        ent[key] = Number(km[2]);
-      }
-      if (!/^[0-9a-f]{16}$/.test(sha))
-        return errors.push(at + " の blob の id が 16字の 形で ない");
-      map.set(rel, ent);
-    });
+  if (text === undefined) {
+    const f = path.join(root, SHIRO_PATH);
+    text = fs.existsSync(f) ? fs.readFileSync(f, "utf8") : null;
+  }
+  if (text === null) return { map, errors };
+  text.split(/\r?\n/).forEach((line, i) => {
+    if (!line.trim() || line.startsWith("#")) return;
+    const at = i + 1 + " 行目";
+    if (matchIdx(line, words).length)
+      return errors.push(at + " に 一覧の 字が ある（字は 出さない）");
+    const [rel, kind, sha, why] = line.split("\t").map((x) => (x || "").trim());
+    if (!rel || !kind || !sha || !why)
+      return errors.push(at + " の 形が 違う（道<TAB>種類<TAB>git の blob の id 頭16字<TAB>訳）");
+    if (rel === SHIRO_PATH) return errors.push(at + " で 白名簿 自身を 名指ししている");
+    if (map.has(rel)) return errors.push(at + " で 同じ 道を 2回 名指ししている");
+    /* 種類＝「未測定N」「当たりM」か その 両方（・ か , で つなぐ）。N・M は 1 以上・同じ 種類の 2度書きは 赤 */
+    const ent = { kind, notes: 0, hits: 0, sha, used: false };
+    const parts = kind.split(/[・,、]/);
+    for (const part of parts) {
+      const km = part.trim().match(/^(未測定|当たり)([1-9]\d*)$/);
+      const key = km && (km[1] === "未測定" ? "notes" : "hits");
+      if (!km || ent[key])
+        return errors.push(
+          at + " の 種類が 知らない 形（未測定N・当たりM か その 片方・数は 1 以上）"
+        );
+      ent[key] = Number(km[2]);
+    }
+    if (!/^[0-9a-f]{16}$/.test(sha)) return errors.push(at + " の blob の id が 16字の 形で ない");
+    map.set(rel, ent);
+  });
   return { map, errors };
 }
 
