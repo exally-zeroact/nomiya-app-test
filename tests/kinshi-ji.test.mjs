@@ -572,7 +572,11 @@ export function isBiff12(buf, recs) {
 export const BIFF12_PERSON = new Map([
   [0x278, "xlsb の コメントの 作者"],
   [0x224, "xlsb の ファイル共有の 名前"],
+  [0x817, "xlsb の 保存した 場所の 道（absPath）"],
 ]);
+/* BIFF12 で 読めた 扱いに する 部品（人の 欄を 持たない か、人の 記録を 上で 見る 物）。他の .bin は 未測定 */
+const BIFF12_READ =
+  /(^|\/)xl\/(sharedStrings|styles|calcChain|metadata|workbook|comments\d*|worksheets\/(sheet|binaryIndex)\d+|tables\/table\d+)\.bin$/i;
 export function wideStrings(data) {
   const out = [];
   for (let o = 0; o + 4 <= data.length; o++) {
@@ -599,14 +603,14 @@ function xmlText(b) {
 }
 
 /* ---------- 作者・会社・利用者の 欄 ---------- */
-const NOT_PERSON_PART =
-  /(^|\/)xl\/(tables|pivotTables|pivotCache|queryTables|externalLinks|connections)(\/|\.xml)/i;
+/* Excel の 表の 部品の displayName は 表の 名前（人で ない）＝この 1つだけ 作者の 欄から 外す */
+const TABLE_PART = /(^|\/)xl\/tables\/[^/]+\.xml$/i;
 const NAME_TAGS =
-  /<(?:[\w-]+:)?(creator|lastModifiedBy|Company|Manager|initial-creator|author)\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:[\w-]+:)?\1>)/g;
+  /<(?:[\w-]+:)?(creator|lastModifiedBy|Company|Manager|initial-creator|author)\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:[\w-]+:)?\1>)/gi;
 const NAME_ATTRS =
-  /\s(?:[\w-]+:)?(author|displayName|initials|userName|userId)\s*=\s*(["'])([\s\S]*?)\2/g;
+  /\s(?:[\w-]+:)?(author|displayName|initials|userName|userId|refreshedBy)\s*=\s*(["'])([\s\S]*?)\2/gi;
 const NAME_ELEM_ATTR =
-  /<(?:[\w-]+:)?(cmAuthor|userInfo|fileSharing|absPath)\b[^>]*?\s(name|url)\s*=\s*(["'])([\s\S]*?)\3/g;
+  /<(?:[\w-]+:)?(cmAuthor|userInfo|fileSharing|absPath)\b[^>]*?\s(name|url)\s*=\s*(["'])([\s\S]*?)\3/gi;
 const CUSTOM_VAL = /<vt:(?:lpwstr|lpstr|bstr)>([\s\S]*?)<\/vt:(?:lpwstr|lpstr|bstr)>/g;
 export function nameFields(partName, xml) {
   const out = [];
@@ -702,8 +706,8 @@ export function scan({ root, files, words }) {
           notes.push(pl + ": 作者の 欄の 部品を 読めない（未測定）");
         /* 表・集計表・つなぎの 部品の displayName は Excel の 表の 名前（人で ない）＝作者の 欄として 見ない。
            core.xml に 作者の 欄が 無いのは「空」と 同じ（空か 見本 だけ 通す 決まりの 中） */
-        if (!NOT_PERSON_PART.test(part.name))
-          for (const [kind, v] of nameFields(part.name, text)) checkName(pl, kind, v);
+        for (const [kind, v] of nameFields(part.name, text))
+          if (!(kind === "displayName" && TABLE_PART.test(part.name))) checkName(pl, kind, v);
       });
       return;
     }
@@ -828,7 +832,8 @@ export function scan({ root, files, words }) {
     if (label.includes("!") && /\.bin$/i.test(label)) {
       for (const t of texts) scanText(label, t);
       const recs = [];
-      if (isBiff12(buf, recs)) {
+      const partName = label.slice(label.lastIndexOf("!") + 1);
+      if (isBiff12(buf, recs) && BIFF12_READ.test(partName)) {
         for (const rc of recs)
           if (BIFF12_PERSON.has(rc.type)) {
             const ws = wideStrings(rc.data).filter((x) => /[^\u0000-\u001f]/.test(x));
@@ -841,7 +846,9 @@ export function scan({ root, files, words }) {
           label +
             (ole
               ? ": OLE の 部品（VBA 等）＝中の 字は 見ていない（未測定）"
-              : ": 形の 分からない バイナリの 部品（BIFF12 でも 印刷の 設定でも ない＝未測定）")
+              : recs.length
+                ? ": xlsb の 人の 欄を 見ていない 部品（変更履歴・集計表 等＝未測定）"
+                : ": 形の 分からない バイナリの 部品（BIFF12 でも 印刷の 設定でも ない＝未測定）")
         );
       }
       return;
@@ -2137,6 +2144,90 @@ function selfTest() {
       fs.writeFileSync(path.join(repo, "b.txt"), "ふつう" + NL + "三行目" + NL);
       must(blobId(repo, "a.txt") !== blobId(repo, "b.txt"), "中身が 違うのに 印が 同じ");
       must(/^[0-9a-f]{16}$/.test(blobId(repo, "a.txt")), "印の 形が 違う");
+    }
+  );
+  T(
+    "xlsb の 保存した 場所（記録 2071）・変更履歴は 未測定・表の 部品の 人の 欄・refreshedBy・大文字の Creator",
+    () => {
+      const wrec = (t1, t2, txt) => {
+        const u = Buffer.from(txt, "utf16le");
+        const body = Buffer.concat([Buffer.alloc(4), u]);
+        body.writeUInt32LE(txt.length, 0);
+        return Buffer.concat([Buffer.from([t1, t2, body.length]), body]);
+      };
+      const plain = Buffer.from([0x01, 0x00]);
+      const xb = (name, bin) =>
+        makeZip([
+          ["docProps/core.xml", core("見本")],
+          [name, bin],
+        ]);
+      must(
+        go([
+          put(
+            "wb1.xlsb",
+            xb(
+              "xl/workbook.bin",
+              Buffer.concat([
+                plain,
+                wrec(
+                  0x97,
+                  0x10,
+                  "C:" + String.fromCharCode(92) + "Users" + String.fromCharCode(92) + "tanin"
+                ),
+              ])
+            )
+          ),
+        ]).code === 1,
+        "xlsb の 保存場所の 道が 緑"
+      );
+      must(
+        go([put("wb2.xlsb", xb("xl/workbook.bin", Buffer.concat([plain, wrec(0x97, 0x10, "")])))])
+          .code === 0,
+        "空の 保存場所で 赤"
+      );
+      const rv = go([
+        put(
+          "rv.xlsb",
+          xb("xl/revisions/revisionHeaders.bin", Buffer.concat([plain, wrec(0x01, 0x01, "tanin")]))
+        ),
+      ]);
+      must(
+        rv.code === 1 && rv.r.notes.some((n2) => n2.includes("人の 欄を 見ていない")),
+        "変更履歴の 部品が 未測定で ない"
+      );
+      must(
+        go([
+          put(
+            "tb.xlsx",
+            makeZip([
+              ["docProps/core.xml", core("見本")],
+              ["xl/tables/table1.xml", '<table displayName="表1" author="他人"/>'],
+            ])
+          ),
+        ]).code === 1,
+        "表の 部品の author が 緑"
+      );
+      must(
+        go([
+          put(
+            "pv.xlsx",
+            makeZip([
+              ["docProps/core.xml", core("見本")],
+              [
+                "xl/pivotCache/pivotCacheDefinition1.xml",
+                '<pivotCacheDefinition refreshedBy="他人"/>',
+              ],
+            ])
+          ),
+        ]).code === 1,
+        "refreshedBy が 緑"
+      );
+      const upper =
+        '<cp:coreProperties xmlns:cp="x" xmlns:dc="y"><dc:Creator>他人</dc:Creator><cp:lastModifiedBy>見本</cp:lastModifiedBy></cp:coreProperties>';
+      must(
+        go([put("up.xlsx", makeZip([["docProps/core.xml", upper]]))]).code === 1,
+        "大文字の Creator が 緑"
+      );
     }
   );
   T("手元に 無い 追跡物・フォルダ（submodule の 形）・LFS の 指し札は 赤", () => {
