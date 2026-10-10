@@ -92,6 +92,15 @@ jobs:
           node .githooks/pre-push-author.mjs --self-test | tee mail-self.out
           awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 5) ok = 1 } END { exit !ok }' mail-self.out
 
+      # ★押す commit の 中身の 門（.githooks/pre-push-kinshi.mjs）の 自己確認★（2026-10-11）
+      #   門 自身は 手元の push で 走る。ここでは 門が 壊れていないか（入れて 消した 字を 赤に する 等）を 見る。
+      - name: 押す commit の 中身の 門の自己確認
+        shell: bash
+        run: |
+          node .githooks/pre-push-kinshi.mjs --self-test | tee push-self.out
+          awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 6) ok = 1 } END { exit !ok }' push-self.out
+          awk '/^確かめた 回数: /{ if ($3 + 0 >= 11) ok = 1 } END { exit !ok }' push-self.out
+
       - name: Lint (eslint)
         run: npm run lint
 
