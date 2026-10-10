@@ -89,7 +89,7 @@ jobs:
         shell: bash
         run: |
           node .githooks/pre-push-author.mjs --self-test | tee mail-self.out
-          sh scripts/ci-yuka.sh mail-self.out 5
+          sh scripts/ci-yuka.sh mail-self.out 6
 
       # ★押す commit の 中身の 門（.githooks/pre-push-kinshi.mjs）の 自己確認★（2026-10-11）
       #   門 自身は 手元の push で 走る。ここでは 門が 壊れていないか（入れて 消した 字を 赤に する 等）を 見る。
@@ -97,7 +97,7 @@ jobs:
         shell: bash
         run: |
           node .githooks/pre-push-kinshi.mjs --self-test | tee push-self.out
-          sh scripts/ci-yuka.sh push-self.out 12 27
+          sh scripts/ci-yuka.sh push-self.out 12 32
 
       # ★床の 物差し（scripts/ci-yuka.sh）の 自己確認＝ubuntu の awk で 233・234x 等が 赤に なるか★（2026-10-11）
       - name: 床の物差しの自己確認
@@ -179,4 +179,4 @@ jobs:
         shell: bash
         run: |
           node .githooks/pre-push-kinshi.mjs --self-test | tee push24-self.out
-          sh scripts/ci-yuka.sh push24-self.out 12 27
+          sh scripts/ci-yuka.sh push24-self.out 12 32

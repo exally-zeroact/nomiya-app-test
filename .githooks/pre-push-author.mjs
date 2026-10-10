@@ -12,7 +12,8 @@
  *     ・--no-verify で 押す／core.hooksPath を 置いていない clone や 別の 機械で 押す
  *     ・GitHub の 画面の merge・squash・編集（作者の 欄は アカウントの 設定で 決まる）
  *     ・注釈付きの tag の tagger の 欄／commit の 本文に 書いた メール（Signed-off-by 等）
- *     ・remote が 2つ 以上 ある 時の 新しい 枝の 初回 push（--not --remotes の 範囲）
+ *   新しい 枝の 範囲は ★押す 先の 遠く（$1）に 今 在る 頭★ から（ls-remote）。遠くの 名が 無い・読めない は 赤
+ *   （前は --not --remotes＝他の remote の 追跡枝に 在る commit を 見なかった・10-11）。
  *   CI は この 門の 自己確認だけを する（遠くに 出た commit の メールは 数えていない）。
  *
  *   使い方（git が 呼ぶ）: 標準入力に「<手元の ref> <手元の sha> <遠くの ref> <遠くの sha>」の 行
@@ -29,18 +30,58 @@ export const OK_MAIL = /^(\d+\+[^@\s]+@users\.noreply\.github\.com|noreply@githu
 
 const git = (cwd, ...a) => execFileSync("git", ["-C", cwd, ...a], { encoding: "utf8" }).trim();
 
+/* ★押す 先の 遠く（hook の $1）に 今 在る 頭（ls-remote）の うち、手元に 在る 物★＝新しい 枝の 範囲の 下限。
+   前の 形（--not --remotes）は 他の remote の 追跡枝・消された 枝の 古い 控えも「遠くに 在る」と 見て、
+   新しい 枝の 字が 素通りした（10-11 アマかせ taiketsu 実測・remote 2 つの clone で「0 本」）。
+   遠くの 名が 無い・読めない は throw（止める 側）。 */
+export function remoteKnown(cwd, remote) {
+  if (!remote) throw new Error("押す 先の 遠くの 名が 無い（hook の $1）");
+  let out;
+  try {
+    out = execFileSync("git", ["-C", cwd, "ls-remote", remote], {
+      encoding: "utf8",
+      maxBuffer: 1 << 28,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    throw new Error("押す 先の 遠くの 頭を 読めない（ls-remote）");
+  }
+  const shas = [
+    ...new Set(
+      out
+        .split("\n")
+        .map((l) => l.split("\t")[0])
+        .filter((x) => /^[0-9a-f]{40,64}$/.test(x))
+    ),
+  ];
+  if (!shas.length) return [];
+  const have = execFileSync("git", ["-C", cwd, "cat-file", "--batch-check"], {
+    input: shas.join("\n") + "\n",
+    encoding: "utf8",
+    maxBuffer: 1 << 28,
+  });
+  return have
+    .split("\n")
+    .filter((l) => / (commit|tag) /.test(l))
+    .map((l) => l.split(" ")[0]);
+}
+
 /* 押す 行ごとに、まだ 遠くに 無い commit を 並べ、欄が noreply で ない 物を 返す */
-export function badCommits(cwd, lines) {
+export function badCommits(cwd, lines, remote) {
   const bad = [];
   let seen = 0;
+  let known = null;
   for (const line of lines) {
     const [, localSha, , remoteSha] = line.trim().split(/\s+/);
     if (!localSha || ZERO.test(localSha)) continue; // 消す push
-    const range =
-      remoteSha && !ZERO.test(remoteSha)
-        ? [localSha, "^" + remoteSha]
-        : [localSha, "--not", "--remotes"];
-    const out = git(cwd, "rev-list", ...range);
+    let range;
+    if (remoteSha && !ZERO.test(remoteSha)) range = [localSha, "^" + remoteSha];
+    else range = [localSha, ...(known ??= remoteKnown(cwd, remote)).map((x) => "^" + x)];
+    const out = execFileSync("git", ["-C", cwd, "rev-list", "--stdin"], {
+      input: range.join("\n") + "\n",
+      encoding: "utf8",
+      maxBuffer: 1 << 28,
+    }).trim();
     for (const sha of out ? out.split("\n") : []) {
       seen++;
       const [ae, ce] = git(cwd, "log", "-1", "--format=%ae%n%ce", sha).split("\n");
@@ -109,6 +150,34 @@ function selfTest() {
       "消す push を 見た"
     );
   });
+  T(
+    "新しい 枝は 押す 先の 遠くに 無い commit を 見る（他の remote の 追跡枝で 見逃さない）",
+    () => {
+      const O = path.join(tmp, "O.git");
+      const TT = path.join(tmp, "T.git");
+      execFileSync("git", ["init", "-q", "--bare", O], { stdio: "pipe" });
+      execFileSync("git", ["init", "-q", "--bare", TT], { stdio: "pipe" });
+      g("remote", "add", "O", O);
+      g("remote", "add", "T", TT);
+      g("push", "-q", "O", a + ":refs/heads/main");
+      g("push", "-q", "T", c + ":refs/heads/side");
+      g("fetch", "-q", "--all");
+      const line = ["refs/heads/x " + c + " refs/heads/x " + "0".repeat(40)];
+      const r = badCommits(tmp, line, "O");
+      must(
+        r.seen === 2 && r.bad.length === 2,
+        "他の remote の 追跡枝に 在る commit を 見ていない: " + r.seen
+      );
+      let threw = 0;
+      for (const rem of [undefined, path.join(tmp, "無い.git")])
+        try {
+          badCommits(tmp, line, rem);
+        } catch {
+          threw++;
+        }
+      must(threw === 2, "押す 先の 名が 無い・読めない 遠くで 止まらない");
+    }
+  );
   T("GIT_INDEX_FILE・GIT_DIR を 付けて 走らせても 親の index・config を 1バイトも 変えない", () => {
     if (process.env.MAIL_SELFTEST_NESTED) return; // 入れ子の 中では 回さない
     const parent = fs.mkdtempSync(path.join(os.tmpdir(), "kinshi-parent-"));
@@ -176,7 +245,14 @@ function selfTest() {
 
 if (process.argv.includes("--self-test")) process.exit(selfTest());
 const input = fs.readFileSync(0, "utf8").split(/\r?\n/).filter(Boolean);
-const { bad, seen } = badCommits(process.cwd(), input);
+let bad;
+let seen;
+try {
+  ({ bad, seen } = badCommits(process.cwd(), input, process.argv[2]));
+} catch (e) {
+  console.error("✗ 押すのを 止めた：" + e.message);
+  process.exit(1);
+}
 if (bad.length) {
   console.error(
     "✗ 押すのを 止めた：commit の メールが noreply で ない（" + bad.length + " 件・字は 出さない）"

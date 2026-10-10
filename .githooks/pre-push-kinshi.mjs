@@ -17,7 +17,8 @@
  *
  *   門の 外：--no-verify・core.hooksPath を 置いていない clone・GitHub の 画面での 編集・
  *     commit 文／作者名／注釈タグの 文・門の 古い 版を 取り出した 作業木からの push（門 自体が 走らない）・
- *     遠くで 消された 枝の 古い 控え（--not --remotes が 遠く扱い）・.githooks/pre-push と メールの 門の 手元の 書き換え。
+ *     .githooks/pre-push と メールの 門の 手元の 書き換え。
+ *   新しい 枝の 範囲は ★押す 先の 遠く（$1）に 今 在る 頭★ から（ls-remote）。遠くの 名が 無い・読めない は 赤。
  *     最後の 門は CI（main と PR）。
  *
  *   使い方（git が 呼ぶ）: 標準入力に「<手元の ref> <手元の sha> <遠くの ref> <遠くの sha>」
@@ -49,17 +50,53 @@ const gitText = (cwd, ...a) =>
   });
 const gitBuf = (cwd, ...a) => execFileSync("git", ["-C", cwd, ...a], { maxBuffer: 1 << 28 });
 
+/* ★押す 先の 遠く（hook の $1）に 今 在る 頭（ls-remote）の うち、手元に 在る 物★＝新しい 枝の 範囲の 下限。
+   前の 形（--not --remotes）は 他の remote の 追跡枝・消された 枝の 古い 控えも「遠くに 在る」と 見て、
+   新しい 枝の 字が 素通りした（10-11 アマかせ taiketsu 実測・remote 2 つの clone で「0 本」）。
+   遠くの 名が 無い・読めない は throw（止める 側）。 */
+export function remoteKnown(cwd, remote) {
+  if (!remote) throw new Error("押す 先の 遠くの 名が 無い（hook の $1）");
+  let out;
+  try {
+    out = gitText(cwd, "ls-remote", remote);
+  } catch {
+    throw new Error("押す 先の 遠くの 頭を 読めない（ls-remote）");
+  }
+  const shas = [
+    ...new Set(
+      out
+        .split("\n")
+        .map((l) => l.split("\t")[0])
+        .filter((x) => /^[0-9a-f]{40,64}$/.test(x))
+    ),
+  ];
+  if (!shas.length) return [];
+  const have = execFileSync("git", ["-C", cwd, "cat-file", "--batch-check"], {
+    input: shas.join("\n") + "\n",
+    encoding: "utf8",
+    maxBuffer: 1 << 28,
+  });
+  return have
+    .split("\n")
+    .filter((l) => / (commit|tag) /.test(l))
+    .map((l) => l.split(" ")[0]);
+}
+
 /* 押す 行ごとに、まだ 遠くに 無い commit（古い 順） */
-export function pushedCommits(cwd, lines) {
+export function pushedCommits(cwd, lines, remote) {
   const out = [];
+  let known = null;
   for (const line of lines) {
     const [, localSha, , remoteSha] = line.trim().split(/\s+/);
     if (!localSha || ZERO.test(localSha)) continue;
-    const range =
-      remoteSha && !ZERO.test(remoteSha)
-        ? [localSha, "^" + remoteSha]
-        : [localSha, "--not", "--remotes"];
-    const list = gitText(cwd, "rev-list", "--reverse", ...range).trim();
+    let range;
+    if (remoteSha && !ZERO.test(remoteSha)) range = [localSha, "^" + remoteSha];
+    else range = [localSha, ...(known ??= remoteKnown(cwd, remote)).map((x) => "^" + x)];
+    const list = execFileSync("git", ["-C", cwd, "rev-list", "--reverse", "--stdin"], {
+      input: range.join("\n") + "\n",
+      encoding: "utf8",
+      maxBuffer: 1 << 28,
+    }).trim();
     for (const c of list ? list.split("\n") : []) if (!out.includes(c)) out.push(c);
   }
   return out;
@@ -125,7 +162,7 @@ export const FINGER = ".githooks/kinshi-finger";
 /* hook の 中の 自己確認の 床＝★ci.yml の 床と 揃える★（自己確認を 0/0 に した 本体が 枝へ 緑で 出た＝10-11 taiketsu 実測） */
 export const FLOOR = {
   [BODY]: { groups: 29, checks: 239 },
-  [GATE]: { groups: 12, checks: 27 },
+  [GATE]: { groups: 12, checks: 32 },
 };
 export function selfOk(stdout, floor) {
   const m = /^自己確認: (\d+)\/(\d+)$/m.exec(stdout || "");
@@ -182,7 +219,7 @@ export function bodyForPush(cwd, lines, gateFile = SELF) {
 }
 
 /* 門の 本体：赤なら 1 */
-export function check({ cwd, lines, env = process.env, file, fingerFile, K: KB = K }) {
+export function check({ cwd, lines, env = process.env, file, fingerFile, K: KB = K, remote }) {
   const out = [];
   const { words, finger } = KB.loadWords({
     env,
@@ -201,7 +238,12 @@ export function check({ cwd, lines, env = process.env, file, fingerFile, K: KB =
       code: 1,
       out: ["✗ 押すのを 止めた：一覧の 指紋が 違う（期待 " + want + "・今 " + finger + "）"],
     };
-  const commits = pushedCommits(cwd, lines);
+  let commits;
+  try {
+    commits = pushedCommits(cwd, lines, remote);
+  } catch (e) {
+    return { code: 1, out: ["✗ 押すのを 止めた：" + e.message] };
+  }
   let files = 0;
   let red = 0;
   let selfNeeded = false;
@@ -331,15 +373,44 @@ function selfTest() {
     must(run(c3, c4, { fingerFile: path.join(tmp, "bad") }).code === 1, "指紋違いで 緑");
     must(run(c3, c4, { fingerFile: path.join(tmp, "nai") }).code === 1, "指紋の 紙なしで 緑");
   });
-  T("初めての 枝（遠くの sha が 無い）は 遠くに 無い commit を 全部 見る", () => {
-    const r = check({
-      cwd: repo,
-      lines: ["refs/heads/x " + c4 + " refs/heads/x " + "0".repeat(40)],
-      env: {},
-      file: list,
-      fingerFile: ff,
-    });
-    must(r.code === 1, "初めての 枝で 字の 入った commit を 見ていない");
+  T("初めての 枝（遠くの sha が 無い）は 押す 先の 遠くに 無い commit を 全部 見る", () => {
+    /* 遠く 2 つ：O（押す 先・c1 だけ）と T（字の 入った c2〜c4 が 在る・追跡枝も 取ってある） */
+    const O = path.join(tmp, "O.git");
+    const TT = path.join(tmp, "T.git");
+    execFileSync("git", ["init", "-q", "--bare", O], { stdio: "pipe" });
+    execFileSync("git", ["init", "-q", "--bare", TT], { stdio: "pipe" });
+    g("remote", "add", "O", O);
+    g("remote", "add", "T", TT);
+    g("push", "-q", "O", c1 + ":refs/heads/main");
+    g("push", "-q", "T", c4 + ":refs/heads/side");
+    g("fetch", "-q", "--all");
+    const nb = (sha, remote) =>
+      check({
+        cwd: repo,
+        lines: ["refs/heads/x " + sha + " refs/heads/x " + "0".repeat(40)],
+        env: {},
+        file: list,
+        fingerFile: ff,
+        remote,
+      });
+    const r = nb(c4, "O");
+    must(
+      r.code === 1 && r.out.some((l) => l.includes(c2.slice(0, 7))),
+      "他の remote の 追跡枝に 在る 字の commit を 見ていない: " + r.out.join(" / ")
+    );
+    must(/commit 3 本/.test(r.out[0]), "押す 先に 無い 3 本を 見ていない: " + r.out[0]);
+    const ok = nb(c1, "O");
+    must(
+      ok.code === 0 && ok.out.some((l) => l.includes("commit 0 本")),
+      "押す 先に 在る commit の 新しい 枝で 赤"
+    );
+    must(nb(c4, undefined).code === 1, "押す 先の 名が 無いのに 緑");
+    must(nb(c4, path.join(tmp, "無い.git")).code === 1, "読めない 遠くで 緑");
+    /* 押す 先で 消された 枝の 古い 控え（追跡枝）が 在っても、今の 遠くの 頭で 見る */
+    g("push", "-q", "O", c4 + ":refs/heads/old");
+    g("fetch", "-q", "O");
+    g("push", "-q", "O", ":refs/heads/old");
+    must(nb(c4, "O").code === 1, "消された 枝の 古い 控えで 緑");
   });
   T("白名簿は その commit の 物と blob の id で 通す", () => {
     const pic = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x80, 0x81, 0x00]);
@@ -549,7 +620,13 @@ if (isMain) {
     if (!b.bodyFile) code = 0; /* 消すだけの push＝見る commit が 無い */
     else {
       const KB = await import(pathToFileURL(b.bodyFile).href);
-      const r = check({ cwd: root, lines, fingerFile: b.fingerFile, K: KB });
+      const r = check({
+        cwd: root,
+        lines,
+        fingerFile: b.fingerFile,
+        K: KB,
+        remote: process.argv[2],
+      });
       for (const l of r.out) (r.code ? console.error : console.log)(l);
       code = r.code;
       const runs = [
