@@ -5,29 +5,27 @@
  *   作り物に 替えたが、見張りが 無いと また 戻る（台本で xlsx を 作り直すと 作者名が 戻る 等）。
  *
  * ★禁止の 字の 一覧は repo に 置かない★（ここに 書くと 名前を もう一度 公開する）
- *   CI      … GitHub Actions の secret KINSHI_JI（1行に 1語）
+ *   CI      … GitHub Actions の secret KINSHI_JI（1行に 1語）＋ 変数 KINSHI_JI_FINGER（一覧の 指紋）
  *   手元    … ~/.tsukurimono/kinshi-ji.txt（repo の 外）
- *   ★どちらも 無い 時は「未測定」で 赤★（緑に 倒さない）
- *   出しに 一覧の 指紋（揃えた 一覧の sha256 の 頭8字）を 出す＝secret と 手元が 同じかを 照らせる
+ *   ★一覧が 無い 時は「未測定」で 赤★（緑に 倒さない）
+ *   ★CI では 指紋（揃えた 一覧の sha256 の 頭8字）を 照らす★＝secret が 縮んだ・壊れた なら 赤
  *
  * ★当たった 時に 字を 出さない★（公開の CI ログは 誰でも 読める）
- *   出すのは「どこ・行・一覧の 何番目か」だけ。★ファイル名・部品名に 一覧の 字が あれば 名前も 番号に 替える★
+ *   出すのは「どこ・行・一覧の 何番目か」だけ。道・ファイル名・部品名に 一覧の 字が あれば 番号に 替える
  *
  * 見る所:
- *   ・git が 追跡している 全部の ファイル。1行ずつ と、改行を 消して つないだ 字（行またぎ）
- *   ・zip（PK で 始まる 物。拡張子では 選ばない）は 全部 ほどく。中の zip も ほどく（3段まで）
- *     XML は タグを 外して つないだ 字にも 当てる（字が <t> に 分かれていても 拾う）
- *   ・PNG は 字の 入る 塊（tEXt・zTXt・iTXt）を ほどいて 当てる
- *   ・字の 読み分け：BOM（UTF-8・UTF-16LE・UTF-16BE）→ 無ければ UTF-8 として 厳しく 読む
- *   ・揃え方：&#..; を 戻す → NFKC → 幅の 無い 字を 消す → ハイフンの 仲間と「ー」を - に
- *       日本語の 語 … 空白を 全部 消して 含むか
- *       英字だけの 語 … 空白を 1つに 揃え、大文字小文字を 区別し、語の 境目で（識別子の 一部に 当てない）
+ *   ・git が 追跡している 全部の ファイル。1行ずつ・行を またいで つないだ 字・タグを 外して つないだ 字
+ *   ・zip（PK で 始まる 物。拡張子では 選ばない）は 全部 ほどく。中の zip も（3段まで・越えたら 赤）
+ *   ・PNG の 字の 塊（tEXt・zTXt・iTXt）／PDF の /Author と XMP の creator（「空か 見本」だけ 通す）
+ *   ・字の 読み分け：BOM → UTF-8 → NUL を 含む 物は UTF-16（LE・BE）でも → 読めない 物は 壊れた 字を 飛ばして 読む
+ *   ・揃え方：&#..; → NFKC → 幅の 無い 字・異体字の 印・向きの 印を 消す → ハイフンの 仲間と「ー」を - に
+ *       日本語の 語 … 空白を 全部 消し、カタカナを ひらがなに 揃えて 含むか
+ *       英字だけの 語 … 空白・_・%20・&nbsp; を 1つの 空白に。大文字小文字は 区別し、語の 境目で
  *   ・作者・会社・利用者の 欄（creator・lastModifiedBy・author・Company・Manager・userName・userId・
- *     displayName・initials・cmAuthor/userInfo/fileSharing の name・absPath の url・custom.xml の 値）は
- *     「空か 見本」だけ 通す
- *   ・ほどけない zip・鍵の かかった zip・読めない 追跡物・作者の 欄が 読めない core.xml は 赤
- * 見ない所（★未測定★と 出しに 書く）:
- *   ・字として 読めない バイナリ（PDF の 圧縮された 中身・Shift_JIS 等）／base64・\uXXXX・%XX・字の つなぎ
+ *     displayName・initials・cmAuthor/userInfo/fileSharing の name・absPath の url・custom.xml の 値）は「空か 見本」だけ
+ *   ・ほどけない／鍵の かかった zip・読めない 追跡物・submodule・LFS の 指し札・作者の 欄が 読めない core.xml は 赤
+ * 見ない所（★未測定★）:
+ *   ・base64・\uXXXX・%XX（%20 以外）・字の つなぎ（'名'+'前'）・PDF の 圧縮された 中身・EXIF
  *   ・git の 過去の 版（見張りは 今の 木だけ）
  *
  * 使い方: node tests/kinshi-ji.test.mjs
@@ -38,10 +36,11 @@ import os from "node:os";
 import path from "node:path";
 import zlib from "node:zlib";
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+const SELF = fileURLToPath(import.meta.url);
+const ROOT = path.join(path.dirname(SELF), "..");
 const LOCAL_LIST = path.join(os.homedir(), ".tsukurimono", "kinshi-ji.txt");
 const OK_NAMES = new Set(["", "見本"]);
 const ZIP_DEPTH = 3;
@@ -58,12 +57,22 @@ function normBase(s) {
   return String(s)
     .replace(/&#x([0-9a-f]+);/gi, (m, h) => safeCp(parseInt(h, 16), m))
     .replace(/&#(\d+);/g, (m, d) => safeCp(parseInt(d, 10), m))
+    .replace(/&nbsp;|%20/gi, " ")
     .normalize("NFKC")
-    .replace(/[\u200B-\u200D\u2060\u00AD\uFEFF]/g, "")
+    .replace(/[\u200B\u200C\u200E\u200F\u202A-\u202E\u2060-\u2064\u00AD\uFEFF]/g, "")
+    .replace(/\u200D/g, "")
+    .replace(/[\uFE00-\uFE0F]/g, "")
+    .replace(/\uDB40[\uDD00-\uDDEF]/g, "")
     .replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D\u30FC]/g, "-");
 }
-export const normJa = (s) => normBase(s).replace(/\s+/g, "");
-export const normAscii = (s) => normBase(s).replace(/\s+/g, " ").trim();
+export const normJa = (s) =>
+  normBase(s)
+    .replace(/\s+/g, "")
+    .replace(/[\u30A1-\u30F6]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0x60));
+export const normAscii = (s) =>
+  normBase(s)
+    .replace(/[\s_]+/g, " ")
+    .trim();
 const isAscii = (s) => /^[\x20-\x7e]+$/.test(s);
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -114,6 +123,10 @@ function matchIdx(text, words) {
   });
   return out;
 }
+/* 道・名前は 区切り（/ \ !）を 外した 形にも 当てる（語が フォルダと ファイルに 分かれても 拾う） */
+const nameHits = (name, words) => [
+  ...new Set([...matchIdx(name, words), ...matchIdx(name.replace(/[/\\!]/g, ""), words)]),
+];
 
 /* ---------- zip を ほどく（central directory から・読めなければ throw） ---------- */
 export function unzip(buf) {
@@ -157,24 +170,42 @@ const isZip = (b) => b.length >= 4 && b.readUInt32LE(0) === 0x04034b50;
 const isPng = (b) =>
   b.length >= 8 &&
   b.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+const isPdf = (b) => b.slice(0, 5).toString("latin1") === "%PDF-";
 
-/* ---------- 字として 読む（読めなければ null） ---------- */
-export function decodeText(buf) {
-  if (buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) return buf.slice(3).toString("utf8");
-  if (buf[0] === 0xff && buf[1] === 0xfe) return buf.slice(2).toString("utf16le");
-  if (buf[0] === 0xfe && buf[1] === 0xff) {
-    const sw = Buffer.from(buf.slice(2));
-    sw.swap16 && sw.length % 2 === 0 ? sw.swap16() : null;
-    return sw.toString("utf16le");
-  }
+const utf16be = (b) => {
+  const sw = Buffer.from(b.slice(0, b.length - (b.length % 2)));
+  sw.swap16();
+  return sw.toString("utf16le");
+};
+
+/* ---------- 字として 読む＝当てる 字の 組（ok=false は 読めなかった） ---------- */
+export function readTexts(buf) {
+  if (buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf)
+    return { ok: true, texts: [buf.slice(3).toString("utf8")] };
+  if (buf[0] === 0xff && buf[1] === 0xfe)
+    return { ok: true, texts: [buf.slice(2).toString("utf16le")] };
+  if (buf[0] === 0xfe && buf[1] === 0xff) return { ok: true, texts: [utf16be(buf.slice(2))] };
+  const hasNul = buf.includes(0);
+  const extra = hasNul
+    ? [
+        buf.toString("utf16le"),
+        buf.slice(1).toString("utf16le"),
+        utf16be(buf),
+        utf16be(buf.slice(1)),
+      ]
+    : [];
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+    const t = new TextDecoder("utf-8", { fatal: true }).decode(buf);
+    return { ok: true, texts: [t, ...extra] };
   } catch {
-    return null;
+    return {
+      ok: false,
+      texts: [new TextDecoder("utf-8").decode(buf), buf.toString("latin1"), ...extra],
+    };
   }
 }
 
-/* ---------- PNG の 字の 塊 ---------- */
+/* ---------- PNG の 字の 塊（壊れていたら throw） ---------- */
 export function pngTexts(buf) {
   const texts = [];
   let p = 8;
@@ -207,6 +238,35 @@ export function pngTexts(buf) {
   return texts;
 }
 
+/* ---------- PDF の 作者（/Author と XMP の creator） ---------- */
+function pdfString(s) {
+  if (s.startsWith("<")) {
+    const hex = s.slice(1, -1).replace(/\s+/g, "");
+    const b = Buffer.from(hex, "hex");
+    return b[0] === 0xfe && b[1] === 0xff ? utf16be(b.slice(2)) : b.toString("latin1");
+  }
+  const body = s.slice(1, -1).replace(/\\([()\\])/g, "$1");
+  const b = Buffer.from(body, "latin1");
+  if (b[0] === 0xfe && b[1] === 0xff) return utf16be(b.slice(2));
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(b);
+  } catch {
+    return body;
+  }
+}
+export function pdfAuthors(buf) {
+  const t = buf.toString("latin1");
+  const out = [];
+  for (const m of t.matchAll(/\/Author\s*(\((?:\\.|[^\\)])*\)|<[0-9A-Fa-f\s]*>)/g))
+    out.push(["PDF /Author", pdfString(m[1])]);
+  const u = new TextDecoder("utf-8").decode(buf);
+  for (const m of u.matchAll(/<dc:creator>([\s\S]*?)<\/dc:creator>/g))
+    out.push(["PDF XMP creator", m[1].replace(/<[^>]*>/g, "")]);
+  for (const m of u.matchAll(/<pdf:Author>([\s\S]*?)<\/pdf:Author>/g))
+    out.push(["PDF XMP Author", m[1]]);
+  return { out, packed: /\/ObjStm|\/FlateDecode/.test(t) };
+}
+
 /* ---------- 作者・会社・利用者の 欄 ---------- */
 const NAME_TAGS =
   /<(?:[\w-]+:)?(creator|lastModifiedBy|Company|Manager|initial-creator|author)\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:[\w-]+:)?\1>)/g;
@@ -222,27 +282,54 @@ export function nameFields(partName, xml) {
   for (const m of xml.matchAll(NAME_ELEM_ATTR)) out.push([m[1] + "@" + m[2], m[4]]);
   if (/(^|\/)docProps\/custom\.xml$/i.test(partName))
     for (const m of xml.matchAll(CUSTOM_VAL)) out.push(["custom", m[1]]);
-  return out.map(([k, v]) => [k, normJa(v)]);
+  return out;
 }
 
 /* ---------- 本体 ---------- */
 export function scan({ root, files, words }) {
-  const hits = [];
+  const hitSet = new Set();
   const notes = [];
   const reds = [];
-  const c = { files: 0, zips: 0, parts: 0, pngTexts: 0, unreadable: 0, nameChecks: 0 };
-  const named = (name, alt) => (matchIdx(name, words).length ? alt : name);
+  const c = {
+    files: 0,
+    zips: 0,
+    parts: 0,
+    pngTexts: 0,
+    pdfAuthors: 0,
+    unreadable: 0,
+    nameChecks: 0,
+  };
+  const hit = (s) => hitSet.add(s);
+  const named = (name, alt) => (nameHits(name, words).length ? alt : name);
+  const checkName = (label, kind, v) => {
+    c.nameChecks++;
+    if (!OK_NAMES.has(normJa(v)))
+      hit(
+        label + ": 作者・会社・利用者の 欄（" + kind + "）が「空か 見本」でない（字は 出さない）"
+      );
+  };
 
   function scanText(label, text) {
     const seen = new Set();
     text.split(/\r?\n/).forEach((line, i) => {
       for (const w of matchIdx(line, words)) {
         seen.add(w);
-        hits.push(label + ":" + (i + 1) + ": 一覧の " + (w + 1) + " 番目");
+        hit(label + ":" + (i + 1) + ": 一覧の " + (w + 1) + " 番目");
       }
     });
-    for (const w of matchIdx(text.replace(/\r?\n/g, ""), words))
-      if (!seen.has(w)) hits.push(label + ":(行またぎ): 一覧の " + (w + 1) + " 番目");
+    const late = (t, why) => {
+      for (const w of matchIdx(t, words))
+        if (!seen.has(w)) {
+          seen.add(w);
+          hit(label + ":(" + why + "): 一覧の " + (w + 1) + " 番目");
+        }
+    };
+    late(text.replace(/\r?\n/g, ""), "行またぎ");
+    late(text.replace(/\r?\n/g, " "), "行またぎ");
+    if (/<[A-Za-z/!?]/.test(text)) {
+      late(text.replace(/<[^>]*>/g, ""), "タグを 外して つないだ 字");
+      late(text.replace(/<[^>]*>/g, " "), "タグを 外して つないだ 字");
+    }
   }
 
   function scanBlob(label, buf, depth) {
@@ -258,8 +345,8 @@ export function scan({ root, files, words }) {
       }
       parts.forEach((part, k) => {
         c.parts++;
-        for (const w of matchIdx(part.name, words))
-          hits.push(
+        for (const w of nameHits(part.name, words))
+          hit(
             label +
               " の " +
               (k + 1) +
@@ -269,23 +356,9 @@ export function scan({ root, files, words }) {
           );
         const pl = label + "!" + named(part.name, "(" + (k + 1) + " 番目の 部品)");
         scanBlob(pl, part.data, depth + 1);
-        const text = decodeText(part.data);
-        if (text === null) return;
-        if (/\.(xml|rels|vml)$/i.test(part.name)) {
-          const joined = text.replace(/<[^>]*>/g, "");
-          for (const w of matchIdx(joined, words))
-            hits.push(pl + ":(タグを 外して つないだ 字): 一覧の " + (w + 1) + " 番目");
-          for (const [kind, v] of nameFields(part.name, text)) {
-            c.nameChecks++;
-            if (!OK_NAMES.has(v))
-              hits.push(
-                pl +
-                  ": 作者・会社・利用者の 欄（" +
-                  kind +
-                  "）が「空か 見本」でない（字は 出さない）"
-              );
-          }
-        }
+        if (!/\.(xml|rels|vml)$/i.test(part.name)) return;
+        const text = new TextDecoder("utf-8").decode(part.data);
+        for (const [kind, v] of nameFields(part.name, text)) checkName(pl, kind, v);
         if (/(^|\/)docProps\/core\.xml$/i.test(part.name)) {
           const has = (t) => new RegExp("<(?:[\\w-]+:)?" + t + "\\b").test(text);
           if (!has("creator") || !has("lastModifiedBy"))
@@ -295,7 +368,13 @@ export function scan({ root, files, words }) {
       return;
     }
     if (isPng(buf)) {
-      for (const t of pngTexts(buf)) {
+      let texts;
+      try {
+        texts = pngTexts(buf);
+      } catch (e) {
+        return reds.push(label + ": PNG の 字の 塊を ほどけない（未測定＝赤）… " + e.message);
+      }
+      for (const t of texts) {
         if (t === null) {
           notes.push(label + ": PNG の EXIF は 見ていない（未測定）");
           continue;
@@ -305,20 +384,31 @@ export function scan({ root, files, words }) {
       }
       return;
     }
-    const text = decodeText(buf);
-    if (text === null) {
-      c.unreadable++;
-      notes.push(label + ": 字として 読めない（未測定・ASCII の 部分だけ 当てた）");
-      scanText(label, buf.toString("latin1"));
-      return;
+    if (isPdf(buf)) {
+      const { out, packed } = pdfAuthors(buf);
+      for (const [kind, v] of out) {
+        c.pdfAuthors++;
+        checkName(label, kind, v);
+      }
+      if (packed) notes.push(label + ": PDF の 圧縮された 中身は 見ていない（未測定）");
     }
-    scanText(label, text);
+    const head = buf.slice(0, 200).toString("latin1");
+    if (head.startsWith("version https://git-lfs"))
+      return reds.push(label + ": LFS の 指し札＝中身を 見ていない（未測定＝赤）");
+    const { ok, texts } = readTexts(buf);
+    if (!ok) {
+      c.unreadable++;
+      notes.push(
+        label + ": 字として 読めない（未測定・壊れた 字を 飛ばして 読んだ 物と UTF-16 で 当てた）"
+      );
+    }
+    for (const t of texts) scanText(label, t);
   }
 
   files.forEach((rel, idx) => {
     c.files++;
-    for (const w of matchIdx(rel, words))
-      hits.push(
+    for (const w of nameHits(rel, words))
+      hit(
         "追跡物の " + (idx + 1) + " 本目の 道・名前: 一覧の " + (w + 1) + " 番目（名前は 出さない）"
       );
     const label = named(rel, "(追跡物の " + (idx + 1) + " 本目)");
@@ -331,9 +421,15 @@ export function scan({ root, files, words }) {
     }
     if (!st.isFile())
       return reds.push(label + ": ふつうの ファイルでない（submodule・リンク 等＝未測定＝赤）");
-    scanBlob(label, fs.readFileSync(abs), 0);
+    let buf;
+    try {
+      buf = fs.readFileSync(abs);
+    } catch {
+      return reds.push(label + ": 読めない（未測定＝赤）");
+    }
+    scanBlob(label, buf, 0);
   });
-  return { hits, notes, reds, c };
+  return { hits: [...hitSet], notes, reds, c };
 }
 
 function gitFiles(root) {
@@ -342,8 +438,13 @@ function gitFiles(root) {
     .filter(Boolean);
 }
 
-/* ---------- 走らせる（終わり値と 出しを 返す＝自己確認から 呼べる） ---------- */
-export function run({ env = process.env, file = LOCAL_LIST, root = ROOT, files } = {}) {
+/* ---------- 走らせる（終わり値と 出しを 返す） ---------- */
+export function run({
+  env = process.env,
+  file = env.KINSHI_JI_FILE || LOCAL_LIST,
+  root = ROOT,
+  files,
+} = {}) {
   const { words, from, finger } = loadWords({ env, file });
   if (!words.length)
     return {
@@ -352,15 +453,28 @@ export function run({ env = process.env, file = LOCAL_LIST, root = ROOT, files }
         "✗ 未測定＝禁止の 字の 一覧が 無い（secret KINSHI_JI も 手元の 一覧も 無い）。緑には しない。",
       ],
     };
+  const lines = [];
+  const want = (env.KINSHI_JI_FINGER || "").trim();
+  let fingerRed = false;
+  if (want && want !== finger) {
+    lines.push(
+      "✗ 一覧の 指紋が 違う（期待 " + want + "・今 " + finger + "）＝secret が 縮んだか 壊れた"
+    );
+    fingerRed = true;
+  } else if (!want && env.CI) {
+    lines.push("✗ CI なのに 指紋の 期待（KINSHI_JI_FINGER）が 無い＝一覧が 正しいか 照らせない");
+    fingerRed = true;
+  }
   const list = files || gitFiles(root);
   const r = scan({ root, files: list, words });
-  const lines = [
+  lines.unshift(
     "一覧＝" +
       from +
       "・" +
       words.length +
       "語・指紋 " +
       finger +
+      (want ? "（期待と " + (want === finger ? "同じ" : "違う") + "）" : "") +
       " ／ 追跡物 " +
       r.c.files +
       " 本・zip " +
@@ -371,10 +485,12 @@ export function run({ env = process.env, file = LOCAL_LIST, root = ROOT, files }
       r.c.nameChecks +
       " 個・PNG の 字の塊 " +
       r.c.pngTexts +
+      " 個・PDF の 作者 " +
+      r.c.pdfAuthors +
       " 個・字として 読めない " +
       r.c.unreadable +
-      " 本",
-  ];
+      " 本"
+  );
   for (const n of r.notes) lines.push("  未測定: " + n);
   for (const x of r.reds) lines.push("  赤: " + x);
   for (const h of r.hits) lines.push("  赤: " + h);
@@ -382,8 +498,8 @@ export function run({ env = process.env, file = LOCAL_LIST, root = ROOT, files }
     lines.push("✗ 追跡物が 0 本＝何も 見ていない");
     return { code: 1, lines, r };
   }
-  if (r.hits.length || r.reds.length) {
-    lines.push("✗ 赤 " + (r.hits.length + r.reds.length) + " 件");
+  if (r.hits.length || r.reds.length || fingerRed) {
+    lines.push("✗ 赤 " + (r.hits.length + r.reds.length + (fingerRed ? 1 : 0)) + " 件");
     return { code: 1, lines, r };
   }
   lines.push(
@@ -477,6 +593,7 @@ function selfTest() {
   const W_RAW = ["見本台ためし語", "９９－８－７７", "カレホン ためし", "Fakeco Lounge"];
   const listFile = path.join(tmp, "list.txt");
   fs.writeFileSync(listFile, W_RAW.join("\n") + "\n");
+  const FINGER = loadWords({ env: {}, file: listFile }).finger;
   const ENV = {};
   const core = (who) =>
     '<cp:coreProperties xmlns:cp="x" xmlns:dc="y"><dc:creator>' +
@@ -490,31 +607,68 @@ function selfTest() {
     return rel;
   };
   const go = (files) => run({ env: ENV, file: listFile, root: tmp, files });
-  const leaks = (x) => {
-    const all = x.lines.join("\n");
-    return W_RAW.some(
-      (w) => all.includes(w) || normJa(all).includes(normJa(w)) || all.includes("Fakeco")
-    );
-  };
+  const leaks = (text) =>
+    W_RAW.some((w) => text.includes(w) || normJa(text).includes(normJa(w))) ||
+    text.includes("Fakeco") ||
+    text.includes("ためし");
 
-  T("一覧が 無ければ 終わり値 1（未測定で 赤）", () => {
-    must(
-      run({ env: {}, file: path.join(tmp, "nai.txt"), root: tmp, files: [] }).code === 1,
-      "一覧が 無いのに 緑"
-    );
-    must(
-      loadWords({ env: { KINSHI_JI: "あ\nい" }, file: null }).words.length === 2,
-      "secret から 読めない"
-    );
-    must(
-      loadWords({ env: { KINSHI_JI: "  " }, file: path.join(tmp, "nai.txt") }).words.length === 0,
-      "空の secret で 語が 出た"
-    );
-  });
-  T("追跡物が 0 本なら 終わり値 1", () => must(go([]).code === 1, "0 本で 緑"));
-  T("きれいな 物は 終わり値 0・分母が 出る・指紋が 出る", () => {
+  /* ★本体を 子プロセスで 走らせる＝main・git の 名簿・終わり値まで 見る★ */
+  T(
+    "子プロセス：一覧なし→1・きれい→0・当たり→1（字は 出ない）・指紋違い→1・CI で 指紋なし→1",
+    () => {
+      const repo = path.join(tmp, "repo");
+      fs.mkdirSync(path.join(repo, "tests"), { recursive: true });
+      fs.copyFileSync(SELF, path.join(repo, "tests", "k.mjs"));
+      fs.writeFileSync(path.join(repo, "a.txt"), "ふつう\n");
+      const git = (...a) => execFileSync("git", ["-C", repo, ...a], { stdio: "ignore" });
+      git("init", "-q");
+      git("add", "-A");
+      const child = (env) => {
+        const base = {
+          PATH: process.env.PATH,
+          SYSTEMROOT: process.env.SYSTEMROOT || "",
+          HOME: tmp,
+          USERPROFILE: tmp,
+        };
+        const r = spawnSync(process.execPath, [path.join(repo, "tests", "k.mjs")], {
+          env: { ...base, ...env },
+          encoding: "utf8",
+        });
+        return { code: r.status, out: (r.stdout || "") + (r.stderr || "") };
+      };
+      /* 本体の 写しにも 自己確認の 作り物の 語が 書いてあるので、子には 別の 語を 使う
+         （組み立てて 作る＝字の 並びとしては ソースに 載らない） */
+      const CW = ["見本台", "こども語"].join("");
+      const cList = path.join(tmp, "child-list.txt");
+      fs.writeFileSync(cList, CW + "\n");
+      const CF = loadWords({ env: {}, file: cList }).finger;
+      must(child({ KINSHI_JI_FILE: path.join(tmp, "nai.txt") }).code === 1, "一覧なしで 緑");
+      const clean = child({ KINSHI_JI_FILE: cList });
+      must(
+        clean.code === 0 && /追跡物 2 本/.test(clean.out),
+        "きれいで 赤 か 名簿が 違う: " + clean.out.split("\n")[0]
+      );
+      must(
+        child({ KINSHI_JI_FILE: cList, KINSHI_JI_FINGER: "00000000" }).code === 1,
+        "指紋違いで 緑"
+      );
+      must(child({ KINSHI_JI_FILE: cList, CI: "true" }).code === 1, "CI で 指紋なしが 緑");
+      must(
+        child({ KINSHI_JI_FILE: cList, CI: "true", KINSHI_JI_FINGER: CF }).code === 0,
+        "CI で 指紋ありが 赤"
+      );
+      must(child({ KINSHI_JI: CW, KINSHI_JI_FINGER: CF }).code === 0, "secret から 読めない");
+      fs.writeFileSync(path.join(repo, "b.txt"), CW + "\n");
+      git("add", "-A");
+      const red = child({ KINSHI_JI_FILE: cList });
+      must(red.code === 1, "当たりで 緑");
+      must(!red.out.includes(CW) && !red.out.includes("こども"), "出しに 字が 出た");
+    }
+  );
+  T("追跡物が 0 本なら 1", () => must(go([]).code === 1, "0 本で 緑"));
+  T("きれいな 物は 0・分母が 出る・指紋が 出る", () => {
     const x = go([
-      put("a.txt", "なにもない\nFakecoX MyFakeco Lounge\n"),
+      put("a.txt", "なにもない\nFakecoX MyFakeco Lounge fakeco lounge\n"),
       put(
         "ok.xlsx",
         makeZip([
@@ -528,41 +682,59 @@ function selfTest() {
       x.r.c.files === 2 && x.r.c.zips === 1 && x.r.c.parts === 2 && x.r.c.nameChecks === 2,
       "分母が 違う " + JSON.stringify(x.r.c)
     );
-    must(/指紋 [0-9a-f]{8}/.test(x.lines[0]), "指紋が 無い");
+    must(x.lines[0].includes("指紋 " + FINGER), "指紋が 無い");
   });
-  T("当たれば 終わり値 1・行と 番号が 出る・字は 出ない", () => {
+  T("当たれば 1・行と 番号が 出る・字は 出ない", () => {
     const x = go([put("b.js", "x\nconst a = '見本台ためし語';\n")]);
     must(
       x.code === 1 && x.r.hits[0].includes("b.js:2") && x.r.hits[0].includes("1 番目"),
       "当たらない"
     );
-    must(!leaks(x), "出しに 字が 出た");
+    must(!leaks(x.lines.join("\n")), "出しに 字が 出た");
   });
-  T("全角・空白・ハイフン・「ー」・&#..;・幅の 無い 字でも 当たる", () => {
-    const x = go([
-      put(
-        "c.html",
-        "99-8-77\n99ー8ー77\nカレホン　ためし\n見本&#21488;ためし語\n見本\u200B台ためし語\n"
-      ),
-    ]);
-    must(x.r.hits.length === 5, "5件 当たらない: " + x.r.hits.length);
-    must(!leaks(x), "出しに 字が 出た");
-  });
-  T("英字の 語は 大文字小文字と 語の 境目を 守る", () => {
-    must(go([put("d.txt", "Fakeco  Lounge\n")]).code === 1, "空白違いで 当たらない");
+  T(
+    "揃え方：全角・空白・ハイフン・ー・&#..;・幅なし・異体字の 印・向きの 印・カタカナ／ひらがな",
+    () => {
+      const rows = [
+        "99-8-77",
+        "99ー8ー77",
+        "カレホン　ためし",
+        "見本&#21488;ためし語",
+        "見本\u200B台ためし語",
+        "見本台\uFE0Fためし語",
+        "見本\u200E台ためし語",
+        "かれほん ためし",
+        "見本台タメシ語",
+      ];
+      const x = go([put("c.html", rows.join("\n") + "\n")]);
+      must(x.r.hits.length === rows.length, rows.length + " 件 当たらない: " + x.r.hits.length);
+    }
+  );
+  T("英字：境目・大文字小文字は 守る／_ ・%20・&nbsp;・空白違い・行またぎは 当たる", () => {
+    for (const s of [
+      "Fakeco  Lounge",
+      "Fakeco_Lounge",
+      "Fakeco%20Lounge",
+      "Fakeco&nbsp;Lounge",
+      "Fakeco\nLounge",
+    ])
+      must(go([put("d.txt", s + "\n")]).code === 1, JSON.stringify(s) + " で 当たらない");
     must(
       go([put("d.txt", "fakeco lounge\nXFakeco Lounge2\n")]).code === 0,
       "小文字・識別子の 一部に 当たった"
     );
   });
-  T("行を またいだ 字も 当たる", () => {
-    const x = go([put("e.txt", "見本台\nためし語\n")]);
+  T("行またぎ・HTML の タグで 分かれた 字も 当たる", () => {
     must(
-      x.r.hits.some((h) => h.includes("行またぎ")),
-      "行またぎを 拾わない"
+      go([put("e.txt", "見本台\nためし語\n")]).r.hits.some((h) => h.includes("行またぎ")),
+      "行またぎ"
+    );
+    must(
+      go([put("e.html", "<span>見本台</span><b>ためし語</b>\n")]).code === 1,
+      "タグで 分かれた 字"
     );
   });
-  T("zip の 中（deflate）・<t> に 分かれた 字・入れ子の zip", () => {
+  T("zip の 中・<t> に 分かれた 字・入れ子の zip・深すぎる 入れ子は 赤", () => {
     const inner = makeZip([["x.xml", "<a>見本台ためし語</a>"]]);
     const x = go([
       put(
@@ -582,7 +754,12 @@ function selfTest() {
       x.r.hits.some((h) => h.includes("e.xlsx!x.xml")),
       "入れ子を ほどかない"
     );
-    must(!leaks(x), "出しに 字が 出た");
+    let deep = makeZip([["x.txt", "ふつう"]]);
+    for (let i = 0; i < 4; i++) deep = makeZip([["d.zip", deep]]);
+    must(
+      go([put("deep.zip", deep)]).r.reds.some((h) => h.includes("深すぎて")),
+      "深すぎる 入れ子が 緑"
+    );
   });
   T("作者・会社・利用者の 欄（core・単引用・cmAuthor・absPath・custom）", () => {
     for (const [nm, xml] of [
@@ -605,11 +782,34 @@ function selfTest() {
       );
     }
   });
+  T("PDF の 作者（/Author の 16進 UTF-16・XMP の creator）は「空か 見本」だけ", () => {
+    const hex = "FEFF" + Buffer.from("他人", "utf16le").swap16().toString("hex");
+    must(
+      go([put("p1.pdf", "%PDF-1.4\n1 0 obj << /Author <" + hex + "> >> endobj\n")]).code === 1,
+      "16進の /Author が 緑"
+    );
+    must(
+      go([
+        put(
+          "p2.pdf",
+          Buffer.from(
+            "%PDF-1.4\n<x:xmpmeta><dc:creator><rdf:Seq><rdf:li>他人</rdf:li></rdf:Seq></dc:creator></x:xmpmeta>\n"
+          )
+        ),
+      ]).code === 1,
+      "XMP が 緑"
+    );
+    must(
+      go([put("p3.pdf", "%PDF-1.4\n1 0 obj << /Author (見本) /Producer (jsPDF) >> endobj\n")])
+        .code === 0,
+      "見本の PDF が 赤"
+    );
+  });
   T("拡張子が 違っても zip なら ほどく", () => {
     const x = go([put("h.bin", makeZip([["x.xml", "<a>見本台ためし語</a>"]]))]);
     must(x.r.c.zips === 1 && x.code === 1, "名前で 選んでいる");
   });
-  T("ほどけない zip・鍵の かかった zip は 赤", () => {
+  T("ほどけない zip・鍵の かかった zip・壊れた PNG は 赤", () => {
     const z = makeZip([["x.xml", "<a>ふつう</a>"]]);
     z.writeUInt16LE(99, z.readUInt32LE(z.length - 6) + 10);
     must(
@@ -620,76 +820,102 @@ function selfTest() {
     const cd = k.readUInt32LE(k.length - 6);
     k.writeUInt16LE(k.readUInt16LE(cd + 8) | 1, cd + 8);
     must(go([put("j.xlsx", k)]).code === 1, "鍵付き zip が 緑");
+    must(
+      go([put("bad.png", makePng([["zTXt", Buffer.from("k\0\0xxxx", "latin1")]]))]).r.reds.some(
+        (h) => h.includes("PNG")
+      ),
+      "壊れた PNG が 緑"
+    );
   });
-  T("名前に 字が あっても 出さない（中身にも 字・バイナリ・フォルダ・部品名）", () => {
-    const a = put("見本台ためし語.txt", "見本台ためし語\n");
-    const b = put("見本台ためし語.bin", Buffer.from([0xff, 0x00, 0x81]));
-    const d = put("見本台ためし語/x.txt", "見本台ためし語");
-    const e = put("k.xlsx", makeZip([["見本台ためし語.xml", "<a>見本台ためし語</a>"]]));
-    for (const f of [a, b, d, e]) {
-      const x = go([f]);
-      must(x.code === 1, f.length + " 字の 名前で 赤に ならない");
-      must(!leaks(x), "出しに 名前が 出た");
+  T(
+    "名前に 字が あっても 出さない（中身にも 字・バイナリ・フォルダ・部品名・/ で 分かれた 名前）",
+    () => {
+      const fs_ = [
+        put("見本台ためし語.txt", "見本台ためし語\n"),
+        put("見本台ためし語.bin", Buffer.from([0xff, 0x00, 0x81])),
+        put("見本台ためし語/x.txt", "見本台ためし語"),
+        put("見本台/ためし語.txt", "99-8-77\n"),
+        put(
+          "k.xlsx",
+          makeZip([
+            ["見本台ためし語.xml", "<a>見本台ためし語</a>"],
+            ["見本台/ためし語.xml", "<a>99-8-77</a>"],
+          ])
+        ),
+      ];
+      for (const f of fs_) {
+        const x = go([f]);
+        must(x.code === 1, "名前で 赤に ならない");
+        must(!leaks(x.lines.join("\n")), "出しに 名前が 出た");
+      }
     }
-  });
+  );
   T("作者の 欄が 無い core.xml は 赤", () => {
     must(
       go([put("l.xlsx", makeZip([["docProps/core.xml", "<cp:coreProperties/>"]]))]).code === 1,
       "読めないのに 緑"
     );
   });
-  T("UTF-16（LE・BE の BOM）・UTF-8 の BOM でも 当たる", () => {
-    const s = "見本台ためし語";
+  T("UTF-16（BOM あり LE・BE・BOM なし LE）・UTF-8 の BOM でも 当たる", () => {
+    const s = "見本台ためし語 Fakeco Lounge";
     const le = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(s, "utf16le")]);
     const be = Buffer.from(le);
     be.swap16();
     const u8 = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(s)]);
+    const noBom = Buffer.from("Fakeco Lounge", "utf16le");
     for (const [nm, b] of [
       ["le", le],
       ["be", be],
       ["u8", u8],
+      ["nobom", noBom],
     ])
       must(go([put(nm + ".txt", b)]).code === 1, nm + " で 当たらない");
   });
   T("PNG の 字の 塊（tEXt・zTXt・iTXt）を 見る・字の 無い PNG は 黙って 緑", () => {
-    const t = Buffer.from("Author\0Fakeco Lounge", "latin1");
-    must(go([put("m.png", makePng([["tEXt", t]]))]).code === 1, "tEXt を 見ていない");
+    must(
+      go([put("m.png", makePng([["tEXt", Buffer.from("Author\0Fakeco Lounge", "latin1")]]))])
+        .code === 1,
+      "tEXt"
+    );
     const z = Buffer.concat([
       Buffer.from("Comment\0\0", "latin1"),
       zlib.deflateSync(Buffer.from("Fakeco Lounge")),
     ]);
-    must(go([put("n.png", makePng([["zTXt", z]]))]).code === 1, "zTXt を 見ていない");
+    must(go([put("n.png", makePng([["zTXt", z]]))]).code === 1, "zTXt");
     const it = Buffer.concat([
       Buffer.from("Title\0\0\0\0\0", "latin1"),
       Buffer.from("見本台ためし語"),
     ]);
-    must(go([put("o.png", makePng([["iTXt", it]]))]).code === 1, "iTXt を 見ていない");
+    must(go([put("o.png", makePng([["iTXt", it]]))]).code === 1, "iTXt");
     const x = go([put("p.png", makePng([["IHDR", Buffer.alloc(13)]]))]);
     must(x.code === 0 && x.r.notes.length === 0, "字の 無い PNG で 未測定");
   });
-  T("字として 読めない 物は 未測定と 書く（ASCII の 部分は 当てる）", () => {
+  T("読めない 物は 未測定と 書き、壊れた 字を 飛ばして 当てる", () => {
     const x = go([
-      put(
-        "q.dat",
-        Buffer.concat([
-          Buffer.from([0xff, 0xfe, 0x00]).slice(2),
-          Buffer.from([0x81, 0x00]),
-          Buffer.from(" Fakeco Lounge "),
-        ])
-      ),
+      put("q.dat", Buffer.concat([Buffer.from([0x81, 0x00]), Buffer.from(" 見本台ためし語 ")])),
     ]);
     must(x.r.c.unreadable === 1 && x.r.notes.length === 1, "黙っている");
-    must(x.code === 1, "ASCII の 部分を 当てていない");
+    must(x.code === 1, "読める 部分を 当てていない");
   });
-  T("手元に 無い 追跡物は 赤", () => must(go(["nai/nai.txt"]).code === 1, "無いのに 緑"));
+  T("手元に 無い 追跡物・フォルダ（submodule の 形）・LFS の 指し札は 赤", () => {
+    must(go(["nai/nai.txt"]).code === 1, "無いのに 緑");
+    fs.mkdirSync(path.join(tmp, "sub"), { recursive: true });
+    must(go(["sub"]).code === 1, "フォルダが 緑");
+    must(
+      go([put("big.bin", "version https://git-lfs.github.com/spec/v1\noid sha256:00\nsize 1\n")])
+        .code === 1,
+      "LFS が 緑"
+    );
+  });
 
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log("自己確認: " + pass + "/" + (pass + fail));
   return fail ? 1 : 0;
 }
 
-if (process.argv.includes("--self-test")) process.exit(selfTest());
-else {
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === SELF;
+if (isMain) {
+  if (process.argv.includes("--self-test")) process.exit(selfTest());
   const { code, lines } = run();
   for (const l of lines) console.log(l);
   process.exit(code);
