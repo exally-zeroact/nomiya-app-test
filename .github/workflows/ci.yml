@@ -64,13 +64,18 @@ jobs:
       #   指紋（変数 KINSHI_JI_FINGER）と 違えば 赤＝secret が 縮んだ・壊れた を 止める。
       #   当たっても 字は 出さない（公開の CI ログは 誰でも 読める）。zip（xlsx 等）は ほどいて 中まで 見る。
       - name: 実在の字が戻っていないか（一覧は secret）
-        run: npm run kinshi
+        # 本体が 何も 言わずに 終わる（main が 走らない 等）のを 緑に しない＝終わりの 行が 出たかも 見る
+        run: |
+          npm run kinshi | tee kinshi.out
+          grep -q "^✓ 実在の 字 0 件" kinshi.out
         env:
           KINSHI_JI: ${{ secrets.KINSHI_JI }}
           KINSHI_JI_FINGER: ${{ vars.KINSHI_JI_FINGER }}
 
       - name: 実在の字の見張りの自己確認
-        run: node tests/kinshi-ji.test.mjs --self-test
+        run: |
+          node tests/kinshi-ji.test.mjs --self-test | tee kinshi-self.out
+          grep -Eq "^自己確認: ([0-9]+)/\1$" kinshi-self.out
 
       - name: Lint (eslint)
         run: npm run lint

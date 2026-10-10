@@ -93,9 +93,21 @@ export function loadWords({ env = process.env, file = LOCAL_LIST } = {}) {
   for (const line of raw.split(/\r?\n/)) {
     const a = normAscii(line);
     if (!a) continue;
-    const w = isAscii(a)
-      ? { ascii: true, key: a, re: new RegExp("(?<![A-Za-z0-9])" + esc(a) + "(?![A-Za-z0-9])") }
-      : { ascii: false, key: normJa(line) };
+    /* 英字の 語：1語の 物は 大文字小文字を 区別（ふつうの 英単語に 当てない）。
+       2語 以上の 物は 大文字小文字を 問わず、間が 空白・. _ + - でも 無しでも 当てる（メール・ドメイン・続け書き） */
+    const toks = a.split(" ");
+    const w = !isAscii(a)
+      ? { ascii: false, key: normJa(line) }
+      : toks.length === 1
+        ? { ascii: true, key: a, re: new RegExp("(?<![A-Za-z0-9])" + esc(a) + "(?![A-Za-z0-9])") }
+        : {
+            ascii: true,
+            key: a,
+            re: new RegExp(
+              "(?<![A-Za-z0-9])" + toks.map(esc).join("[\\s._+-]*") + "(?![A-Za-z0-9])",
+              "i"
+            ),
+          };
     if (!w.key || seen.has(w.key)) continue;
     seen.add(w.key);
     words.push(w);
@@ -185,24 +197,50 @@ export function readTexts(buf) {
   if (buf[0] === 0xff && buf[1] === 0xfe)
     return { ok: true, texts: [buf.slice(2).toString("utf16le")] };
   if (buf[0] === 0xfe && buf[1] === 0xff) return { ok: true, texts: [utf16be(buf.slice(2))] };
-  const hasNul = buf.includes(0);
-  const extra = hasNul
-    ? [
-        buf.toString("utf16le"),
-        buf.slice(1).toString("utf16le"),
-        utf16be(buf),
-        utf16be(buf.slice(1)),
-      ]
-    : [];
-  try {
-    const t = new TextDecoder("utf-8", { fatal: true }).decode(buf);
-    return { ok: true, texts: [t, ...extra] };
-  } catch {
-    return {
-      ok: false,
-      texts: [new TextDecoder("utf-8").decode(buf), buf.toString("latin1"), ...extra],
-    };
-  }
+  const utf16s = [
+    buf.toString("utf16le"),
+    buf.slice(1).toString("utf16le"),
+    utf16be(buf),
+    utf16be(buf.slice(1)),
+  ];
+  const strict = (enc) => {
+    try {
+      return new TextDecoder(enc, { fatal: true }).decode(buf);
+    } catch {
+      return null;
+    }
+  };
+  const jis = buf.includes(0x1b) ? strict("iso-2022-jp") : null;
+  const u8 = strict("utf-8");
+  if (u8 !== null)
+    return { ok: true, texts: [u8, ...(buf.includes(0) ? utf16s : []), ...(jis ? [jis] : [])] };
+  /* UTF-8 で 読めない＝日本の 古い 字コード（Shift_JIS・EUC-JP・ISO-2022-JP）と BOM 無しの UTF-16 でも 読んで 当てる */
+  const sjis = strict("shift_jis");
+  const euc = strict("euc-jp");
+  const texts = [
+    new TextDecoder("utf-8").decode(buf),
+    buf.toString("latin1"),
+    new TextDecoder("shift_jis").decode(buf),
+    new TextDecoder("euc-jp").decode(buf),
+    ...utf16s,
+    ...(jis ? [jis] : []),
+  ];
+  return { ok: Boolean(sjis !== null || euc !== null || jis), texts };
+}
+
+/* ---------- 字の 無い 形と 分かっている バイナリ（読めなくても 赤に しない） ---------- */
+export function knownBinary(label, buf) {
+  if (buf.length < 4) return null;
+  const h = buf.slice(0, 4).toString("latin1");
+  if (isPdf(buf)) return "PDF";
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "JPEG";
+  if (h === "GIF8") return "GIF";
+  if (h === "RIFF") return "RIFF（WebP 等）";
+  if (buf.readUInt32BE(0) === 0x00000100) return "ICO";
+  if (h === "wOFF" || h === "wOF2" || h === "OTTO" || buf.readUInt32BE(0) === 0x00010000)
+    return "字形（フォント）";
+  if (label.includes("!") && /printerSettings\d*\.bin$/i.test(label)) return "印刷の 設定";
+  return null;
 }
 
 /* ---------- PNG の 字の 塊（壊れていたら throw） ---------- */
@@ -382,7 +420,19 @@ export function scan({ root, files, words }) {
         c.pngTexts++;
         scanText(label + "(PNG の 字の 塊)", t);
       }
+      scanText(label + "(PNG の 生の 字)", buf.toString("latin1"));
       return;
+    }
+    if (buf[0] === 0x1f && buf[1] === 0x8b) {
+      let inner;
+      try {
+        inner = zlib.gunzipSync(buf);
+      } catch (e) {
+        return reds.push(label + ": gzip を ほどけない（未測定＝赤）… " + e.message);
+      }
+      if (depth >= ZIP_DEPTH)
+        return reds.push(label + ": 入れ子が 深すぎて 見ていない（未測定＝赤）");
+      return scanBlob(label + "(gzip の 中)", inner, depth + 1);
     }
     if (isPdf(buf)) {
       const { out, packed } = pdfAuthors(buf);
@@ -398,9 +448,14 @@ export function scan({ root, files, words }) {
     const { ok, texts } = readTexts(buf);
     if (!ok) {
       c.unreadable++;
-      notes.push(
-        label + ": 字として 読めない（未測定・壊れた 字を 飛ばして 読んだ 物と UTF-16 で 当てた）"
-      );
+      const kind = knownBinary(label, buf);
+      if (kind)
+        notes.push(label + ": 字として 読めない " + kind + "（未測定・読める 部分だけ 当てた）");
+      else
+        reds.push(
+          label +
+            ": 字として 読めない 知らない 形（UTF-8・Shift_JIS・EUC-JP・ISO-2022-JP の どれでも ない＝未測定＝赤）"
+        );
     }
     for (const t of texts) scanText(label, t);
   }
@@ -590,7 +645,7 @@ function selfTest() {
     if (!v) throw new Error(m);
   };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "kinshi-"));
-  const W_RAW = ["見本台ためし語", "９９－８－７７", "カレホン ためし", "Fakeco Lounge"];
+  const W_RAW = ["見本台ためし語", "９９－８－７７", "カレホン ためし", "Fakeco Lounge", "Zorgox"];
   const listFile = path.join(tmp, "list.txt");
   fs.writeFileSync(listFile, W_RAW.join("\n") + "\n");
   const FINGER = loadWords({ env: {}, file: listFile }).finger;
@@ -668,7 +723,7 @@ function selfTest() {
   T("追跡物が 0 本なら 1", () => must(go([]).code === 1, "0 本で 緑"));
   T("きれいな 物は 0・分母が 出る・指紋が 出る", () => {
     const x = go([
-      put("a.txt", "なにもない\nFakecoX MyFakeco Lounge fakeco lounge\n"),
+      put("a.txt", "なにもない\nFakecoX MyFakeco Lounge zorgox MyZorgox ZorgoxY\n"),
       put(
         "ok.xlsx",
         makeZip([
@@ -717,11 +772,17 @@ function selfTest() {
       "Fakeco%20Lounge",
       "Fakeco&nbsp;Lounge",
       "Fakeco\nLounge",
+      "fakeco lounge",
+      "FAKECO LOUNGE",
+      "info@fakeco-lounge.jp",
+      "FakecoLounge",
+      "fakeco.lounge",
+      "Zorgox",
     ])
       must(go([put("d.txt", s + "\n")]).code === 1, JSON.stringify(s) + " で 当たらない");
     must(
-      go([put("d.txt", "fakeco lounge\nXFakeco Lounge2\n")]).code === 0,
-      "小文字・識別子の 一部に 当たった"
+      go([put("d.txt", "XFakeco Lounge2\nzorgox MyZorgox ZorgoxY\n")]).code === 0,
+      "1語の 小文字・識別子の 一部に 当たった"
     );
   });
   T("行またぎ・HTML の タグで 分かれた 字も 当たる", () => {
@@ -768,6 +829,7 @@ function selfTest() {
       ["ppt/commentAuthors.xml", '<p:cmAuthor id="0" name="他人" initials=""/>'],
       ["xl/workbook.xml", '<x15ac:absPath url="C:\\Users\\tanin\\" />'],
       ["docProps/custom.xml", "<property><vt:lpwstr>他人</vt:lpwstr></property>"],
+      ["meta.xml", "<meta:initial-creator>他人</meta:initial-creator>"],
     ]) {
       const parts = [[nm, xml]];
       if (nm !== "docProps/core.xml") parts.push(["docProps/core.xml", core("見本")]);
@@ -889,13 +951,34 @@ function selfTest() {
     must(go([put("o.png", makePng([["iTXt", it]]))]).code === 1, "iTXt");
     const x = go([put("p.png", makePng([["IHDR", Buffer.alloc(13)]]))]);
     must(x.code === 0 && x.r.notes.length === 0, "字の 無い PNG で 未測定");
+    const ex = go([put("ex.png", makePng([["eXIf", Buffer.alloc(4)]]))]);
+    must(
+      ex.r.notes.some((n) => n.includes("EXIF")),
+      "EXIF を 黙っている"
+    );
+    must(
+      go([put("raw.png", Buffer.concat([makePng([]), Buffer.from("Zorgox")]))]).code === 1,
+      "IEND の 後ろ"
+    );
   });
-  T("読めない 物は 未測定と 書き、壊れた 字を 飛ばして 当てる", () => {
-    const x = go([
-      put("q.dat", Buffer.concat([Buffer.from([0x81, 0x00]), Buffer.from(" 見本台ためし語 ")])),
-    ]);
-    must(x.r.c.unreadable === 1 && x.r.notes.length === 1, "黙っている");
-    must(x.code === 1, "読める 部分を 当てていない");
+  T("日本の 古い 字コード・BOM 無しの UTF-16（日本語だけ）・gzip でも 当たる", () => {
+    /* 作り物の 語を 各 字コードで 書いた バイト（字の 並びとしては ソースに 載らない） */
+    for (const [nm, hex] of [
+      ["sjis.csv", "8ca9967b91e482bd82df82b58cea"],
+      ["euc.csv", "b8abcbdcc2e6a4bfa4e1a4b7b8ec"],
+      ["jis.eml", "1b2442382b4b5c4266243f24612437386c1b2842"],
+      ["u16le.txt", "8b892c67f0535f30813057309e8a"],
+      ["u16be.txt", "898b672c53f0305f308130578a9e"],
+    ])
+      must(go([put(nm, Buffer.from(hex, "hex"))]).code === 1, nm + " で 当たらない");
+    must(go([put("z.gz", zlib.gzipSync(Buffer.from("見本台ためし語")))]).code === 1, "gzip の 中");
+  });
+  T("知らない 形の バイナリは 赤・分かっている 形（JPEG 等）は 未測定と 書く", () => {
+    const junk = Buffer.from([0x80, 0x81, 0xfe, 0x00, 0x9f, 0x00, 0xff, 0x80, 0xc0, 0x00]);
+    const x = go([put("q.dat", junk)]);
+    must(x.code === 1 && x.r.reds.some((h) => h.includes("知らない 形")), "知らない バイナリが 緑");
+    const j = go([put("q.jpg", Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), junk]))]);
+    must(j.code === 0 && j.r.notes.some((n) => n.includes("JPEG")), "JPEG で 赤 か 黙る");
   });
   T("手元に 無い 追跡物・フォルダ（submodule の 形）・LFS の 指し札は 赤", () => {
     must(go(["nai/nai.txt"]).code === 1, "無いのに 緑");
