@@ -18,7 +18,8 @@
  *   門の 外：--no-verify・core.hooksPath を 置いていない clone・GitHub の 画面での 編集・
  *     commit 文／作者名／注釈タグの 文・門の 古い 版を 取り出した 作業木からの push（門 自体が 走らない）・
  *     .githooks/pre-push と メールの 門の 手元の 書き換え。
- *   新しい 枝の 範囲は ★押す 先の 遠く（$1）に 今 在る 頭★ から（ls-remote）。遠くの 名が 無い・読めない は 赤。
+ *   新しい 枝の 範囲は ★押す 先の 遠く（hook の $2＝押す 道・無ければ $1）に 今 在る 頭★ から（ls-remote）。
+ *     遠くの 名が 無い・読めない・手元に 取っていない 頭が 在る は 赤。
  *     最後の 門は CI（main と PR）。
  *
  *   使い方（git が 呼ぶ）: 標準入力に「<手元の ref> <手元の sha> <遠くの ref> <遠くの sha>」
@@ -32,15 +33,18 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SELF = fileURLToPath(import.meta.url);
 const ZERO = /^0+$/;
-/* 手元の 本体は 自己確認と 既定の 読み口 だけ（押す 時は 押す 頭の 本体で 走る）＝手元に 無くても 門は 走る */
+/* ★手元の 本体は --self-test の 時だけ 読む★（押す 時は 押す 頭の 本体だけで 走る）。
+   前は 範囲を 決める より 先に 手元の 本体を import していた＝commit していない 手元の 本体の 頭に
+   process.exit(0) を 足すと、字の 入った commit が 押されて exit 0（10-11 アマかせ taiketsu 実測） */
 let K = null;
-try {
-  K = await import(
-    pathToFileURL(path.join(path.dirname(SELF), "..", "tests", "kinshi-ji.test.mjs")).href
-  );
-} catch {
-  K = null;
-}
+if (process.argv.includes("--self-test"))
+  try {
+    K = await import(
+      pathToFileURL(path.join(path.dirname(SELF), "..", "tests", "kinshi-ji.test.mjs")).href
+    );
+  } catch {
+    K = null;
+  }
 
 const gitText = (cwd, ...a) =>
   execFileSync("git", ["-C", cwd, ...a], {
@@ -50,7 +54,7 @@ const gitText = (cwd, ...a) =>
   });
 const gitBuf = (cwd, ...a) => execFileSync("git", ["-C", cwd, ...a], { maxBuffer: 1 << 28 });
 
-/* ★押す 先の 遠く（hook の $1）に 今 在る 頭（ls-remote）の うち、手元に 在る 物★＝新しい 枝の 範囲の 下限。
+/* ★押す 先の 遠く（hook の $2・無ければ $1）に 今 在る 頭（ls-remote）の うち、手元に 在る 物★＝新しい 枝の 範囲の 下限。
    前の 形（--not --remotes）は 他の remote の 追跡枝・消された 枝の 古い 控えも「遠くに 在る」と 見て、
    新しい 枝の 字が 素通りした（10-11 アマかせ taiketsu 実測・remote 2 つの clone で「0 本」）。
    遠くの 名が 無い・読めない は throw（止める 側）。
@@ -193,7 +197,7 @@ export const FINGER = ".githooks/kinshi-finger";
 /* hook の 中の 自己確認の 床＝★ci.yml の 床と 揃える★（自己確認を 0/0 に した 本体が 枝へ 緑で 出た＝10-11 taiketsu 実測） */
 export const FLOOR = {
   [BODY]: { groups: 29, checks: 239 },
-  [GATE]: { groups: 13, checks: 34 },
+  [GATE]: { groups: 14, checks: 37 },
 };
 export function selfOk(stdout, floor) {
   const m = /^自己確認: (\d+)\/(\d+)$/m.exec(stdout || "");
@@ -639,6 +643,43 @@ function selfTest() {
     must(after <= before, "一時 dir が 残った（" + before + "→" + after + "）");
     g2("reset", "-q", "--hard", w1);
   });
+  T(
+    "本物の 門：手元の 本体の 頭で 止まっても（process.exit(0)）押す 頭の 本体で 止まる・門の 自己確認も 押す 版で 回る",
+    () => {
+      const exitBody = Buffer.concat([Buffer.from("process.exit(0);\n"), realBody]);
+      try {
+        put(BODY, exitBody);
+        const s = gate(b0, w1);
+        must(
+          s.status === 1 && said(s).includes(w1.slice(0, 7)),
+          "手元の 本体の 頭の exit(0) で 緑: " + said(s)
+        );
+        /* 門だけ 変えた commit を 押す：門の 自己確認は 床の 数を 出すだけに 弱めた 門（本物の 自己確認を 入れ子で
+           回すと 終わらない）。門は 自己確認の 時 隣の 本体を 先に 読む＝手元の 作業木で 回れば exit(0) の 本体で
+           何も 出ずに 落ち、押す 版（一時 dir の 取り出した 本体の 隣）で 回れば 床の 数が 出る */
+        put(BODY, realBody);
+        const real = fs.readFileSync(path.join(r2, GATE), "utf8");
+        const hook = 'if (process.argv.includes("--self-test")) process.exit(' + "selfTest());";
+        must(real.split(hook).length === 2, "門の 自己確認の 口が 当たらない（試しが 壊れている）");
+        put(
+          GATE,
+          real.replace(
+            hook,
+            'if (process.argv.includes("--self-test")) { console.log("自己確認: " + FLOOR[GATE].groups + "/" + FLOOR[GATE].groups); console.log("確かめた 回数: " + FLOOR[GATE].checks); process.exit(0); }'
+          )
+        );
+        const wg2 = commit2("wg2");
+        put(BODY, exitBody);
+        const s2 = gate(w1, wg2);
+        must(
+          s2.status === 0 && said(s2).includes("門が 変わったので 自己確認も 回した（通った"),
+          "門の 自己確認が 手元の 本体で 回った: " + said(s2)
+        );
+      } finally {
+        g2("reset", "-q", "--hard", w1);
+      }
+    }
+  );
   T("本物の 門：新しい 枝は hook の $2（実際に 押す 道）を 読む（pushurl で 取り違えない）", () => {
     const A = path.join(tmp, "A.git");
     const B = path.join(tmp, "B.git");
@@ -689,9 +730,14 @@ if (isMain) {
       });
       for (const l of r.out) (r.code ? console.error : console.log)(l);
       code = r.code;
+      /* 門の 自己確認も ★押す 版の 門と 本体★で 回す：一時 dir に 押す 頭の 門（＝手元と 同じ blob と 照らし済み）を 置き、
+         隣の 取り出した 本体を 読ませる（手元の 作業木の 本体で 回っていた＝10-11 taiketsu の 見立て） */
+      const gateCopy = path.join(b.dir, GATE);
+      fs.mkdirSync(path.dirname(gateCopy), { recursive: true });
+      fs.copyFileSync(SELF, gateCopy);
       const runs = [
         [r.selfNeeded, b.bodyFile, BODY, "見張りの 本体"],
-        [r.gateNeeded, SELF, GATE, "門"],
+        [r.gateNeeded, gateCopy, GATE, "門"],
       ];
       for (const [need, file, rel, name] of runs) {
         if (code || !need) continue;
