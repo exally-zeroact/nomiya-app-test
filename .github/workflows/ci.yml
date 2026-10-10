@@ -126,3 +126,29 @@ jobs:
             test-results/**/error-context.md
           if-no-files-found: ignore
           retention-days: 14
+
+  # ★実在の字の見張りを node 24（ubuntu）でも 回す★（2026-10-11）
+  #   node 24.21 の ubuntu で、奇数の 長さの Buffer を toString("utf16le") すると「double free」で process ごと 落ちた
+  #   （素の node の 1行で 再現・node 20 は 通る）。見張りは u16le() で 偶数に 揃えて 読む。
+  #   本体の 試験は node 20 の まま。ここは 見張りが node 24 でも 落ちない 事だけを 見る（後戻りを 捕まえる）。
+  kinshi-node24:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: 実在の字が戻っていないか（node 24）
+        shell: bash
+        run: |
+          node tests/kinshi-ji.test.mjs | tee kinshi24.out
+          grep -q "^✓ 実在の 字 0 件" kinshi24.out
+        env:
+          KINSHI_JI: ${{ secrets.KINSHI_JI }}
+          KINSHI_JI_FINGER: ${{ vars.KINSHI_JI_FINGER }}
+      - name: 実在の字の見張りの自己確認（node 24）
+        shell: bash
+        run: |
+          node tests/kinshi-ji.test.mjs --self-test | tee kinshi24-self.out
+          awk -F'[ /]' '/^自己確認: /{ if ($2 == $3 && $2 + 0 >= 29) ok = 1 } END { exit !ok }' kinshi24-self.out

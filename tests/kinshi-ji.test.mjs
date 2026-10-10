@@ -33,6 +33,9 @@
  *   ・base64・\uXXXX・%XX（%20 以外）・字の つなぎ（'名'+'前'）・絵の 中の 字
  *   ・git の 過去の 版（見張りは 今の 木だけ）
  *
+ * node の 版：出しの 頭に 出す。node 24.21（ubuntu）は 奇数の 長さの utf16le で 落ちる＝u16le() で 偶数に 揃える。
+ *   CI は 本体を node 20、見張りだけを node 24 の job でも 回す（後戻りを 捕まえる）。
+ *
  * 使い方: node tests/kinshi-ji.test.mjs
  *         node tests/kinshi-ji.test.mjs --self-test
  */
@@ -197,6 +200,9 @@ const isPng = (b) =>
   b.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
 const isPdf = (b) => b.slice(0, 5).toString("latin1") === "%PDF-";
 
+/* UTF-16LE で 読む 時は 必ず 偶数の 長さに 揃える＝node 24.21（ubuntu）で 奇数の 長さの Buffer を
+   toString("utf16le") すると「double free or corruption」で process ごと 落ちた（2026-10-11 CI で 再現・node 20 は 通る） */
+const u16le = (b) => b.slice(0, b.length - (b.length % 2)).toString("utf16le");
 const utf16be = (b) => {
   const sw = Buffer.from(b.slice(0, b.length - (b.length % 2)));
   sw.swap16();
@@ -207,15 +213,9 @@ const utf16be = (b) => {
 export function readTexts(buf) {
   if (buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf)
     return { ok: true, texts: [buf.slice(3).toString("utf8")] };
-  if (buf[0] === 0xff && buf[1] === 0xfe)
-    return { ok: true, texts: [buf.slice(2).toString("utf16le")] };
+  if (buf[0] === 0xff && buf[1] === 0xfe) return { ok: true, texts: [u16le(buf.slice(2))] };
   if (buf[0] === 0xfe && buf[1] === 0xff) return { ok: true, texts: [utf16be(buf.slice(2))] };
-  const utf16s = [
-    buf.toString("utf16le"),
-    buf.slice(1).toString("utf16le"),
-    utf16be(buf),
-    utf16be(buf.slice(1)),
-  ];
+  const utf16s = [u16le(buf), u16le(buf.slice(1)), utf16be(buf), utf16be(buf.slice(1))];
   const strict = (enc) => {
     try {
       return new TextDecoder(enc, { fatal: true }).decode(buf);
@@ -578,11 +578,15 @@ export const BIFF12_PERSON = new Map([
 /* BIFF12 で 読めた 扱いに する 部品（人の 欄を 持たない か、人の 記録を 上で 見る 物）。他の .bin は 未測定 */
 const BIFF12_READ =
   /(^|\/)xl\/(sharedStrings|styles|calcChain|metadata|workbook|comments\d*|worksheets\/(sheet|binaryIndex)\d+|tables\/table\d+)\.bin$/i;
-export function wideStrings(data) {
+export function wideStrings(data, atEnd = false) {
   const out = [];
   for (let o = 0; o + 4 <= data.length; o++) {
     const n = data.readUInt32LE(o);
-    if (n > 0 && n <= 32767 && o + 4 + 2 * n <= data.length)
+    if (
+      n > 0 &&
+      n <= 32767 &&
+      (atEnd ? o + 4 + 2 * n === data.length : o + 4 + 2 * n <= data.length)
+    )
       out.push(data.slice(o + 4, o + 4 + 2 * n).toString("utf16le"));
   }
   return out;
@@ -598,7 +602,7 @@ function isDevmode(label, buf) {
 
 /* XML の 部品を 字に（BOM で UTF-16 LE/BE も） */
 function xmlText(b) {
-  if (b[0] === 0xff && b[1] === 0xfe) return b.slice(2).toString("utf16le");
+  if (b[0] === 0xff && b[1] === 0xfe) return u16le(b.slice(2));
   if (b[0] === 0xfe && b[1] === 0xff) return utf16be(b.slice(2));
   return new TextDecoder("utf-8").decode(b);
 }
@@ -618,7 +622,7 @@ export function nameFields(partName, xml) {
   for (const m of xml.matchAll(NAME_TAGS))
     out.push([
       m[1],
-      (m[2] || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>|<[^>]*>/g, (x, cd) => cd ?? ""),
+      (m[2] || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>|<[^<>]*>/g, (x, cd) => cd ?? ""),
     ]);
   for (const m of xml.matchAll(NAME_ATTRS)) out.push([m[1], m[3]]);
   for (const m of xml.matchAll(NAME_ELEM_ATTR)) out.push([m[1] + "@" + m[2], m[4]]);
@@ -856,8 +860,10 @@ export function scan({ root, files, words }) {
       if (isBiff12(buf, recs) && BIFF12_READ.test(partName)) {
         for (const rc of recs)
           if (BIFF12_PERSON.has(rc.type)) {
-            /* 記録の 名前の 欄は その 記録で 一番 長い 字の 塊（固い 欄の 中の 字の 切れ端で 偽の 赤に しない） */
-            const ws = wideStrings(rc.data)
+            /* 名前の 欄は 記録の 終わりで 終わる 字の 塊（固い 欄の 中の 切れ端で 偽の 赤に しない）。
+               終わりで 終わる 塊が 無ければ 全部の 塊を 見る（どれか 1つでも 空か 見本で なければ 赤） */
+            const tail = wideStrings(rc.data, true).filter((x) => /[^\u0000-\u001f]/.test(x));
+            const ws = (tail.length ? tail : wideStrings(rc.data))
               .filter((x) => /[^\u0000-\u001f]/.test(x))
               .sort((a, b) => b.length - a.length);
             const odd = ws.find((x) => !OK_NAMES.has(normJa(x)));
@@ -1074,7 +1080,9 @@ export function run({
   const list = files || gitFiles(root);
   const r = scan({ root, files: list, words });
   lines.unshift(
-    "一覧＝" +
+    "node " +
+      process.version +
+      " ／ 一覧＝" +
       from +
       "・" +
       words.length +
@@ -2402,6 +2410,38 @@ function selfTest() {
           ),
         ]).code === 1,
         "CDATA の 中の タグを 剥がして 緑"
+      );
+      must(
+        go([
+          put(
+            "cd3.xlsx",
+            makeZip([
+              [
+                "docProps/core.xml",
+                "<cp:coreProperties><dc:creator><z<![CDATA[他人]]>見本</dc:creator></cp:coreProperties>",
+              ],
+            ])
+          ),
+        ]).code === 1,
+        "壊れた タグの 中の CDATA が 緑"
+      );
+      /* 実 Excel の 個人用ビュー（0x18d）の 形＝固い 欄の 中に 字の 切れ端に 見える バイト（01 00 00 00 58 02）＋最後に 名前 */
+      const view = (name) => {
+        const head = Buffer.alloc(30);
+        Buffer.from([1, 0, 0, 0, 0x58, 0x02]).copy(head, 16);
+        const nb = Buffer.alloc(4 + 2 * name.length);
+        nb.writeUInt32LE(name.length, 0);
+        nb.write(name, 4, "utf16le");
+        const body = Buffer.concat([head, nb]);
+        return makeZip([
+          ["docProps/core.xml", core("見本")],
+          ["xl/workbook.bin", Buffer.concat([Buffer.from([0x8d, 0x03, body.length]), body])],
+        ]);
+      };
+      must(go([put("v1.xlsb", view("見本"))]).code === 0, "見本の 個人用ビューで 偽の 赤");
+      must(
+        go([put("v2.xlsb", view("他人 - 個人用ビュー"))]).code === 1,
+        "他人の 個人用ビューが 緑"
       );
       const rec = (t1, t2, parts) => {
         const body = Buffer.concat(
