@@ -962,7 +962,7 @@ test.describe("飲み屋 売上管理", () => {
 
     await gotoSet(page, "self");
     await page.locator("#setStore").fill("スナック ゼロ");
-    await page.locator("#setBank").fill("伊予銀行 今治支店 普通 1234567");
+    await page.locator("#setBank").fill("見本銀行 架空支店 普通 1234567");
     await page.locator("#btnSaveSet").click();
 
     await goto(page, "ledger");
@@ -974,7 +974,7 @@ test.describe("飲み屋 売上管理", () => {
     await goto(page, "inv");
     await pickCompany(page, "山本商事");
     await expect(page.locator("#invSheets .iv-sum tr").nth(1)).toContainText("2,370");
-    await expect(page.locator("#invSheets .iv-bank")).toContainText("伊予銀行");
+    await expect(page.locator("#invSheets .iv-bank")).toContainText("見本銀行");
     expect(errors, `pageerror: ${errors.join(" | ")}`).toEqual([]);
   });
 
@@ -1321,7 +1321,7 @@ test.describe("飲み屋 売上管理", () => {
     await expect(page.locator("#invSheets .iv-to")).toHaveText("山本商事　御中");
     await expect(page.locator("#invSheets .iv-tosub")).toHaveText("総務部 山本 様");
     // 相手の住所は出さない（登録する欄も置いていない）
-    await expect(page.locator("#invSheets")).not.toContainText("愛媛県今治市栄町");
+    await expect(page.locator("#invSheets")).not.toContainText("架空県架空市栄町");
 
     // 明細が多くても、担当者のぶんだけ行を減らしてA4に収める
     for (let i = 6; i <= 26; i++) {
@@ -1781,7 +1781,7 @@ test.describe("飲み屋 売上管理", () => {
     // A店：店の情報を全部入れる
     await gotoSet(page, "self");
     await page.locator("#setStore").fill("スナック まりも");
-    await page.locator("#setBank").fill("伊予銀行 本店 普通 1234567");
+    await page.locator("#setBank").fill("見本銀行 本店 普通 1234567");
     await page.locator("#setInvoiceNo").fill("T1111111111111");
     await page.locator("#btnSaveSet").click();
     await expect(page.locator("#acctInfo")).toContainText("同期済み");
@@ -5927,7 +5927,7 @@ test.describe("㉒ 判子と印刷の窓", () => {
       const N = window.__NOMIYA;
       N.settings.hanko = trimmed;
       N.settings.store = "合同会社ZEROact";
-      N.settings.addr = "今治市本町7-3-40";
+      N.settings.addr = "東京都架空区見本町1-2-3";
       N.settings.tel = "090-0000-0000";
       N.renderAll();
       return { before, after };
