@@ -27,15 +27,29 @@ import os from "node:os";
 import path from "node:path";
 
 const ZERO = /^0+$/;
-/* ★門の git は 差し替え（refs/replace）と grafts を 読まない★：git replace で 字の blob を きれいな blob に
+/* ★門の git は 差し替え（refs/replace）を 読まない★：git replace で 字の blob を きれいな blob に
    差し替えると 門は「0 件」・push は 元の blob を 送った（10-11 taiketsu 実測・作り物の 遠くに 字 1 件）。
-   grafts（.git/info/grafts）は GIT_NO_REPLACE_OBJECTS では 止まらない（輪の graft で 字が 出た・同 実測）
-   ＝GIT_GRAFT_FILE を 無い 道に 向ける。子の git は この 環境変数を 受け継ぐ */
-export const NO_REWRITE = {
-  GIT_NO_REPLACE_OBJECTS: "1",
-  GIT_GRAFT_FILE: path.join(os.tmpdir(), "ppk-no-grafts-none", "grafts"),
-};
+   子の git は この 環境変数を 受け継ぐ（push 本体の pack-objects も replace を 読まない＝見え方が 揃う）。
+   ★grafts は「在れば 赤」★（graftsPresent）：grafts は GIT_NO_REPLACE_OBJECTS では 止まらず、
+   門だけ 読まない 様に（GIT_GRAFT_FILE を 無い 道に）すると push 本体は 読む＝親を 足す graft で 字が 出た
+   （10-11 taiketsu 実測・その 前の 版では 赤）。ふつうの 使い方で grafts は 作らない */
+export const NO_REWRITE = { GIT_NO_REPLACE_OBJECTS: "1" };
 Object.assign(process.env, NO_REWRITE);
+
+/* grafts の 紙（GIT_GRAFT_FILE を 呼ぶ 側が 付けて いれば その 道）が 在れば throw */
+export function graftsPresent(cwd) {
+  const rel = execFileSync("git", ["-C", cwd, "rev-parse", "--git-path", "info/grafts"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+  const f = path.resolve(cwd, rel);
+  if (fs.existsSync(f))
+    throw new Error(
+      "grafts（" +
+        rel +
+        "）が 在る＝門と push で 親の 見え方が 違う。消してから 押す（git replace --convert-graft-file で 差し替えに 移せる）"
+    );
+}
 
 export const OK_MAIL = /^(\d+\+[^@\s]+@users\.noreply\.github\.com|noreply@github\.com)$/i;
 
@@ -110,6 +124,7 @@ function foreignHead(tmp, bare, ref) {
 
 /* 押す 行ごとに、まだ 遠くに 無い commit を 並べ、欄が noreply で ない 物を 返す */
 export function badCommits(cwd, lines, remote) {
+  graftsPresent(cwd);
   const bad = [];
   let seen = 0;
   let known = null;
@@ -250,6 +265,24 @@ function selfTest() {
           threw++;
         }
       must(threw === 2, "押す 先の 名が 無い・読めない 遠くで 止まらない");
+      /* grafts が 在れば 止まる（本物の 門を 子として：c の 親を a に＝間の 悪い メールの b を 飛ばす） */
+      const gf = path.join(tmp, ".git", "info", "grafts");
+      fs.mkdirSync(path.dirname(gf), { recursive: true });
+      fs.writeFileSync(gf, c + " " + a + "\n");
+      try {
+        const sg = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
+          cwd: tmp,
+          env: unmarked({ ...process.env, MAIL_SELFTEST_NESTED: "1" }),
+          encoding: "utf8",
+          input: "refs/heads/main " + c + " refs/heads/main " + a + "\n",
+        });
+        must(
+          sg.status === 1 && ((sg.stdout || "") + (sg.stderr || "")).includes("grafts"),
+          "grafts で 悪い メールが 緑: " + (sg.stdout || "") + (sg.stderr || "")
+        );
+      } finally {
+        fs.rmSync(gf, { force: true });
+      }
       /* 遠くに 手元に 無い 頭＝「fetch してから」で 止める */
       const undo = foreignHead(tmp, O, "refs/heads/yoso");
       let msg = "";
