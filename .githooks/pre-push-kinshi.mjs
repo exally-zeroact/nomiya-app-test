@@ -11,13 +11,17 @@
  *     一覧が 無い・指紋が 違う・指紋の 紙が 無い は 赤。
  *   ★見張りの 本体は 押す 頭の 木の 物を 一時の 所へ 取り出して 走らせる★（手元の 字の 本体は 読まない）。
  *     手元で 本体を 弱めた・add し忘れた push が 緑で 通った（10-11 taiketsu T11・5a45b10 の 入れ忘れ）。
- *     門（この 紙）も 押す 頭の 物と 手元が 違えば 赤（走っている 門＝押す 門 に する）。押す 頭に 本体・門が 無ければ 赤。
+ *     門（この 紙）も、照らし（bodyForPush）まで 来れば 押す 頭の 物と 手元が 違う 時に 赤。押す 頭に 本体・門が 無ければ 赤。
+ *     ★照らしより 前に 手元の 門 自身が 止まる 形（門の 頭の exit(0) 等）は 門では 塞げない＝下の「門の 外」★
  *   見張りの 本体が 押す 範囲で 変わった 時は、自己確認も 回す（取り出した 押す 版で）。
  *   ★字は 出さない★（commit の SHA・道・行・一覧の 何番目か だけ）。
  *
  *   門の 外：--no-verify・core.hooksPath を 置いていない clone・GitHub の 画面での 編集・
  *     commit 文／作者名／注釈タグの 文・門の 古い 版を 取り出した 作業木からの push（門 自体が 走らない）・
- *     .githooks/pre-push と メールの 門の 手元の 書き換え。
+ *     .githooks/pre-push と メールの 門の 手元の 書き換え・
+ *     ★手元の 門 自身の 書き換え（照らしより 前＝頭の exit(0) 等）・NODE_OPTIONS（--import／--require で 先に 走る 物）★
+ *     （走る 門が 自分を 確かめる 事は できない・10-11 taiketsu 実測で 緑）。
+ *     わざと 壊す 手で しか 起きない 穴（これら・床の 揃え 書き換え 等）は 直さず ここに 書く（10-11 指示役＝押す 門の 形を 凍結）。
  *   新しい 枝の 範囲は ★押す 先の 遠く（hook の $2＝押す 道・無ければ $1）に 今 在る 頭★ から（ls-remote）。
  *     遠くの 名が 無い・読めない・手元に 取っていない 頭が 在る は 赤。
  *     最後の 門は CI（main と PR）。
@@ -33,6 +37,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SELF = fileURLToPath(import.meta.url);
 const ZERO = /^0+$/;
+/* ★門の git は 差し替え（refs/replace・grafts）を 読まない★：git replace で 字の blob を きれいな blob に
+   差し替えると 門は「0 件」・push は 元の blob を 送った（10-11 taiketsu 実測・作り物の 遠くに 字 1 件）。
+   子の git は この 環境変数を 受け継ぐ */
+process.env.GIT_NO_REPLACE_OBJECTS = "1";
+
 /* ★手元の 本体は --self-test の 時だけ 読む★（押す 時は 押す 頭の 本体だけで 走る）。
    前は 範囲を 決める より 先に 手元の 本体を import していた＝commit していない 手元の 本体の 頭に
    process.exit(0) を 足すと、字の 入った commit が 押されて exit 0（10-11 アマかせ taiketsu 実測） */
@@ -197,7 +206,7 @@ export const FINGER = ".githooks/kinshi-finger";
 /* hook の 中の 自己確認の 床＝★ci.yml の 床と 揃える★（自己確認を 0/0 に した 本体が 枝へ 緑で 出た＝10-11 taiketsu 実測） */
 export const FLOOR = {
   [BODY]: { groups: 29, checks: 239 },
-  [GATE]: { groups: 14, checks: 37 },
+  [GATE]: { groups: 15, checks: 39 },
 };
 export function selfOk(stdout, floor) {
   const m = /^自己確認: (\d+)\/(\d+)$/m.exec(stdout || "");
@@ -323,6 +332,7 @@ export function check({ cwd, lines, env = process.env, file, fingerFile, K: KB =
 function selfTest() {
   /* 呼ぶ 側（hook・worktree）が 渡す GIT_* を 外す＝一時 repo の git が 親を 書き換えない */
   for (const k of Object.keys(process.env)) if (k.startsWith("GIT_")) delete process.env[k];
+  process.env.GIT_NO_REPLACE_OBJECTS = "1"; // 外した 後に 差し替えを 読まない 印だけ 戻す
   let pass = 0;
   let fail = 0;
   let checks = 0;
@@ -675,11 +685,36 @@ function selfTest() {
           s2.status === 0 && said(s2).includes("門が 変わったので 自己確認も 回した（通った"),
           "門の 自己確認が 手元の 本体で 回った: " + said(s2)
         );
+        /* 出しは 本当に 出た 数（弱めた 門が 出した 床ちょうどの 数）と 終わり値 */
+        const F = FLOOR[GATE];
+        must(
+          said(s2).includes(
+            "自己確認 " + F.groups + "/" + F.groups + "・確かめた 回数 " + F.checks
+          ) && said(s2).includes("終わり値 0"),
+          "通った 時に 出た 数を 出していない: " + said(s2)
+        );
       } finally {
         g2("reset", "-q", "--hard", w1);
       }
     }
   );
+  T("本物の 門：git replace で 字の blob を きれいな blob に 差し替えても 止まる", () => {
+    const wordBlob = gitText(r2, "rev-parse", w1 + ":w.txt").trim();
+    const clean = execFileSync("git", ["-C", r2, "hash-object", "-w", "--stdin"], {
+      input: "ふつう\n",
+      encoding: "utf8",
+    }).trim();
+    g2("replace", wordBlob, clean);
+    try {
+      const s = gate(b0, w1);
+      must(
+        s.status === 1 && said(s).includes(w1.slice(0, 7)),
+        "差し替えで 字の commit が 緑: " + said(s)
+      );
+    } finally {
+      g2("replace", "-d", wordBlob);
+    }
+  });
   T("本物の 門：新しい 枝は hook の $2（実際に 押す 道）を 読む（pushurl で 取り違えない）", () => {
     const A = path.join(tmp, "A.git");
     const B = path.join(tmp, "B.git");
@@ -744,22 +779,24 @@ if (isMain) {
         const s = spawnSync(process.execPath, [file, "--self-test"], { encoding: "utf8" });
         const ok = s.status === 0 && selfOk(s.stdout, FLOOR[rel]);
         const f = FLOOR[rel];
+        /* ★出すのは 本当に 出た 数★（床の 数を 通った 印に 出さない＝分母を 出さない 緑に しない） */
+        const mg = /^自己確認: (\d+)\/(\d+)$/m.exec(s.stdout || "");
+        const mc = /^確かめた 回数: (\d+)$/m.exec(s.stdout || "");
+        const got =
+          (mg ? "自己確認 " + mg[1] + "/" + mg[2] : "自己確認の 行 無し") +
+          "・" +
+          (mc ? "確かめた 回数 " + mc[1] : "回数の 行 無し") +
+          "（床 " +
+          f.groups +
+          " 組・" +
+          f.checks +
+          " 回・終わり値 " +
+          s.status +
+          "）";
         console.log(
           ok
-            ? "✓ " +
-                name +
-                "が 変わったので 自己確認も 回した（通った・床 " +
-                f.groups +
-                " 組・" +
-                f.checks +
-                " 回）"
-            : "✗ " +
-                name +
-                "の 自己確認が 通らないか 床（" +
-                f.groups +
-                " 組・" +
-                f.checks +
-                " 回）未満"
+            ? "✓ " + name + "が 変わったので 自己確認も 回した（通った・" + got + "）"
+            : "✗ " + name + "の 自己確認が 通らないか 床 未満（" + got + "）"
         );
         if (!ok) code = 1;
       }

@@ -26,6 +26,11 @@ import os from "node:os";
 import path from "node:path";
 
 const ZERO = /^0+$/;
+/* ★門の git は 差し替え（refs/replace・grafts）を 読まない★：git replace で 字の blob を きれいな blob に
+   差し替えると 門は「0 件」・push は 元の blob を 送った（10-11 taiketsu 実測・作り物の 遠くに 字 1 件）。
+   子の git は この 環境変数を 受け継ぐ */
+process.env.GIT_NO_REPLACE_OBJECTS = "1";
+
 export const OK_MAIL = /^(\d+\+[^@\s]+@users\.noreply\.github\.com|noreply@github\.com)$/i;
 
 const git = (cwd, ...a) => execFileSync("git", ["-C", cwd, ...a], { encoding: "utf8" }).trim();
@@ -126,6 +131,7 @@ export function badCommits(cwd, lines, remote) {
 function selfTest() {
   /* ★呼ぶ側（hook・worktree）が 渡す GIT_*（GIT_INDEX_FILE・GIT_DIR 等）を 外す★＝一時 repo の git が 親の index・config を 書き換えない */
   for (const k of Object.keys(process.env)) if (k.startsWith("GIT_")) delete process.env[k];
+  process.env.GIT_NO_REPLACE_OBJECTS = "1"; // 外した 後に 差し替えを 読まない 印だけ 戻す
   let pass = 0;
   let fail = 0;
   const T = (n, fn) => {
@@ -174,6 +180,24 @@ function selfTest() {
       !r.bad.join("\n").includes("example.com") && r.bad.every((x) => x.includes(b)),
       "字が 出た か SHA が 無い"
     );
+  });
+  T("git replace で 悪い メールの commit を 差し替えても 止まる", () => {
+    const body = execFileSync("git", ["-C", tmp, "cat-file", "commit", b], { encoding: "utf8" });
+    must(
+      body.includes("someone@example.com"),
+      "試しの commit に 悪い メールが 無い（試しが 壊れている）"
+    );
+    const fake = execFileSync("git", ["-C", tmp, "hash-object", "-t", "commit", "-w", "--stdin"], {
+      input: body.split("someone@example.com").join(NR),
+      encoding: "utf8",
+    }).trim();
+    g("replace", b, fake);
+    try {
+      const r = badCommits(tmp, ["refs/heads/main " + c + " refs/heads/main " + a]);
+      must(r.bad.length === 2, "差し替えで 悪い メールが 緑: " + r.bad.length);
+    } finally {
+      g("replace", "-d", b);
+    }
   });
   T("消す push は 見ない", () => {
     must(
