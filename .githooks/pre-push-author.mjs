@@ -13,6 +13,7 @@
  *     ・GitHub の 画面の merge・squash・編集（作者の 欄は アカウントの 設定で 決まる）
  *     ・注釈付きの tag の tagger の 欄／commit の 本文に 書いた メール（Signed-off-by 等）
  *     ・sparse-checkout で .githooks が 作業木から 外れる／git lfs install・update --force が .githooks/pre-push を 上書き
+ *     ・GIT_DIR と GIT_WORK_TREE を 付けて 作業木の 外から 押す（相対の core.hooksPath が 見つからず 門が 走らない）
  *   新しい 枝の 範囲は ★押す 先の 遠く（$1）に 今 在る 頭★ から（ls-remote）。遠くの 名が 無い・読めない は 赤
  *   （前は --not --remotes＝他の remote の 追跡枝に 在る commit を 見なかった・10-11）。
  *   CI は この 門の 自己確認だけを する（遠くに 出た commit の メールは 数えていない）。
@@ -29,7 +30,8 @@ import path from "node:path";
 const ZERO = /^0+$/;
 /* ★門の git は 差し替え（refs/replace）を 読まない★：git replace で 字の blob を きれいな blob に
    差し替えると 門は「0 件」・push は 元の blob を 送った（10-11 taiketsu 実測・作り物の 遠くに 字 1 件）。
-   子の git は この 環境変数を 受け継ぐ（push 本体の pack-objects も replace を 読まない＝見え方が 揃う）。
+   門の 子の git は この 環境変数を 受け継ぐ。push 本体の pack-objects は hook の 子では なく、元から replace を
+   読まない 作り（--no-verify で 測ると 元の blob が 出た＝10-11 taiketsu）＝門と push の 見え方が 揃う。
    ★grafts は「在れば 赤」★（graftsPresent）：grafts は GIT_NO_REPLACE_OBJECTS では 止まらず、
    門だけ 読まない 様に（GIT_GRAFT_FILE を 無い 道に）すると push 本体は 読む＝親を 足す graft で 字が 出た
    （10-11 taiketsu 実測・その 前の 版では 赤）。ふつうの 使い方で grafts は 作らない */
@@ -280,6 +282,24 @@ function selfTest() {
           sg.status === 1 && ((sg.stdout || "") + (sg.stderr || "")).includes("grafts"),
           "grafts で 悪い メールが 緑: " + (sg.stdout || "") + (sg.stderr || "")
         );
+        fs.rmSync(gf, { force: true });
+        /* 呼ぶ 側が 別の grafts の 紙を GIT_GRAFT_FILE で 付けた（info/grafts を 決め打ちに すると 緑＝10-11 taiketsu） */
+        const gf2 = path.join(os.tmpdir(), "ppa-外の grafts-" + process.pid);
+        fs.writeFileSync(gf2, c + " " + a + "\n");
+        try {
+          const sg2 = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
+            cwd: tmp,
+            env: unmarked({ ...process.env, MAIL_SELFTEST_NESTED: "1", GIT_GRAFT_FILE: gf2 }),
+            encoding: "utf8",
+            input: "refs/heads/main " + c + " refs/heads/main " + a + "\n",
+          });
+          must(
+            sg2.status === 1 && ((sg2.stdout || "") + (sg2.stderr || "")).includes("grafts"),
+            "外の grafts の 紙で 悪い メールが 緑: " + (sg2.stdout || "") + (sg2.stderr || "")
+          );
+        } finally {
+          fs.rmSync(gf2, { force: true });
+        }
       } finally {
         fs.rmSync(gf, { force: true });
       }

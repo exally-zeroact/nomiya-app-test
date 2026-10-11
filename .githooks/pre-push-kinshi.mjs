@@ -19,6 +19,7 @@
  *   門の 外：--no-verify・core.hooksPath を 置いていない clone・GitHub の 画面での 編集・
  *     commit 文／作者名／注釈タグの 文・門の 古い 版を 取り出した 作業木からの push（門 自体が 走らない）・
  *     .githooks/pre-push と メールの 門の 手元の 書き換え・
+ *     ★GIT_DIR と GIT_WORK_TREE を 付けて 作業木の 外から 押す（相対の core.hooksPath が 見つからず 門が 走らない）★・
  *     ★sparse-checkout で .githooks が 作業木から 外れる（hook が 黙って 走らない）・
  *     git lfs install --force／git lfs update --force が .githooks/pre-push を 上書き する★（10-11 taiketsu 実測で 漏れた）。
  *     ★手元の 門 自身の 書き換え（照らしより 前＝頭の exit(0) 等）・NODE_OPTIONS（--import／--require で 先に 走る 物）★
@@ -41,7 +42,8 @@ const SELF = fileURLToPath(import.meta.url);
 const ZERO = /^0+$/;
 /* ★門の git は 差し替え（refs/replace）を 読まない★：git replace で 字の blob を きれいな blob に
    差し替えると 門は「0 件」・push は 元の blob を 送った（10-11 taiketsu 実測・作り物の 遠くに 字 1 件）。
-   子の git は この 環境変数を 受け継ぐ（push 本体の pack-objects も replace を 読まない＝見え方が 揃う）。
+   門の 子の git は この 環境変数を 受け継ぐ。push 本体の pack-objects は hook の 子では なく、元から replace を
+   読まない 作り（--no-verify で 測ると 元の blob が 出た＝10-11 taiketsu）＝門と push の 見え方が 揃う。
    ★grafts は「在れば 赤」★（graftsPresent）：grafts は GIT_NO_REPLACE_OBJECTS では 止まらず、
    門だけ 読まない 様に（GIT_GRAFT_FILE を 無い 道に）すると push 本体は 読む＝親を 足す graft で 字が 出た
    （10-11 taiketsu 実測・その 前の 版では 赤）。ふつうの 使い方で grafts は 作らない */
