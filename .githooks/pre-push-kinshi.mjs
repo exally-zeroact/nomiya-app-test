@@ -19,6 +19,8 @@
  *   門の 外：--no-verify・core.hooksPath を 置いていない clone・GitHub の 画面での 編集・
  *     commit 文／作者名／注釈タグの 文・門の 古い 版を 取り出した 作業木からの push（門 自体が 走らない）・
  *     .githooks/pre-push と メールの 門の 手元の 書き換え・
+ *     ★sparse-checkout で .githooks が 作業木から 外れる（hook が 黙って 走らない）・
+ *     git lfs install --force／git lfs update --force が .githooks/pre-push を 上書き する★（10-11 taiketsu 実測で 漏れた）。
  *     ★手元の 門 自身の 書き換え（照らしより 前＝頭の exit(0) 等）・NODE_OPTIONS（--import／--require で 先に 走る 物）★
  *     （走る 門が 自分を 確かめる 事は できない・10-11 taiketsu 実測で 緑）。
  *     わざと 壊す 手で しか 起きない 穴（これら・床の 揃え 書き換え 等）は 直さず ここに 書く（10-11 指示役＝押す 門の 形を 凍結）。
@@ -37,10 +39,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SELF = fileURLToPath(import.meta.url);
 const ZERO = /^0+$/;
-/* ★門の git は 差し替え（refs/replace・grafts）を 読まない★：git replace で 字の blob を きれいな blob に
+/* ★門の git は 差し替え（refs/replace）と grafts を 読まない★：git replace で 字の blob を きれいな blob に
    差し替えると 門は「0 件」・push は 元の blob を 送った（10-11 taiketsu 実測・作り物の 遠くに 字 1 件）。
-   子の git は この 環境変数を 受け継ぐ */
-process.env.GIT_NO_REPLACE_OBJECTS = "1";
+   grafts（.git/info/grafts）は GIT_NO_REPLACE_OBJECTS では 止まらない（輪の graft で 字が 出た・同 実測）
+   ＝GIT_GRAFT_FILE を 無い 道に 向ける。子の git は この 環境変数を 受け継ぐ */
+export const NO_REWRITE = {
+  GIT_NO_REPLACE_OBJECTS: "1",
+  GIT_GRAFT_FILE: path.join(os.tmpdir(), "ppk-no-grafts-none", "grafts"),
+};
+Object.assign(process.env, NO_REWRITE);
 
 /* ★手元の 本体は --self-test の 時だけ 読む★（押す 時は 押す 頭の 本体だけで 走る）。
    前は 範囲を 決める より 先に 手元の 本体を import していた＝commit していない 手元の 本体の 頭に
@@ -133,6 +140,13 @@ export function pushedCommits(cwd, lines, remote) {
   for (const line of lines) {
     const [, localSha, , remoteSha] = line.trim().split(/\s+/);
     if (!localSha || ZERO.test(localSha)) continue;
+    /* 押す 物は commit（と commit に 付けた tag）だけ＝木・blob に 付けた tag は 中身を 見られない（木の 軽い tag で
+       「commit 0 本・字 0 件」の まま 字の blob が 出た＝10-11 taiketsu 実測） */
+    const kind = gitText(cwd, "cat-file", "-t", localSha + "^{}").trim();
+    if (kind !== "commit")
+      throw new Error(
+        "押す 物が commit で ない（" + kind + " に 付けた tag 等）＝中身を 見られない"
+      );
     let range;
     if (remoteSha && !ZERO.test(remoteSha)) range = [localSha, "^" + remoteSha];
     else range = [localSha, ...(known ??= remoteKnown(cwd, remote)).map((x) => "^" + x)];
@@ -206,7 +220,7 @@ export const FINGER = ".githooks/kinshi-finger";
 /* hook の 中の 自己確認の 床＝★ci.yml の 床と 揃える★（自己確認を 0/0 に した 本体が 枝へ 緑で 出た＝10-11 taiketsu 実測） */
 export const FLOOR = {
   [BODY]: { groups: 29, checks: 239 },
-  [GATE]: { groups: 15, checks: 39 },
+  [GATE]: { groups: 16, checks: 41 },
 };
 export function selfOk(stdout, floor) {
   const m = /^自己確認: (\d+)\/(\d+)$/m.exec(stdout || "");
@@ -332,7 +346,14 @@ export function check({ cwd, lines, env = process.env, file, fingerFile, K: KB =
 function selfTest() {
   /* 呼ぶ 側（hook・worktree）が 渡す GIT_* を 外す＝一時 repo の git が 親を 書き換えない */
   for (const k of Object.keys(process.env)) if (k.startsWith("GIT_")) delete process.env[k];
-  process.env.GIT_NO_REPLACE_OBJECTS = "1"; // 外した 後に 差し替えを 読まない 印だけ 戻す
+  Object.assign(process.env, NO_REWRITE); // 外した 後に 差し替え・grafts を 読まない 印だけ 戻す
+  /* ★子の 門を 起こす 時は 印を 外して 渡す★＝子が 自分で 印を 付けて いるかを 試す（受け継いだ 印で 緑に しない・
+     一番上の 1 行を 消しても 自己確認が 緑だった＝10-11 taiketsu 実測） */
+  const unmarked = (e) => {
+    const x = { ...e };
+    for (const k of Object.keys(NO_REWRITE)) delete x[k];
+    return x;
+  };
   let pass = 0;
   let fail = 0;
   let checks = 0;
@@ -451,6 +472,20 @@ function selfTest() {
     );
     must(nb(c4, undefined).code === 1, "押す 先の 名が 無いのに 緑");
     must(nb(c4, path.join(tmp, "無い.git")).code === 1, "読めない 遠くで 緑");
+    /* 木に 付けた 軽い tag は 赤（中身を 見られない） */
+    const treeSha = gitText(repo, "rev-parse", c4 + "^{tree}").trim();
+    const rt = check({
+      cwd: repo,
+      lines: ["refs/tags/t " + treeSha + " refs/tags/t " + "0".repeat(40)],
+      env: {},
+      file: list,
+      fingerFile: ff,
+      remote: "O",
+    });
+    must(
+      rt.code === 1 && rt.out.join(" ").includes("commit で ない"),
+      "木の tag で 緑: " + rt.out.join(" / ")
+    );
     /* 押す 先で 消された 枝の 古い 控え（追跡枝）が 在っても、今の 遠くの 頭で 見る */
     g("push", "-q", "O", c4 + ":refs/heads/old");
     g("fetch", "-q", "O");
@@ -540,7 +575,7 @@ function selfTest() {
   const b0 = commit2("b0");
   put("w.txt", "x\n" + WORD + "\n");
   const w1 = commit2("w1");
-  const env2 = { ...process.env, KINSHI_JI_FILE: list };
+  const env2 = unmarked({ ...process.env, KINSHI_JI_FILE: list });
   delete env2.KINSHI_JI;
   const gate = (from, to) =>
     spawnSync(process.execPath, [path.join(r2, GATE)], {
@@ -713,6 +748,21 @@ function selfTest() {
       );
     } finally {
       g2("replace", "-d", wordBlob);
+    }
+  });
+  T("本物の 門：grafts で 字の commit の 親を 書き換えても 止まる", () => {
+    /* w1 の 親を w1 自身に（親との 差が 0 に 見える） */
+    const gf = path.join(r2, ".git", "info", "grafts");
+    fs.mkdirSync(path.dirname(gf), { recursive: true });
+    fs.writeFileSync(gf, w1 + " " + w1 + "\n");
+    try {
+      const s = gate(b0, w1);
+      must(
+        s.status === 1 && said(s).includes(w1.slice(0, 7)),
+        "grafts で 字の commit が 緑: " + said(s)
+      );
+    } finally {
+      fs.rmSync(gf, { force: true });
     }
   });
   T("本物の 門：新しい 枝は hook の $2（実際に 押す 道）を 読む（pushurl で 取り違えない）", () => {

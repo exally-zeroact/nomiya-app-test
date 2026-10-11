@@ -12,6 +12,7 @@
  *     ・--no-verify で 押す／core.hooksPath を 置いていない clone や 別の 機械で 押す
  *     ・GitHub の 画面の merge・squash・編集（作者の 欄は アカウントの 設定で 決まる）
  *     ・注釈付きの tag の tagger の 欄／commit の 本文に 書いた メール（Signed-off-by 等）
+ *     ・sparse-checkout で .githooks が 作業木から 外れる／git lfs install・update --force が .githooks/pre-push を 上書き
  *   新しい 枝の 範囲は ★押す 先の 遠く（$1）に 今 在る 頭★ から（ls-remote）。遠くの 名が 無い・読めない は 赤
  *   （前は --not --remotes＝他の remote の 追跡枝に 在る commit を 見なかった・10-11）。
  *   CI は この 門の 自己確認だけを する（遠くに 出た commit の メールは 数えていない）。
@@ -26,10 +27,15 @@ import os from "node:os";
 import path from "node:path";
 
 const ZERO = /^0+$/;
-/* ★門の git は 差し替え（refs/replace・grafts）を 読まない★：git replace で 字の blob を きれいな blob に
+/* ★門の git は 差し替え（refs/replace）と grafts を 読まない★：git replace で 字の blob を きれいな blob に
    差し替えると 門は「0 件」・push は 元の blob を 送った（10-11 taiketsu 実測・作り物の 遠くに 字 1 件）。
-   子の git は この 環境変数を 受け継ぐ */
-process.env.GIT_NO_REPLACE_OBJECTS = "1";
+   grafts（.git/info/grafts）は GIT_NO_REPLACE_OBJECTS では 止まらない（輪の graft で 字が 出た・同 実測）
+   ＝GIT_GRAFT_FILE を 無い 道に 向ける。子の git は この 環境変数を 受け継ぐ */
+export const NO_REWRITE = {
+  GIT_NO_REPLACE_OBJECTS: "1",
+  GIT_GRAFT_FILE: path.join(os.tmpdir(), "ppk-no-grafts-none", "grafts"),
+};
+Object.assign(process.env, NO_REWRITE);
 
 export const OK_MAIL = /^(\d+\+[^@\s]+@users\.noreply\.github\.com|noreply@github\.com)$/i;
 
@@ -131,7 +137,14 @@ export function badCommits(cwd, lines, remote) {
 function selfTest() {
   /* ★呼ぶ側（hook・worktree）が 渡す GIT_*（GIT_INDEX_FILE・GIT_DIR 等）を 外す★＝一時 repo の git が 親の index・config を 書き換えない */
   for (const k of Object.keys(process.env)) if (k.startsWith("GIT_")) delete process.env[k];
-  process.env.GIT_NO_REPLACE_OBJECTS = "1"; // 外した 後に 差し替えを 読まない 印だけ 戻す
+  Object.assign(process.env, NO_REWRITE); // 外した 後に 差し替え・grafts を 読まない 印だけ 戻す
+  /* ★子の 門を 起こす 時は 印を 外して 渡す★＝子が 自分で 印を 付けて いるかを 試す（受け継いだ 印で 緑に しない・
+     一番上の 1 行を 消しても 自己確認が 緑だった＝10-11 taiketsu 実測） */
+  const unmarked = (e) => {
+    const x = { ...e };
+    for (const k of Object.keys(NO_REWRITE)) delete x[k];
+    return x;
+  };
   let pass = 0;
   let fail = 0;
   const T = (n, fn) => {
@@ -193,8 +206,14 @@ function selfTest() {
     }).trim();
     g("replace", b, fake);
     try {
-      const r = badCommits(tmp, ["refs/heads/main " + c + " refs/heads/main " + a]);
-      must(r.bad.length === 2, "差し替えで 悪い メールが 緑: " + r.bad.length);
+      /* 本物の 門を 子と して 印を 外した env で 起こす＝門が 自分で 印を 付けて いるかを 試す */
+      const s = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
+        cwd: tmp,
+        env: unmarked({ ...process.env, MAIL_SELFTEST_NESTED: "1" }),
+        encoding: "utf8",
+        input: "refs/heads/main " + c + " refs/heads/main " + a + "\n",
+      });
+      must(s.status === 1, "差し替えで 悪い メールが 緑: " + (s.stdout || "") + (s.stderr || ""));
     } finally {
       g("replace", "-d", b);
     }
