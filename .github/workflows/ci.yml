@@ -14,7 +14,7 @@ on:
 
 jobs:
   quality:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       HUSKY: "0" # CI では git フックを動かさない(install時の husky を無効化)
     steps:
@@ -147,7 +147,7 @@ jobs:
   #   （素の node の 1行で 再現・node 20 は 通る）。見張りは u16le() で 偶数に 揃えて 読む。
   #   本体の 試験は node 20 の まま。ここは 見張りが node 24 でも 落ちない 事だけを 見る（後戻りを 捕まえる）。
   kinshi-node24:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
